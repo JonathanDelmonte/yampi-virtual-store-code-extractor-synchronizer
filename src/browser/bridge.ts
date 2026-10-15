@@ -3,7 +3,7 @@ import type {EditorView} from '@codemirror/view';
 import {editorView, readDocument} from './editor-document';
 import {assertContext, validatePath, validatePaths, validateImage, imagePath, writable, MAX_FILE_BYTES, type Context} from '../core/model';
 export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write'; context?: Context; path?: string; expected?: string; content?: string}
-export const version = '0.3.4';
+export const version = '0.3.5';
 type Reply = {ok: true; value: unknown} | {ok: false; error: string};
 const clean = (e: Element | null) => e?.textContent?.trim() || '';
 type EditorRoot = ShadowRoot | HTMLElement;

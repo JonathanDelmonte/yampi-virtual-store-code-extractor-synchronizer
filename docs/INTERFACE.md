@@ -2,11 +2,11 @@
 
 ## Nomes aprovados
 
-Repositório, pacote npm e pasta de desenvolvimento: **yampi-virtual-store-code-extractor-synchronizer**.
+Repositório, pacote npm e pasta de desenvolvimento: **zirtuno-sync**.
 
-Nome de exibição no Chrome e no painel: **Yampi Code Sync**. Autoria: **Zirtuno**.
+Nome de exibição no Chrome e no painel: **Zirtuno Sync**. Autoria: **Zirtuno**. Descrição: **Edição local e sincronização de código para Yampi.**
 
-Virtual store identifica a loja virtual; code identifica os arquivos do editor; extractor e synchronizer descrevem a cópia para o computador e o retorno. O nome curto evita ocupar o cabeçalho inteiro da extensão. Os identificadores internos de arquivos e histórico são preservados para aceitar exportações anteriores.
+Zirtuno identifica o desenvolvedor da ferramenta; Sync descreve a cópia do código para edição local e a sincronização dos textos escolhidos com o editor Yampi. A descrição informa a plataforma compatível. O nome curto cabe no cabeçalho da extensão. Os identificadores internos de arquivos, backups e histórico são preservados para aceitar exportações anteriores.
 
 A versão 0.3.3 usa a logo Y/código fornecida pelo proprietário, redimensionada com proporções e transparência preservadas. A pequena assinatura Zirtuno continua no cabeçalho. O Chrome controla a composição e o espaço entre descrição e ID na sua página de extensões; a descrição foi reduzida para uma frase curta, sem HTML ou artifícios de quebra de linha.
 
@@ -42,4 +42,4 @@ Uma ferramenta de trabalho compacta, com fundo quase branco, texto escuro e azul
 
 ## Distribuição e privacidade
 
-Somente o pacote atual fica disponível nos releases. O histórico Git preserva alterações de código para auditoria e correções, sem acumular instaladores antigos nos releases. A geração local usa `.cache/package/`; ZIPs e hashes são descartáveis depois do upload confirmado. A pasta carregada sem compactação precisa permanecer no computador enquanto estiver instalada. Nenhum tema, exportação, backup ou dado de loja deve entrar no repositório ou no pacote da extensão. Exemplos e testes são fictícios.
+O release marcado como mais recente oferece o pacote atual. Releases anteriores preservam seus nomes e arquivos históricos. O histórico Git preserva alterações de código para auditoria e correções. A geração local usa `.cache/package/`; ZIPs e hashes são descartáveis depois do upload confirmado. A pasta carregada sem compactação precisa permanecer no computador enquanto estiver instalada. Nenhum tema, exportação, backup ou dado de loja deve entrar no repositório ou no pacote da extensão. Exemplos e testes são fictícios.

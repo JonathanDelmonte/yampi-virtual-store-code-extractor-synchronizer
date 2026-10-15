@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Yampi Code Sync",
-  "version": "0.3.4",
+  "name": "Zirtuno Sync",
+  "version": "0.3.5",
   "author": "Zirtuno",
   "minimum_chrome_version": "120",
-  "description": "Baixe e sincronize o código da sua loja Yampi.",
-  "homepage_url": "https://github.com/JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer",
+  "description": "Edite localmente e sincronize o código da sua loja Yampi.",
+  "homepage_url": "https://github.com/ZIRTUNO/zirtuno-sync",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",

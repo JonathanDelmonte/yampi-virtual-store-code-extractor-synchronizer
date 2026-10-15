@@ -1,13 +1,13 @@
 {
-  "name": "yampi-virtual-store-code-extractor-synchronizer",
-  "version": "0.3.4",
+  "name": "zirtuno-sync",
+  "version": "0.3.5",
   "author": {"name": "Zirtuno", "url": "https://www.instagram.com/zirtuno/"},
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=24"
   },
-  "description": "Yampi Code Sync: extração e sincronização dos arquivos do editor Yampi, por Zirtuno",
+  "description": "Zirtuno Sync: edição local e sincronização de código para Yampi",
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/dev.mjs",

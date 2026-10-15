@@ -1,6 +1,6 @@
 # Instalação local
 
-1. Extraia `yampi-code-sync-0.3.4.zip` em uma pasta fixa. Não carregue o ZIP diretamente. Depois de extrair, pode apagar o ZIP e seu arquivo SHA-256; mantenha a pasta carregada no Chrome.
+1. Extraia `zirtuno-sync-0.3.5.zip` em uma pasta fixa. Não carregue o ZIP diretamente. Depois de extrair, pode apagar o ZIP e seu arquivo SHA-256; mantenha a pasta carregada no Chrome.
 2. Abra a página de extensões do Chrome (`chrome://extensions`) ou Edge (`edge://extensions`). O painel lateral depende da API `sidePanel`, disponível no Chrome 120 ou posterior. Outros navegadores não foram validados.
 3. Ative o modo de desenvolvedor e escolha **Carregar sem compactação** / **Load unpacked**.
 4. Selecione a pasta que contém `manifest.json`. Mantenha os demais arquivos e as pastas `icons/` e `brand/` juntos.
@@ -8,11 +8,11 @@
 
 Se clicar fora do editor, a extensão abre uma orientação no painel lateral. Clique em **Abrir editor de código da Yampi** para acessar o editor na mesma aba; se necessário, faça login. Depois que o editor carregar, clique novamente no ícone para conectar. Esse caminho não inicia uma exportação e não cria uma nova aba.
 
-Para atualizar uma instalação anterior da versão 0.2/0.3, extraia o novo ZIP sobre os arquivos da mesma pasta que você carregou no Chrome. Abra `chrome://extensions` e clique em **Recarregar** no cartão da extensão, que passa a se chamar **Yampi Code Sync**. Feche o painel antigo da extensão, recarregue a aba do editor sem rascunhos pendentes e clique no ícone. Usar uma pasta diferente pode criar uma nova identidade da extensão e separar os backups existentes; preserve a pasta instalada para atualizar.
+Para atualizar uma instalação anterior da versão 0.2/0.3, extraia o novo ZIP sobre os arquivos da mesma pasta que você carregou no Chrome. Abra `chrome://extensions` e clique em **Recarregar** no cartão da extensão, que passa a se chamar **Zirtuno Sync**. Feche o painel antigo da extensão, recarregue a aba do editor sem rascunhos pendentes e clique no ícone. Usar uma pasta diferente pode criar uma nova identidade da extensão e separar os backups existentes; preserve a pasta instalada para atualizar.
 
 Durante desenvolvimento, `npm run build` atualiza a pasta `dist`. Carregue essa pasta e clique em Recarregar na página de extensões após mudar o código. Em seguida, recarregue a aba Yampi, sem rascunhos pendentes, para substituir o adaptador anterior.
 
-O pacote é uma versão local de desenvolvimento, sem instalação automática ou aprovação de uma loja oficial de extensões. A versão 0.3 deve ser validada primeiro em ambiente controlado. A gravação foi testada somente no editor fictício, inclusive em Chromium com extensão Manifest V3. O teste usa permissão adicional somente na cópia temporária; o proprietário concluiu uma exportação textual real na 0.2.3, mas a 0.3.4 ainda precisa de nova conferência no painel real. Qualquer teste real de gravação depende de instruções específicas sobre ambiente e arquivo.
+O pacote é uma versão local de desenvolvimento, sem instalação automática ou aprovação de uma loja oficial de extensões. A versão 0.3 deve ser validada primeiro em ambiente controlado. A gravação foi testada somente no editor fictício, inclusive em Chromium com extensão Manifest V3. O teste usa permissão adicional somente na cópia temporária; o proprietário concluiu uma exportação textual real na 0.2.3, mas a versão atual ainda precisa de nova conferência no painel real. Qualquer teste real de gravação depende de instruções específicas sobre ambiente e arquivo.
 
 Ao clicar no ícone dentro do editor, abre-se um painel lateral na mesma aba. Confira a loja no topo e clique em **Confirmar e baixar ZIP**. Nenhum arquivo é aberto ou copiado antes desse botão, e nenhum arquivo precisa ser importado para exportar. A extensão abre os arquivos para leitura, sem editar, salvar, excluir ou publicar conteúdo na Yampi. O worker bloqueia comandos de gravação durante a cópia. Acompanhe o progresso; o ZIP é baixado ao concluir. Um erro interrompe a cópia e mostra o motivo.
 

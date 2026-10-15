@@ -1,12 +1,14 @@
-# Yampi Code Sync
+# Zirtuno Sync
 
 Extensão independente para copiar o código do editor Yampi, trabalhar no computador e devolver os textos escolhidos com comparação e backup. O repositório público contém somente a ferramenta e exemplos fictícios; projetos e dados de lojas ficam fora dele.
 
-## Versão 0.3.4
+## Versão 0.3.5
+
+**Edição local e sincronização de código para Yampi.** A versão 0.3.5 adota o nome Zirtuno Sync no Chrome, no painel, no repositório e no instalador. Exportações e backups anteriores continuam usando os mesmos formatos e identificadores internos. Esta versão mantém as melhorias de desempenho da 0.3.4 descritas abaixo.
 
 A cópia usa uma única chamada ao adaptador por comando após a conexão. Imagens, fontes e estilos públicos são baixados em até quatro requisições simultâneas, com reaproveitamento das respostas válidas dentro da mesma exportação quando outra origem exige autorização. A compactação ocorre em um worker local, mantendo o painel responsivo. PNG/JPEG/WebP/WOFF2 preservam seus bytes no ZIP, sem uma segunda compressão desnecessária. A navegação pelos arquivos do editor permanece sequencial, com as mesmas verificações de estabilidade e integridade. [Auditoria e medições reproduzíveis](docs/AUDITORIA.md).
 
-Nome do repositório, pacote e pasta de desenvolvimento: **yampi-virtual-store-code-extractor-synchronizer**. No Chrome e no painel, o nome curto é **Yampi Code Sync**, desenvolvido por **Zirtuno**. O ícone usa a logo fornecida pelo proprietário; sua versão original está em `assets/yampi-code-sync-logo.png`. A descrição curta deixa a finalidade mais clara no cartão de extensões. O espaçamento desse cartão é controlado pelo Chrome.
+Nome do repositório, pacote e pasta de desenvolvimento: **zirtuno-sync**. No Chrome e no painel, o nome é **Zirtuno Sync**, desenvolvido por **Zirtuno**. O ícone usa a logo fornecida pelo proprietário; sua versão original está em `assets/zirtuno-sync-logo.png`. A descrição curta informa a compatibilidade com Yampi no cartão de extensões. O espaçamento desse cartão é controlado pelo Chrome.
 
 O painel preserva os tutoriais e as seções abertas, com bordas arredondadas, ações em azul petróleo e tons suaves derivados da marca Zirtuno. A assinatura discreta no cabeçalho abre seu Instagram somente ao clicar. Abas com sublinhado, confirmações visíveis e transições curtas orientam cada etapa; movimento reduzido e navegação por teclado continuam respeitados. [Proposta visual e nome técnico](docs/INTERFACE.md).
 
@@ -29,7 +31,7 @@ Quando há configuração declarativa compatível no editor, ela tem prioridade.
 
 ## Instalar e exportar
 
-Baixe em [Releases](https://github.com/ZIRTUNO/yampi-virtual-store-code-extractor-synchronizer/releases), extraia o ZIP da extensão e carregue a pasta em `chrome://extensions`, com modo de desenvolvedor e **Carregar sem compactação**. Para atualizar, substitua os arquivos na mesma pasta instalada e recarregue o cartão. O ZIP pode ser apagado depois da extração; mantenha a pasta instalada enquanto a extensão estiver em uso. [Instruções completas](docs/INSTALACAO.md).
+Baixe em [Releases](https://github.com/ZIRTUNO/zirtuno-sync/releases/latest), extraia o ZIP da extensão e carregue a pasta em `chrome://extensions`, com modo de desenvolvedor e **Carregar sem compactação**. Para atualizar, substitua os arquivos na mesma pasta instalada e recarregue o cartão. O ZIP pode ser apagado depois da extração; mantenha a pasta instalada enquanto a extensão estiver em uso. [Instruções completas](docs/INSTALACAO.md).
 
 1. Abra `https://app.yampi.com.br/store/code-editor/` e clique no ícone. O painel abre na própria aba, sem copiar automaticamente. Se estiver em outra tela, a extensão mostra **Abrir editor de código da Yampi**; use esse botão e clique novamente no ícone depois que o editor carregar.
 2. Confira a loja. Deixe **Incluir contexto visual da vitrine publicada** marcado e clique em **Confirmar e baixar ZIP**. O Chrome pede leitura da origem da vitrine. Negar permite copiar o código com prévia demonstrativa.
@@ -103,7 +105,7 @@ npm run audit:performance
 npm run package
 ```
 
-`npm run dev` oferece a demonstração fictícia em `http://127.0.0.1:5181/demo.html?demo=1`. O pacote contém 17 arquivos permitidos e sai temporariamente em `.cache/package/yampi-code-sync-0.3.4.zip`, com SHA-256. Esses dois arquivos podem ser removidos depois de confirmar o upload em Releases; a geração não acumula instaladores em `releases/`. Ícones são redimensionados localmente a partir da logo autorizada, preservando proporções e transparência. Sharp é uma dependência de desenvolvimento e não integra o pacote da extensão. A assinatura exibida em 18 px usa uma versão de 72×72 px gerada de `assets/zirtuno-logo-source.png`; a imagem original permanece somente no código de desenvolvimento. Chrome/Edge com `sidePanel` são necessários; outros navegadores não foram validados. O painel global fica desativado e cada aba exige clique no ícone. Vue 2 é usado por compatibilidade, fora de manutenção; use projetos confiáveis e mantenha o servidor em localhost.
+`npm run dev` oferece a demonstração fictícia em `http://127.0.0.1:5181/demo.html?demo=1`. O pacote contém 17 arquivos permitidos e sai temporariamente em `.cache/package/zirtuno-sync-0.3.5.zip`, com SHA-256. Esses dois arquivos podem ser removidos depois de confirmar o upload em Releases; a geração não acumula instaladores em `releases/`. Ícones são redimensionados localmente a partir da logo autorizada, preservando proporções e transparência. Sharp é uma dependência de desenvolvimento e não integra o pacote da extensão. A assinatura exibida em 18 px usa uma versão de 72×72 px gerada de `assets/zirtuno-logo-source.png`; a imagem original permanece somente no código de desenvolvimento. Chrome/Edge com `sidePanel` são necessários; outros navegadores não foram validados. O painel global fica desativado e cada aba exige clique no ícone. Vue 2 é usado por compatibilidade, fora de manutenção; use projetos confiáveis e mantenha o servidor em localhost.
 
 Testes cobrem leitura integral, escrita somente fictícia, backup, conflitos, restauração, parser, privacidade e isolamento. Duas lojas fictícias, escura/clara, têm identidade, fontes, cores, produtos e rotas distintas. ZIPs são movidos e executados com acesso à loja bloqueado. Capturas independentes de referência são comparadas com a mesma home/estado/viewport após fontes/imagens carregarem. [Resultados e evidências](docs/VALIDACAO.md).
 

@@ -214,7 +214,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // readiness across reloads; reinject only when the current page needs it.
     const invoke=()=>chrome.scripting.executeScript({target: {tabId: session.tabId}, world: 'MAIN', func: async command => {
       const api = (window as unknown as {YampiThemeSyncBridge?: {version?:string;command: (c: Command) => Promise<unknown>}}).YampiThemeSyncBridge;
-      if (api?.version !== '0.3.4') return {needsBridge:true};
+      if (api?.version !== '0.3.5') return {needsBridge:true};
       return api.command(command);
     }, args: [cmd]});
     let results=await invoke();
