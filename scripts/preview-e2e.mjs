@@ -95,7 +95,7 @@ try {
   console.log('Prévia formato real: npm ci e checks no projeto movido.');
   await command(['ci','--ignore-scripts','--no-audit','--no-fund'],rocketMoved);
   const rocketCheck=await command(['run','check'],rocketMoved);assert.match(rocketCheck,/published-verified-by-css/);assert.doesNotMatch(rocketCheck,/Seções visíveis não renderizadas/);
-  const {createLocalServer:createRocketServer}=await import(pathToFileURL(path.join(rocketMoved,'.yampi-sync/tools/dev.mjs'))+'?rocket');const rocketLocal=await createRocketServer(rocketMoved);localServer=rocketLocal.server;await new Promise(r=>localServer.listen(0,'127.0.0.1',r));const rocketBase='http://127.0.0.1:'+localServer.address().port;
+  const {createLocalServer:createRocketServer}=await import(pathToFileURL(path.join(rocketMoved,'.yampi-sync/tools/dev.mjs'))+'?rocket');const rocketCompiler=await import(pathToFileURL(path.join(rocketMoved,'node_modules/esbuild/lib/main.js')));buildStops.push(rocketCompiler.stop||rocketCompiler.default.stop);const rocketLocal=await createRocketServer(rocketMoved);localServer=rocketLocal.server;await new Promise(r=>localServer.listen(0,'127.0.0.1',r));const rocketBase='http://127.0.0.1:'+localServer.address().port;
   const rocketContext=await browser.newContext(),rocketForeign=[];await rocketContext.route('**/*',route=>{if(route.request().url().startsWith(rocketBase+'/'))return route.continue();rocketForeign.push(route.request().url());return route.abort();});
   const rocketPages=[];
   for(const [route,expectedSections] of [['/',3],['/categoria-a',1],['/produto-ficticio-1',2],['/sobre',1],['/promocao',1]]) {

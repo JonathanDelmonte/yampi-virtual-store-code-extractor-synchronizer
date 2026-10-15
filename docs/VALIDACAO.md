@@ -8,6 +8,8 @@ Windows, Node.js 24.15.0. Os quatro commits até `9654001` foram combinados com 
 
 Os testes que combinam os dois trabalhos conferem que um arquivo novo vazio precisa ser selecionado junto com quem o inclui, que a restauração devolve o conteúdo vazio anterior, que conteúdo remoto conflitante bloqueia também seus dependentes e que uma troca de loja na conferência interrompe antes do próximo arquivo. As prévias de três lojas fictícias passaram: duas com comparação visual e uma no formato da vitrine, com seções, fontes, ícones, imagens, erro de rota não capturada e diagnóstico de prévia incompleta.
 
+O teste visual também encerra o compilador esbuild do terceiro projeto exportado na limpeza, como já fazia nos outros dois. Isso libera o executável temporário no Windows e permite remover a pasta de teste sem deixar processos abertos.
+
 Nenhuma gravação ou restauração real foi executada. As limitações de validação real e os resultados históricos abaixo continuam com seus escopos originais.
 
 ## Validação anterior da 0.4.0
