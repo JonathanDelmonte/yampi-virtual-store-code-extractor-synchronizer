@@ -29,7 +29,7 @@ Quando há configuração declarativa compatível no editor, ela tem prioridade.
 
 ## Instalar e exportar
 
-Baixe em [Releases](https://github.com/JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer/releases), extraia o ZIP da extensão e carregue a pasta em `chrome://extensions`, com modo de desenvolvedor e **Carregar sem compactação**. Para atualizar, substitua os arquivos na mesma pasta instalada e recarregue o cartão. O ZIP pode ser apagado depois da extração; mantenha a pasta instalada enquanto a extensão estiver em uso. [Instruções completas](docs/INSTALACAO.md).
+Baixe em [Releases](https://github.com/ZIRTUNO/yampi-virtual-store-code-extractor-synchronizer/releases), extraia o ZIP da extensão e carregue a pasta em `chrome://extensions`, com modo de desenvolvedor e **Carregar sem compactação**. Para atualizar, substitua os arquivos na mesma pasta instalada e recarregue o cartão. O ZIP pode ser apagado depois da extração; mantenha a pasta instalada enquanto a extensão estiver em uso. [Instruções completas](docs/INSTALACAO.md).
 
 1. Abra `https://app.yampi.com.br/store/code-editor/` e clique no ícone. O painel abre na própria aba, sem copiar automaticamente. Se estiver em outra tela, a extensão mostra **Abrir editor de código da Yampi**; use esse botão e clique novamente no ícone depois que o editor carregar.
 2. Confira a loja. Deixe **Incluir contexto visual da vitrine publicada** marcado e clique em **Confirmar e baixar ZIP**. O Chrome pede leitura da origem da vitrine. Negar permite copiar o código com prévia demonstrativa.
