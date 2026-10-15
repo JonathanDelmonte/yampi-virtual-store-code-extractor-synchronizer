@@ -1,6 +1,10 @@
 # Instalação local
 
-1. Extraia `zirtuno-sync-yampi-0.4.0.zip` em uma pasta fixa. Não carregue o ZIP diretamente. Depois de extrair, pode apagar o ZIP e seu arquivo SHA-256; mantenha a pasta carregada no Chrome.
+**[Baixar extensão pronta para Chrome](https://github.com/JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer/releases/latest/download/zirtuno-sync-yampi.zip)** · [SHA-256](https://github.com/JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer/releases/latest/download/zirtuno-sync-yampi.zip.sha256)
+
+O link sempre oferece a versão marcada como mais recente. A versão deste código é **0.4.0**. Use o arquivo **zirtuno-sync-yampi.zip** em Releases; os downloads **Source code** contêm o projeto para desenvolvimento, sem a extensão compilada.
+
+1. Extraia `zirtuno-sync-yampi.zip` em uma pasta fixa chamada `zirtuno-sync-yampi`. Não carregue o ZIP diretamente. Depois de extrair, pode apagar o ZIP e seu arquivo SHA-256; mantenha a pasta carregada no Chrome.
 2. Abra a página de extensões do Chrome (`chrome://extensions`) ou Edge (`edge://extensions`). O painel lateral depende da API `sidePanel`, disponível no Chrome 120 ou posterior. Outros navegadores não foram validados.
 3. Ative o modo de desenvolvedor e escolha **Carregar sem compactação** / **Load unpacked**.
 4. Selecione a pasta que contém `manifest.json`. Mantenha os demais arquivos e as pastas `icons/` e `brand/` juntos.
@@ -10,7 +14,9 @@ Se clicar fora do editor, a extensão abre uma orientação no painel lateral. C
 
 Para atualizar uma instalação anterior da versão 0.2/0.3, extraia o novo ZIP sobre os arquivos da mesma pasta que você carregou no Chrome. Abra `chrome://extensions` e clique em **Recarregar** no cartão da extensão, que passa a se chamar **Zirtuno Sync Yampi**. Feche o painel antigo da extensão, recarregue a aba do editor sem rascunhos pendentes e clique no ícone. Usar uma pasta diferente pode criar uma nova identidade da extensão e separar os backups existentes; preserve a pasta instalada para atualizar.
 
-Durante desenvolvimento, `npm run build` atualiza a pasta `dist`. Carregue essa pasta e clique em Recarregar na página de extensões após mudar o código. Em seguida, recarregue a aba Yampi, sem rascunhos pendentes, para substituir o adaptador anterior.
+Neste repositório, `npm ci` e `npm run package`, com Node 24, preparam **`releases/zirtuno-sync-yampi/`**. Essa é a pasta pronta para selecionar em **Carregar sem compactação**. As próximas execuções de `npm run package` atualizam a mesma pasta; depois, clique em **Recarregar** no cartão da extensão. O nome da pasta permanece fixo entre versões. O diretório `releases/` é local e ignorado pelo Git; os downloads públicos ficam na seção Releases do GitHub.
+
+Durante desenvolvimento, `npm run build` também atualiza a pasta `dist`, usada na demonstração e nos testes. Em seguida, recarregue a aba Yampi, sem rascunhos pendentes, para substituir o adaptador anterior.
 
 O pacote é uma versão local de desenvolvimento, sem instalação automática ou aprovação de uma loja oficial de extensões. A versão 0.4 deve ser validada primeiro em ambiente controlado. A gravação foi testada somente no editor fictício, inclusive em Chromium com extensão Manifest V3. O teste usa permissão adicional somente na cópia temporária; o proprietário concluiu uma exportação textual real na 0.2.3, mas a captura da 0.4.0 ainda precisa de nova conferência no painel e numa vitrine reais. Qualquer teste real de gravação depende de instruções específicas sobre ambiente e arquivo.
 

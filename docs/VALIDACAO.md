@@ -1,5 +1,9 @@
 # Validação da versão 0.4.0
 
+## Distribuição simplificada em 15/10/2026
+
+Com Node.js 24.15.0, `npm ci` e `npm run package` passaram, incluindo TypeScript, 182 testes em 12 arquivos e build. O empacotamento prepara a pasta fixa `releases/zirtuno-sync-yampi/`, o ZIP com versão e o ZIP de nome estável `zirtuno-sync-yampi.zip`, com seus hashes. A pasta e os ZIPs têm os mesmos 17 arquivos permitidos, conferidos byte a byte; os dois ZIPs têm o mesmo SHA-256. O README e o guia destacam o download direto em Releases. A instalação na janela do Chrome do usuário exige concluir o carregamento ou a recarga manualmente; esta validação não confirma essa instalação nem altera o estado de validação real da Yampi.
+
 ## Integração do repositório ZIRTUNO em 15/10/2026
 
 Windows, Node.js 24.15.0. Os quatro commits até `9654001` foram combinados com o trabalho local da 0.4.0. `npm ci`, `npm run check` e `npm run package` passaram: TypeScript, **182 testes em 12 arquivos**, build e ZIP local `zirtuno-sync-yampi-0.4.0.zip` com 17 arquivos permitidos e SHA-256. O repositório principal e os links de instalação continuam apontando para `JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer`.
