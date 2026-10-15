@@ -1,6 +1,6 @@
 {
   "name": "zirtuno-sync-yampi",
-  "version": "0.3.7",
+  "version": "0.4.0",
   "author": {"name": "Zirtuno", "url": "https://www.instagram.com/zirtuno/"},
   "private": true,
   "type": "module",
@@ -33,6 +33,7 @@
     "fflate": "^0.8.3",
     "js-cookie": "3.0.8",
     "lodash": "4.18.1",
+    "parse5": "8.0.1",
     "playwright": "1.64.0",
     "sass": "1.105.1",
     "sharp": "0.35.5",

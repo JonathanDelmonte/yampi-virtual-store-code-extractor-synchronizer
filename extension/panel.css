@@ -121,7 +121,9 @@ td.path { font-family: "Cascadia Code", Consolas, ui-monospace, monospace; overf
 td input { margin: 0; }
 .row-status { color: var(--muted); line-height: 1.6; }
 .row-status.update { color: #255f47; }
-.row-status.conflict, .row-status.missing-remote, .row-status.unsupported, .row-status.new-local { color: #91432b; }
+.row-status.conflict, .row-status.missing-remote, .row-status.unsupported, .row-status.new-local, .row-status.blocked-dependency { color: #91432b; }
+.row-detail { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.plan-warnings { margin: 8px 0 0; padding-left: 18px; color: #91432b; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 td button { font-size: 11px; min-height: 34px; padding: 6px; border-color: transparent; color: var(--accent); }
 .note { color: var(--muted); font-size: 12px; line-height: 1.65; }
 #review { margin-bottom: 26px; }

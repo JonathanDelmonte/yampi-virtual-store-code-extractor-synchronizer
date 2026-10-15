@@ -3,7 +3,8 @@ import Vuex from 'vuex';
 import _ from 'lodash';
 import Splide from '@splidejs/splide';
 Vue.use(Vuex);
-let fixture;
+let fixture, localState = {};
+const missingRoutes = new Set(), derivedRoutes = new Set();
 export const eventBus = new Vue();
 export const uuidv4 = () => crypto.randomUUID();
 export const debounce = _.debounce;
@@ -12,43 +13,80 @@ export const isLinkSameStoreDomain = value => {try {return new URL(value, locati
 export const createPriceObjects = value => value?.data || value || {};
 function imageReady(image){image.classList.remove('-loading');const owner=image.closest('.custom-image,.image-holder,.main-product-image');owner?.classList.remove('-loading');}
 export const getImageMeta = (src, callback) => {const image=new Image();let done=false;const finish=()=>{if(!done){done=true;callback(image.naturalWidth,image.naturalHeight);}};image.onload=finish;image.onerror=()=>report('Imagem local indisponível: '+src);image.src=localImage(src);if(image.complete&&image.naturalWidth)queueMicrotask(finish);};
-export const localImage=src=>{const value=String(src||'');if(/^\/(tema|preview)\/assets\//.test(value)||/^data:image\/(png|jpeg|webp);base64,/.test(value))return value;
-  const map=fixture?.__preview?.assetMap||{};try{if(map[value])return map[value];const url=new URL(value,map.__origin||location.origin);if(map[url.href])return map[url.href];}catch{}
+export const localImage=src=>{const value=String(src||'');if(/^\/(tema|preview|__platform)\/assets\//.test(value)||/^data:image\/(png|jpeg|webp);base64,/.test(value))return value;
+  const map=fixture?.__preview?.assetMap||{};try{if(map[value])return map[value];const url=new URL(value.startsWith('//')?'https:'+value:value,map.__origin||location.origin);if(map[url.href])return map[url.href];}catch{}
   if(value){window.__yampiMissingImages||=new Set();if(!window.__yampiMissingImages.has(value)){window.__yampiMissingImages.add(value);report('Imagem não capturada; placeholder local em uso. Consulte preview/report.json.');}}
   return '/__local/placeholder.svg';};
 export function report(message, error = false, details) {
-  window.__yampiLocalMessages ||= [];
-  window.__yampiLocalMessages.push({message, error, details});
+  const scope = typeof window === 'undefined' ? globalThis : window;
+  scope.__yampiLocalMessages ||= [];
+  scope.__yampiLocalMessages.push({message, error, details});
+  if (typeof window === 'undefined') return;
   if (error) window.__yampiLocalReady = false;
+  if (typeof document === 'undefined') return;
   let target = document.querySelector('#yampi-local-notice');
   if (!target) {target = document.createElement('aside'); target.id = 'yampi-local-notice'; document.body.prepend(target);}
   target.textContent = message; target.dataset.error = String(error);
+  if (localState.finished) updateStatus();
 }
 const denied = async () => {report('Esta ação depende dos serviços da loja e está desativada na prévia local.'); const error = new Error('Serviço real desativado na prévia local.'); error.response = {status: 403, data: {errors: {local: [error.message]}}}; throw error;};
 const capturedPrices=value=>value?.prices?.data||value?.prices||{};
-function capturedFilters() {
-  const prices=(fixture.products||[]).map(p=>Number(capturedPrices(p).price_sale??capturedPrices(p).price)).filter(Number.isFinite);
-  return {priceRange:fixture.priceRange||{min:prices.length?Math.min(...prices):null,max:prices.length?Math.max(...prices):null,source:'captured-sample'},categories:fixture.categories||[],attributes:[],...(fixture.filters||{})};
+function capturedFilters(data = fixture) {
+  const prices=(data.products||[]).map(p=>Number(capturedPrices(p).price_sale??capturedPrices(p).price)).filter(Number.isFinite);
+  return {priceRange:data.priceRange||{min:prices.length?Math.min(...prices):null,max:prices.length?Math.max(...prices):null,source:'captured-sample'},categories:data.categories||[],attributes:[],...(data.filters||{})};
 }
-async function read(url) {
-  const route = String(url || '').split('?')[0];
-  const products=fixture.products||[];const params=new URL(String(url||''),location.origin).searchParams;
-  let payload;
-  if (/suggestions/.test(route)) payload = products.map(p => p.name);
-  else if(/collections/.test(route))payload=fixture.collections||[{id:1,name:'Coleção demonstrativa',url_path:'/preview?page=category',products:{data:products}}];
-  else if (/categories/.test(route)) payload = fixture.categories || [];
-  else if (/banners/.test(route)) payload = fixture.banners || [];
-  else if(/filters/.test(route))payload=capturedFilters();
-  else if(/attributes/.test(route))payload=fixture.filters?.attributes||[];
-  else if(/ratings|reviews|questions|brands|installments/.test(route))payload=[];
-  else if (/count/.test(route)) payload = products.length;
-  else if(/products|similars|recommendations|search/.test(route)){const min=Number(params.get('price_min')??params.get('min_price')??0),max=Number(params.get('price_max')??params.get('max_price')??Infinity);payload=products.filter(p=>{const price=Number((p.prices?.data||p.prices)?.price_sale??(p.prices?.data||p.prices)?.price??0);return price>=min&&price<=max;});}
-  else throw new Error(`Serviço GET não simulado: ${route}. Configure os dados locais.`);
-  return {data: {data: _.cloneDeep(payload), meta: {total: Array.isArray(payload) ? payload.length : 0, current_page: 1, last_page: 1}, links: {}}, status: 200};
+// Requests are normalized to the public API path and query, as recorded by the capture.
+function normalize(url, params) {
+  const parsed = new URL(String(url || ''), 'https://api.local.invalid/');
+  const query = new URLSearchParams(parsed.search);
+  for (const [key, value] of Object.entries(params || {})) for (const item of [].concat(value)) if (item !== undefined && item !== null) query.append(Array.isArray(value) && !key.endsWith('[]') ? key + '[]' : key, String(item));
+  const path = parsed.pathname.replace(/^\/v\d+\/[^/]+\/public\//, '/').replace(/^\/+|\/+$/g, '');
+  return {path, query};
 }
-export const client = Object.assign(config => (String(config.method || 'get').toLowerCase() === 'get' ? read(config.url) : denied()), {get: read, post: denied, put: denied, patch: denied, delete: denied});
+const values = (query, ...names) => names.flatMap(name => [...query.getAll(name), ...query.getAll(name + '[]')]).flatMap(value => value.split(',')).map(value => value.trim()).filter(Boolean);
+function routeError(module, path, query) {
+  const label = 'GET ' + path + (String(query) ? '?' + query : '');
+  if (!missingRoutes.has(label)) {missingRoutes.add(label); report('Rota não capturada: ' + label + (module !== 'api' ? ' (' + module + ')' : '') + '.');}
+  const error = new Error('Rota não capturada na prévia local: ' + label);
+  error.response = {status: 404, data: {errors: {local: [error.message]}}};
+  return error;
+}
+// Recorded public reads are replayed. Filters by id/slug/limit select from the
+// recorded items; an unrecorded route is an explicit error, never another route's data.
+export function replayFrom(data, module, url, params) {
+  const {path, query} = normalize(url, params), records = (data.__preview?.api || []).filter(r => r.path === path);
+  if (records.length) {
+    const ids = values(query, 'id', 'ids'), slugs = values(query, 'slug', 'slugs'), limit = Number(query.get('limit')) || undefined;
+    const exact = records.find(r => r.query === String(query));
+    if (exact && !ids.length && !slugs.length) return {data: _.cloneDeep(exact.body), status: exact.status};
+    const items = [...new Map(records.flatMap(r => Array.isArray(r.body?.data) ? r.body.data : []).map(item => [item?.id ?? item?.slug, item])).values()];
+    if (ids.length || slugs.length) {
+      const selected = items.filter(item => ids.includes(String(item?.id)) || slugs.includes(String(item?.slug)));
+      if (selected.length < Math.max(ids.length, slugs.length)) throw routeError(module, path, query);
+      return {data: {..._.cloneDeep(records[0].body), data: _.cloneDeep(selected.slice(0, limit))}, status: 200};
+    }
+    const body = _.cloneDeep((exact || records[0]).body);
+    if (limit && Array.isArray(body?.data)) body.data = body.data.slice(0, limit);
+    return {data: body, status: (exact || records[0]).status};
+  }
+  // Documented derivations from the captured sample; labeled as such.
+  const products = data.products || [];
+  if (/^(?:catalog\/)?filters$/.test(path)) {derivedRoutes.add(path); return {data: {data: capturedFilters(data), meta: {source: 'captured-sample'}}, status: 200};}
+  if (/^(?:catalog\/)?products$/.test(path)) {
+    derivedRoutes.add(path);
+    const min = Number(query.get('price_min') ?? query.get('min_price') ?? 0), max = Number(query.get('price_max') ?? query.get('max_price') ?? Infinity);
+    const payload = products.filter(p => {const price = Number(capturedPrices(p).price_sale ?? capturedPrices(p).price ?? 0); return price >= min && price <= max;});
+    return {data: {data: _.cloneDeep(payload), meta: {total: payload.length, current_page: 1, last_page: 1, source: 'captured-sample'}, links: {}}, status: 200};
+  }
+  throw routeError(module, path, query);
+}
+export function clientFor(module = 'api') {
+  const read = async (url, config = {}) => replayFrom(fixture, module, url, config.params);
+  return Object.assign(config => (String(config.method || 'get').toLowerCase() === 'get' ? read(config.url, config) : denied()), {get: read, post: denied, put: denied, patch: denied, delete: denied});
+}
+export const client = clientFor('api');
 export const builderSearch = query => query || {};
-export const urlSearch = query => '/preview?page=category&' + new URLSearchParams(query || {});
+export const urlSearch = query => '/busca?' + new URLSearchParams(query || {});
 export class SearchAttributesHandler {
   constructor() {this.attributes = [];}
   add(value) {this.attributes.push(value); return this;}
@@ -56,25 +94,26 @@ export class SearchAttributesHandler {
   get() {return this.attributes;}
   clear() {this.attributes = [];}
 }
-const safeLink=value=>{
-  if(/^\/preview(?:\?|$)/.test(String(value||'')))return String(value);
-  try{const base=fixture?.__preview?.source?.origin||location.origin,url=new URL(String(value||'/'),base);
-    if(url.pathname==='/preview'&&url.origin===location.origin)return url.pathname+url.search;
-    const match=(fixture?.__preview?.routes||[]).find(route=>route.sourceUrl===url.href);
-    if(match)return '/preview?page='+match.kind+'&capture='+match.id;
-    if(url.pathname==='/'&&[location.origin,base].includes(url.origin))return '/preview?page=home';
-    if(url.pathname==='/busca'&&[location.origin,base].includes(url.origin))return '/preview?page=category';
-    report('Rota não capturada nesta prévia: '+url.pathname);return '#';
-  }catch{return '#';}
+// Store links become local paths; the local router renders captured pages and
+// answers uncaptured ones with an explicit page. Other origins stay blocked.
+const safeLink = value => {
+  const text = String(value ?? '');
+  if (/^\/preview(?:\?|$)/.test(text)) return text;
+  try {
+    const origin = fixture?.__preview?.source?.origin, url = new URL(text || '/', origin || location.origin);
+    if ([location.origin, origin].includes(url.origin)) return url.pathname + url.search + url.hash;
+    return url.href;
+  } catch {return '#';}
 };
 const product = () => fixture.product?.data || fixture.product || fixture.products?.[0] || {};
 function currentProduct(vm) {const value = vm.product || vm.$attrs.product; return value?.data || value?.content || value || product();}
 function firstSku(value) {const skus=value?.skus?.data||value?.skus||[];return skus.find(s=>s.id===value.selected_sku_id)||skus.find(s=>s.blocked_sale!==true)||{...capturedPrices(value),id:value?.id,blocked_sale:true,allow_sell_without_customization:false,customizations:{data:[]}};}
+const themeParams = () => fixture.pageConfig?.data?.theme?.params || fixture.pageConfig?.theme?.params || {};
 export const mixins = {
   mobile: {data: () => ({isMobile: matchMedia('(max-width:700px)').matches}), mounted() {this.__localResize = () => {this.isMobile = matchMedia('(max-width:700px)').matches;}; window.addEventListener('resize', this.__localResize);}, beforeDestroy() {window.removeEventListener('resize', this.__localResize);}},
   merchant:{computed:{merchant:()=>fixture.merchantData,shouldUseNewSearchStrategy:()=>fixture.merchantData?.new_search===true||fixture.merchantData?.store_search_v1===true}},
   product: {computed: {validProduct() {return currentProduct(this);}, firstValidSku() {return firstSku(this.validProduct);}, selectedSku() {return this.$store.state.product.selectedSku || this.firstValidSku;}, validSku() {return this.selectedSku;}}, methods: {setSelectedSku(value) {this.$store.commit('product/SET', {selectedSku: value});}}},
-  productCardTheme: {computed: {themeStyle: () => fixture.pageConfig?.data?.theme?.params || {}, spaceBetweenNamePrice:()=>fixture.pageConfig?.data?.theme?.params?.space_between_name_price||'small',oldPriceSize:()=>fixture.pageConfig?.data?.theme?.params?.old_price_size||'small',smallCentsPrice:()=>!!fixture.pageConfig?.data?.theme?.params?.small_cents_price,showMaxInstallment:()=>!!fixture.pageConfig?.data?.theme?.params?.show_max_installment}},
+  productCardTheme: {computed: {themeStyle: themeParams, spaceBetweenNamePrice:()=>themeParams().space_between_name_price||'small',oldPriceSize:()=>themeParams().old_price_size||'small',smallCentsPrice:()=>!!themeParams().small_cents_price,showMaxInstallment:()=>!!themeParams().show_max_installment}},
   prices: {data: () => ({loadingPrices: false, productPricesParams: {}}), computed: {
     productPrices() {const sku=this.selectedSku;if(sku?.prices)return sku.prices.data||sku.prices;if(sku&&(sku.price_sale!==undefined||sku.price!==undefined))return {...sku,price:sku.price??sku.price_sale,price_formated:sku.price_formated??sku.price_sale_formated};return capturedPrices(currentProduct(this));},
     selectedPrice() {return this.productPrices.price_formated || (this.hasPrice?this.$formatMoney(this.productPrices.price_sale??this.productPrices.price):'Preço não capturado');},
@@ -88,16 +127,50 @@ export const mixins = {
   queryParams: {data: () => ({queryParams: {}}), methods: {bootQueryParams() {this.queryParams = Object.fromEntries(new URLSearchParams(location.search));}, updateQueryParams(values) {this.queryParams = {...this.queryParams, ...values};}, getQueryParam: name => new URLSearchParams(location.search).get(name)}},
   touchable: {data: () => ({isTouchable: matchMedia('(pointer:coarse)').matches})},
 };
-export function setup(data) {
-  fixture = data;
+// The status is structural: rendered vs expected sections, placeholders, fonts
+// with errors and uncaptured routes. HTTP 200 or a mounted app is not enough.
+function updateStatus() {
+  const target = document.querySelector('#yampi-preview-status [data-summary]');
+  const s = window.__yampiLocalState;
+  if (!target || !s) return;
+  const parts = [];
+  if (s.expectedSections !== null) parts.push(s.renderedSections < s.expectedSections ? `Prévia incompleta: ${s.renderedSections} de ${s.expectedSections} seções` : `${s.renderedSections}/${s.expectedSections} seções`);
+  if (!s.captured) parts.push('página sem captura');
+  if (s.placeholders) parts.push(`${s.placeholders} ${s.placeholders === 1 ? 'imagem' : 'imagens'} em placeholder`);
+  if (s.failedFonts.length) parts.push(`${s.failedFonts.length} ${s.failedFonts.length === 1 ? 'fonte' : 'fontes'} com erro`);
+  if (s.missingRoutes.length) parts.push(`${s.missingRoutes.length} ${s.missingRoutes.length === 1 ? 'rota não capturada' : 'rotas não capturadas'}`);
+  if (s.errors) parts.push(`${s.errors} ${s.errors === 1 ? 'erro' : 'erros'}`);
+  if (s.assetsUrl) parts.push('assets_url local não garante o caminho de produção');
+  target.textContent = parts.join(' · ');
+  target.closest('aside').dataset.incomplete = String(!window.__yampiLocalReady);
+}
+export async function finish() {
+  await document.fonts?.ready;
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const messages = window.__yampiLocalMessages || [];
+  const expected = Number.isInteger(localState.expectedSections) ? localState.expectedSections : null;
+  window.__yampiLocalState = {
+    page: localState.page, captured: localState.page?.captured !== false, expectedSections: expected, renderedSections: localState.renderedSections ?? 0, missingSections: localState.missingSections || [],
+    placeholders: [...document.images].filter(image => (image.currentSrc || image.src).includes('/__local/placeholder.svg')).length,
+    failedFonts: [...(document.fonts || [])].filter(face => face.status === 'error').map(face => face.family),
+    missingRoutes: [...missingRoutes], derivedRoutes: [...derivedRoutes], errors: messages.filter(m => m.error).length, assetsUrl: localState.assetsUrl || 0,
+    warnings: localState.warnings || [],
+  };
+  window.__yampiLocalReady = (expected === null || window.__yampiLocalState.renderedSections >= expected) && !messages.some(m => m.error);
+  localState.finished = true;
+  updateStatus();
+}
+export function setup(data, state = {}) {
+  fixture = data; localState = state || {};
   window.merchant = data.merchantData; window.product = product(); window.Yampi = {local: true, cache: {js: 10}, mago_config: {}}; window._ = _;
   Vue.config.productionTip = false;
   Vue.config.errorHandler = (error, component, info) => report('Erro Vue local: ' + error.message, true, {component: component?.$options.name, info, stack: error.stack});
   Vue.config.warnHandler = (message,component,trace) => report('Aviso Vue local: '+message,false,{component:component?.$options.name,trace});
+  window.addEventListener('unhandledrejection', event => {if (!/^Rota não capturada/.test(event.reason?.message || '')) report('Promessa rejeitada na prévia local: ' + (event.reason?.message || event.reason), false); event.preventDefault();});
   const modules = {
     merchant: {merchant: data.merchantData, storeModules:{new_search:data.merchantData?.new_search===true},storeSearch:data.merchantData?.store_search_v1===true, defaultCard: {}, categories: data.categories || []},
     product: {product: data.product, validProduct: product(), validSku: null, selectedSku: null, loadingPrices: false, price: product().prices?.data || {}},
-    theme: {themeStyle: data.pageConfig?.data?.theme?.params || data.pageConfig?.theme?.params || {}},
+    theme: {themeStyle: themeParams()},
     preview: {isPreview: true, isIframe: true, activeSection: null},
     header: {showSearchBar: false},
     cart: {cart: {items: [], prices: {total: 0, subtotal: 0, shipment: 0, discount: 0}, cart_discounts: []}, cartType: 'side_cart'},
@@ -125,7 +198,7 @@ export function setup(data) {
   Vue.prototype.$thumborize = localImage;
   Vue.prototype.$safeCleanLink = safeLink;
   Vue.prototype.$checkoutUrl = () => '#';
-  Vue.prototype.$redirectTo = value => {const url = safeLink(value); if (url !== '#') location.assign(url); else report('Link externo desativado na prévia local.');};
+  Vue.prototype.$redirectTo = value => {const url = safeLink(value); if (url.startsWith('/')) location.assign(url); else report('Link externo desativado na prévia local.');};
   Vue.prototype.$applyQueriesToUrl = (url, query) => {const result = new URL(url, location.origin); for (const [k, v] of Object.entries(query || {})) result.searchParams.set(k, v); return result.pathname + result.search;};
   Vue.prototype.$randomString = uuidv4;
   Vue.prototype.$t = Vue.prototype.$tc = (key, value) => value === undefined ? key : String(value);
@@ -145,6 +218,6 @@ export function setup(data) {
   document.addEventListener('error',event=>{if(event.target instanceof HTMLImageElement)report('Asset local não carregado; consulte o diagnóstico.');},true);
   document.addEventListener('securitypolicyviolation',event=>report('Recurso externo bloqueado na prévia local: '+event.violatedDirective));
   document.addEventListener('submit', event => {event.preventDefault(); report('Formulários reais estão desativados na prévia local.');}, true);
-  document.addEventListener('click', event => {const link = event.target.closest?.('a'); if (link && new URL(link.href).origin !== location.origin) {event.preventDefault(); report('Link externo desativado na prévia local.');}}, true);
+  document.addEventListener('click', event => {const link = event.target.closest?.('a'); if (link && link.href && new URL(link.href).origin !== location.origin) {event.preventDefault(); report('Link externo desativado na prévia local.');}}, true);
   return store;
 }

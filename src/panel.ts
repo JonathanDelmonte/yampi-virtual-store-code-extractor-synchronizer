@@ -1,11 +1,11 @@
-import {preparePreview, finishPreview, type PreviewDraft, type PreviewFetch} from './browser/preview-capture';
+import {preparePreview, finishPreview, unauthorizedOrigins, type PreviewDraft, type PreviewFetch} from './browser/preview-capture';
 import {demonstration, publicUrl, type PreviewBundle} from './core/preview';
 import {BrowserAdapter, type RPC} from './browser/adapter';
 import {PanelConnection} from './browser/panel-connection';
 import {zipInWorker} from './browser/zip-client';
 import {capture, applyPlan} from './core/workflow';
 import {encodeSnapshot, decodeProject, readProjectDirectory} from './core/archive';
-import {makePlan, missingNewTexts} from './core/planner';
+import {makePlan, missingNewTexts, selectionIssues} from './core/planner';
 import {assertContext, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Context, type Assets, type Snapshot, type Files, type Plan, type PlanRow, type Journal, type Progress} from './core/model';
 import {put, get, clearLocal, saveJournal, journalHistory, contextKey} from './storage';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -92,8 +92,11 @@ function controls(): void {
   $('preview-pending').hidden=!pendingPreview;
   for(const id of ['preview-allow','preview-partial','preview-discard'])$(id).toggleAttribute('disabled',working||!pendingPreview);
   $('compare').toggleAttribute('disabled', working || !connected || !baseline || !local);
-  $('apply').toggleAttribute('disabled', working || !connected || !plan || !selected.size || !!missing || $<HTMLInputElement>('confirm-store').value !== plan.context.storeName);
-  $('apply').title = working ? 'Aguarde a operação atual terminar.' : !connected ? 'Conecte ao Editor de código da Yampi.' : !plan || !selected.size ? 'Compare o projeto e selecione arquivos compatíveis para envio.' : missing ? `Crie vazios no editor da Yampi os arquivos novos marcados (${missing}) e compare novamente.` : $<HTMLInputElement>('confirm-store').value !== plan.context.storeName ? 'Digite o nome da loja de destino para confirmar.' : 'Salvar os arquivos selecionados com backup e conferência após recarregar.';
+  const partial = plan ? selectionIssues(plan, selected) : [];
+  $('apply').toggleAttribute('disabled', working || !connected || !plan || !selected.size || !!missing || partial.length > 0 || $<HTMLInputElement>('confirm-store').value !== plan.context.storeName);
+  $('apply').title = working ? 'Aguarde a operação atual terminar.' : !connected ? 'Conecte ao Editor de código da Yampi.' : !plan || !selected.size ? 'Compare o projeto e selecione arquivos compatíveis para envio.' : missing ? `Crie vazios no editor da Yampi os arquivos novos marcados (${missing}) e compare novamente.` : partial.length ? 'Arquivos que usam uns aos outros precisam ser enviados juntos.' : $<HTMLInputElement>('confirm-store').value !== plan.context.storeName ? 'Digite o nome da loja de destino para confirmar.' : 'Salvar os arquivos selecionados com backup e conferência após recarregar.';
+  $('discard-whitespace').hidden = !plan?.rows.some(r => r.status === 'update' && r.whitespaceOnly);
+  $('discard-whitespace').toggleAttribute('disabled', working);
   for (const id of ['baseline', 'folder', 'confirm-store', 'clear', 'filter', 'demo-local', 'history', 'download-journal', 'retry', 'mode-export', 'mode-import', 'go-import']) $(id).toggleAttribute('disabled', working);
   $('retry').hidden = connected || !editorTab && !isDemo;
   $('restore').toggleAttribute('disabled', working || !connected || !journal);
@@ -152,7 +155,7 @@ function setLocal(files: Files, assets: Assets = {}): void {
   $('local-info').textContent = `${Object.keys(files).length} textos e ${images} ${images === 1 ? 'imagem' : 'imagens'} carregados do computador.`;
 }
 const labels: Record<PlanRow['status'], string> = {
-  update: 'Pronto para envio', unchanged: 'Sem alterações', 'remote-only': 'Mudou apenas na loja', 'already-applied': 'Já está na loja', conflict: 'Conflito', 'missing-local': 'Ausente localmente · preservado', 'missing-remote': 'Removido na loja · bloqueado', 'new-local': 'Novo · crie vazio na Yampi', unsupported: 'Tipo sem suporte · bloqueado'
+  update: 'Pronto para envio', unchanged: 'Sem alterações', 'remote-only': 'Mudou apenas na loja', 'already-applied': 'Já está na loja', conflict: 'Conflito', 'missing-local': 'Ausente localmente · preservado', 'missing-remote': 'Removido na loja · bloqueado', 'new-local': 'Novo · crie vazio na Yampi', unsupported: 'Tipo sem suporte · bloqueado', 'blocked-dependency': 'Depende de arquivo que não será enviado · bloqueado', 'whitespace-only': 'Só espaço em branco · descartado'
 };
 const label = (row: PlanRow) => row.status === 'new-local' && row.image ? 'Imagem nova · envie pela Yampi' : row.status === 'update' && row.base === undefined ? 'Novo · pronto para preencher' : labels[row.status];
 function showDiff(row: PlanRow, pointerClick: boolean): void {
@@ -172,10 +175,13 @@ function renderPlan(): void {
   $('rows').replaceChildren();
   const counts = plan.rows.reduce((map, row) => {map[row.status] = (map[row.status] || 0) + 1; return map;}, {} as Record<string, number>);
   const missing = missingNewTexts(plan).length;
-  $('summary').textContent = `${selected.size} selecionados · ${counts.update || 0} prontos · ${counts.conflict || 0} conflitos${missing ? ` · ${missing} para criar na Yampi` : ''} · ${plan.rows.length} caminhos comparados`;
+  const partial = selectionIssues(plan, selected), whitespace = plan.rows.filter(r => r.status === 'update' && r.whitespaceOnly).length;
+  $('summary').textContent = `${selected.size} selecionados · ${counts.update || 0} prontos · ${counts.conflict || 0} conflitos${missing ? ` · ${missing} para criar na Yampi` : ''} · ${counts['blocked-dependency'] || 0} bloqueados por dependência${whitespace ? ` · ${whitespace} só espaço em branco` : ''} · ${plan.rows.length} caminhos comparados`;
+  $('plan-warnings').replaceChildren(...[...partial.map(p => `Envio parcial bloqueado: ${p.path} precisa ir junto com ${p.requires}.`), ...(plan.warnings || []).map(w => `${w.path}: ${w.message}`)].map(text => {const item = document.createElement('li'); item.textContent = text; return item;}));
+  $('plan-warnings').hidden = !partial.length && !plan.warnings?.length;
   for (const row of plan.rows) {
     if (filter === 'changes' && ['unchanged', 'already-applied', 'missing-local'].includes(row.status)) continue;
-    if (filter === 'update' && row.status !== 'update' || filter === 'conflict' && row.status !== 'conflict') continue;
+    if (filter === 'update' && row.status !== 'update' || filter === 'conflict' && row.status !== 'conflict' || filter === 'whitespace' && !row.whitespaceOnly && row.status !== 'whitespace-only' || filter === 'blocked' && row.status !== 'blocked-dependency') continue;
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', `Enviar ${row.path}`);
@@ -183,7 +189,9 @@ function renderPlan(): void {
     checkbox.addEventListener('change', () => {checkbox.checked ? selected.add(row.path) : selected.delete(row.path); renderPlan(); controls();});
     td.append(checkbox);
     const pathCell = document.createElement('td'); pathCell.className = 'path'; pathCell.textContent = row.path;
-    const result = document.createElement('td'), badge = document.createElement('span'); badge.className = `row-status ${row.status}`; badge.textContent = label(row); result.append(badge);
+    const result = document.createElement('td'), badge = document.createElement('span'); badge.className = `row-status ${row.status}`; badge.textContent = label(row) + (row.status === 'update' && row.whitespaceOnly ? ' · só espaço em branco' : ''); result.append(badge);
+    const detail = row.blockedBy?.length ? 'Depende de: ' + row.blockedBy.join(', ') : row.dependsOn?.length ? 'Envie junto com: ' + row.dependsOn.join(', ') : '';
+    if (detail) {const note = document.createElement('small'); note.className = 'row-detail'; note.textContent = detail; result.append(note);}
     const action = document.createElement('td'), button = document.createElement('button'); button.textContent = 'Ver versões'; button.addEventListener('click', event => showDiff(row, event.detail > 0)); action.append(button);
     tr.append(td, pathCell, result, action); $('rows').append(tr);
   }
@@ -197,7 +205,8 @@ async function compare(): Promise<void> {
   await adapter.refresh();
   const remote = await capture(adapter, {signal: controller?.signal, progress});
   plan = makePlan(baseline, local, remote, localAssets);
-  selected.clear(); plan.rows.filter(r => r.status === 'update').forEach(r => selected.add(r.path));
+  // Whitespace-only differences start unselected; coupled files start together.
+  selected.clear(); plan.rows.filter(r => r.status === 'update' && !r.whitespaceOnly).forEach(r => selected.add(r.path));
   $<HTMLInputElement>('confirm-store').value = '';
   const missing = missingNewTexts(plan).length;
   renderPlan(); status('Comparação concluída', missing ? `Crie vazios no editor da Yampi ${missing === 1 ? 'o arquivo novo marcado' : `os ${missing} arquivos novos marcados`}, na mesma pasta, e compare novamente. O envio fica bloqueado até lá.` : selected.size ? `${selected.size} ${selected.size === 1 ? 'arquivo pode ser enviado' : 'arquivos podem ser enviados'}. Revise as versões e confirme a loja.` : 'Nenhuma alteração pode ser enviada. Confira os resultados da comparação abaixo.');
@@ -234,16 +243,17 @@ async function deliverProject(snapshot:Snapshot,visual:PreviewBundle):Promise<vo
   await download(bytes,fileName('exportacao',snapshot.context.storeName));
   setBaseline(snapshot);pendingPreview=undefined;
   const source=visual.source.kind==='demonstration'?'demonstrativa':'parcial — '+(visual.source.kind==='editor'?'dados do editor':'vitrine publicada, rascunho não vinculado');
-  $('preview-info').textContent=`Prévia ${source}. ${Object.keys(visual.assets).length} recursos locais; ${visual.pages.length} páginas capturadas; ${visual.issues.length} observações. Relatório: preview/report.json. Fidelidade visual não validada automaticamente.`;
+  const kinds=[...new Set(visual.pages.map(p=>p.kind+(p.context==='search'?' (busca)':'')))].join(', ')||'nenhuma';
+  const megabytes=(Object.values(visual.assets).reduce((sum,bytes)=>sum+bytes.length,0)/1048576).toFixed(1).replace('.',',');
+  $('preview-info').textContent=`Prévia ${source}. ${visual.pages.length} páginas (${kinds}); ${Object.keys(visual.assets).length} recursos locais (${megabytes} MB); ${visual.api.length} leituras públicas gravadas; ${visual.issues.length} observações. Relatório: preview/report.json. Execute npm run check para conferir seções e CSS. Fidelidade visual não validada automaticamente.`;
   status('ZIP da loja baixado','Código preservado. '+$('preview-info').textContent);
 }
 async function completeVisual(snapshot:Snapshot,draft:PreviewDraft,origins:string[]):Promise<void> {
   await rpc({action:'preview-allow',preview:{origins,context:snapshot.context}});
   const bundle=await finishPreview(draft,remoteFetch(snapshot),origins,controller?.signal,(done,total)=>progress({done,total,path:'Imagens, fontes e estilos',phase:'Baixando recursos visuais'}));
-  const missing=[...new Set(bundle.issues.filter(i=>i.code==='asset-unavailable'&&i.reason==='Origem não autorizada para leitura.'&&i.resource).map(i=>new URL(i.resource!).origin))];
+  const missing=unauthorizedOrigins(bundle);
   if(missing.length) {
     pendingPreview={snapshot,draft,bundle,origins};
-    draft.urls=[...new Set([...draft.urls,...bundle.issues.filter(i=>i.code==='asset-unavailable'&&i.resource).map(i=>i.resource!)])];
     $('preview-origins').textContent=missing.join(', ');
     status('Código copiado; recursos visuais aguardam autorização','Autorize somente as origens listadas para incluir imagens/fontes no ZIP, ou baixe uma prévia parcial. Nenhum arquivo da Yampi foi alterado.');
   } else await deliverProject(snapshot,bundle);
@@ -252,7 +262,7 @@ async function exportProject(permission:Promise<boolean>):Promise<void> {
   if(!connected)throw new Error('Abra o editor de código Yampi e clique no ícone da extensão.');
   const snapshot=await capture(adapter,{signal:controller?.signal,progress});
   const enabled=await permission;
-  if(!enabled){await deliverProject(snapshot,demonstration(snapshot.context,'Captura visual não autorizada ou desativada. Código exportado; configurações, catálogo de amostra, imagens e fontes visuais não foram capturados.'));return;}
+  if(!enabled){await deliverProject(snapshot,demonstration(snapshot.context,'Captura visual não autorizada ou desativada. Código exportado; configurações, catálogo de amostra, imagens e fontes visuais não foram capturados.',Object.keys(snapshot.files)));return;}
   status('Capturando contexto visual público…','Somente leituras, sem scripts da vitrine. A publicação pode diferir do rascunho.');
   const editorData=await adapter.visual();
   const draft=await preparePreview(snapshot,remoteFetch(snapshot),{editorData,enabled:true,signal:controller?.signal});
@@ -260,7 +270,7 @@ async function exportProject(permission:Promise<boolean>):Promise<void> {
 }
 $('export').addEventListener('click',()=>{const permission=$<HTMLInputElement>('include-preview').checked&&currentContext?requestScopes([currentContext.previewOrigin]):Promise.resolve(false);void run(()=>exportProject(permission));});
 $('preview-allow').addEventListener('click',()=>{const pending=pendingPreview;if(!pending)return;
-  const missing=[...new Set(pending.bundle.issues.filter(i=>i.code==='asset-unavailable'&&i.reason==='Origem não autorizada para leitura.'&&i.resource).map(i=>new URL(i.resource!).origin))];
+  const missing=unauthorizedOrigins(pending.bundle);
   const permission=requestScopes(missing);
   void run(async()=>{if(!await permission){status('Permissão não concedida','Você pode baixar com a prévia parcial.');return;}
     const origins=[...new Set([...pending.origins,...missing])];
@@ -292,6 +302,11 @@ $('folder').addEventListener('change', () => void run(async () => {
   else status('Pasta local carregada', 'Conecte ao editor para comparar e enviar as alterações.');
 }, connected));
 $('compare').addEventListener('click', () => void run(compare));
+$('discard-whitespace').addEventListener('click', () => {
+  if (!plan || working) return;
+  for (const row of plan.rows) if (row.status === 'update' && row.whitespaceOnly) {row.status = 'whitespace-only'; selected.delete(row.path);}
+  renderPlan(); controls(); status('Alterações só de espaço em branco descartadas', 'Esses arquivos não serão enviados. Compare novamente para reavaliar.');
+});
 $('confirm-store').addEventListener('input', controls);
 $('filter').addEventListener('change', renderPlan);
 $('close-diff').addEventListener('click', () => {$('diff').hidden = true;});

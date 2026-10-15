@@ -1,9 +1,9 @@
-import {visualData} from '../core/preview';
+import {sanitizeRaw} from '../core/preview';
 import type {EditorView} from '@codemirror/view';
 import {editorView, readDocument} from './editor-document';
 import {assertContext, validatePath, validatePaths, validateImage, imagePath, writable, MAX_FILE_BYTES, type Context} from '../core/model';
 export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write'; context?: Context; path?: string; expected?: string; content?: string}
-export const version = '0.3.7';
+export const version = '0.4.0';
 type Reply = {ok: true; value: unknown} | {ok: false; error: string};
 const clean = (e: Element | null) => e?.textContent?.trim() || '';
 type EditorRoot = ShadowRoot | HTMLElement;
@@ -204,12 +204,12 @@ export async function command(input: Command): Promise<Reply> {
     assertClean();
     if (input.op === 'context') return {ok: true, value: context};
     if (input.op === 'visual') {
-      const values: Record<string, unknown> = {};
-      for (const name of ['merchantData','merchant','pageConfig','themeConfig','product','products','categories','banners','collections','content','sections','filters']) {
-        const descriptor = Object.getOwnPropertyDescriptor(window,name);
-        if (descriptor && 'value' in descriptor) values[name] = descriptor.value;
-      }
-      return {ok:true,value:visualData(values)};
+      // Only a draft theme configuration in the platform format is read here; the
+      // admin page's account, session and store data are never collected.
+      const descriptor = Object.getOwnPropertyDescriptor(window, 'themeConfig');
+      const config = descriptor && 'value' in descriptor ? descriptor.value as {theme?: unknown; sections?: unknown} : undefined;
+      if (!config || typeof config !== 'object' || !config.theme || typeof config.theme !== 'object' || !Array.isArray(config.sections)) return {ok: true, value: {}};
+      return {ok: true, value: {themeConfig: sanitizeRaw({themeConfig: config}, 'editor').raw.themeConfig}};
     }
     if (input.op === 'inventory') return {ok: true, value: await completeInventory(context)};
     if (!input.path) throw new Error('Arquivo não informado.');

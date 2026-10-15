@@ -11,17 +11,24 @@ export interface Snapshot {
   files: Files;
   assets?: Assets;
 }
-export interface FileHash {path: string; sha256: string; bytes: number; kind?: 'text' | 'image'}
+export type LineEnding = 'lf' | 'crlf' | 'cr' | 'mixed' | 'none';
+export interface FileHash {path: string; sha256: string; bytes: number; kind?: 'text' | 'image'; eol?: LineEnding; finalNewline?: boolean}
+// Version 3 adds tool/theme metadata, line-ending facts, skipped paths and the
+// preview link. Versions 1 and 2 remain readable.
 export interface Manifest {
   format: 'yampi-theme-sync';
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   context: Context;
   capturedAt: string;
   files: FileHash[];
+  tool?: {name: string; version: string};
+  theme?: {alias: string | null; id: string | number | null; name: string | null; state: 'draft' | 'published' | 'unknown'; source: string};
+  skipped?: {path: string; reason: string}[];
+  preview?: {manifest: string; format: number};
 }
-export type Status = 'update' | 'unchanged' | 'remote-only' | 'already-applied' | 'conflict' | 'missing-local' | 'missing-remote' | 'new-local' | 'unsupported';
-export interface PlanRow {path: string; status: Status; base?: string; local?: string; remote?: string; image?: {base?: Uint8Array; local?: Uint8Array; remote?: Uint8Array}}
-export interface Plan {context: Context; rows: PlanRow[]; createdAt: string}
+export type Status = 'update' | 'unchanged' | 'remote-only' | 'already-applied' | 'conflict' | 'missing-local' | 'missing-remote' | 'new-local' | 'unsupported' | 'blocked-dependency' | 'whitespace-only';
+export interface PlanRow {path: string; status: Status; base?: string; local?: string; remote?: string; image?: {base?: Uint8Array; local?: Uint8Array; remote?: Uint8Array}; whitespaceOnly?: boolean; blockedBy?: string[]; dependsOn?: string[]}
+export interface Plan {context: Context; rows: PlanRow[]; createdAt: string; warnings?: {path: string; message: string}[]}
 export interface Adapter {
   context(): Promise<Context>;
   inventory(): Promise<string[]>;
@@ -63,6 +70,17 @@ export function validatePaths(paths: string[]): void {
   }
 }
 export function writable(path: string): boolean {return /\.(twig|vue|css|scss)$/i.test(path)}
+export function lineEnding(text: string): {eol: LineEnding; finalNewline: boolean} {
+  const crlf = (text.match(/\r\n/g) || []).length, cr = (text.match(/\r(?!\n)/g) || []).length, lf = (text.match(/(?<!\r)\n/g) || []).length;
+  const kinds = [crlf && 'crlf', cr && 'cr', lf && 'lf'].filter(Boolean) as LineEnding[];
+  return {eol: kinds.length > 1 ? 'mixed' : kinds[0] || 'none', finalNewline: /[\r\n]$/.test(text)};
+}
+// Editors may reindent, trim trailing spaces or toggle the final newline. Such a
+// difference is shown separately and can be discarded before sending.
+export function sameIgnoringWhitespace(a: string, b: string): boolean {
+  const normalize = (text: string) => text.replace(/\r\n?/g, '\n').split('\n').map(line => line.trim()).filter(Boolean).join('\n');
+  return normalize(a) === normalize(b);
+}
 export function imagePath(path: string): boolean {return /^assets\/.*\.(png|jpe?g|webp|svg)$/i.test(path)}
 export function validateImage(path: string, bytes: Uint8Array): void {
   if (!imagePath(path) || !bytes.length || bytes.length > MAX_FILE_BYTES) throw new Error(`Imagem inválida ou grande demais: ${path}`);

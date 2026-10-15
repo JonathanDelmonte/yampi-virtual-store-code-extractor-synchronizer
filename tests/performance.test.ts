@@ -5,7 +5,7 @@ import {encodeSnapshot,decodeProject} from '../src/core/archive';
 import {unzipSync} from 'fflate';
 import {demoSnapshot,demoImage} from '../src/demo/sample';
 const bytes=(text:string)=>new TextEncoder().encode(text);
-const draft=(urls:string[]):PreviewDraft=>{const bundle=demonstration(demoSnapshot.context,'Fictício');bundle.issues=[];return {bundle,urls,documents:new Map()};};
+const draft=(urls:string[]):PreviewDraft=>{const bundle=demonstration(demoSnapshot.context,'Fictício');bundle.issues=[];return {bundle,resources:urls.map(url=>({url,priority:/.css$/.test(url)?1:4,category:/.css$/.test(url)?'css':'image',source:'html'})),api:[],documents:new Map(),themeAssets:[]};};
 describe('extração mais rápida com os mesmos limites e originais',()=>{
   test('recursos públicos têm no máximo quatro GETs simultâneos e mantêm ordem e hashes',async()=>{
     let active=0,peak=0;const urls=Array.from({length:9},(_,i)=>`https://cdn.invalid/${i}.svg`);
@@ -13,12 +13,12 @@ describe('extração mais rápida com os mesmos limites e originais',()=>{
     expect(peak).toBe(4);expect(result.resources.map(r=>r.url)).toEqual(urls);expect(result.issues).toEqual([]);await expect(previewEntries(result)).resolves.toBeDefined();
   });
   test('segunda autorização reutiliza bytes válidos sem perder URLs originais ou fontes do CSS',async()=>{
-    const css='https://cdn.invalid/a.css',font='https://font.invalid/a.woff2';const input=draft([css]);input.bundle.data={merchantData:{logo_url:'https://cdn.invalid/logo.svg'}};
+    const css='https://cdn.invalid/a.css',font='https://font.invalid/a.woff2';const input=draft([css]);input.bundle.pages=[{id:'page-0',kind:'home',sourceUrl:demoSnapshot.context.previewOrigin+'/',raw:{merchant:{logo_url:'https://cdn.invalid/logo.svg'}}}];
     const fetcher=vi.fn(async(url:string)=>({url,type:url===css?'text/css':'font/woff2',bytes:bytes(url===css?'@font-face{font-family:Demo;src:url('+font+')}':'wOF2-fictitious')}));
     const partial=await finishPreview(input,fetcher,['https://cdn.invalid']);expect(partial.issues.some(i=>i.code==='asset-unavailable')).toBe(true);
     const result=await finishPreview(input,fetcher,['https://cdn.invalid','https://font.invalid']);
-    expect(fetcher.mock.calls.map(([url])=>url)).toEqual([css,font]);expect(result.issues).toEqual([]);expect(result.styles).toHaveLength(1);
-    expect((input.bundle.data.merchantData as any).logo_url).toBe('https://cdn.invalid/logo.svg');expect(input.bundle.assets).toEqual({});
+    expect(fetcher.mock.calls.map(([url])=>url)).toEqual([css,font]);expect(result.issues).toEqual([]);expect(result.platform.fontSheets).toHaveLength(1);
+    expect((input.bundle.pages[0].raw.merchant as any).logo_url).toBe('https://cdn.invalid/logo.svg');expect(result.pages[0].raw).toEqual(input.bundle.pages[0].raw);expect(input.bundle.assets).toEqual({});
     const sheet=result.resources.find(r=>r.url===css)!,face=result.resources.find(r=>r.url===font)!;
     expect(new TextDecoder().decode(result.assets[sheet.path])).toContain('/preview/'+face.path);await expect(previewEntries(result)).resolves.toBeDefined();
     const denied=await finishPreview(input,fetcher,[]);expect(denied.resources).toEqual([]);expect(fetcher).toHaveBeenCalledTimes(2);

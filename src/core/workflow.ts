@@ -1,5 +1,5 @@
 import {assertContext, safeFiles, safeSnapshot, imagePath, writable, validatePaths, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Assets, type Adapter, type ReadAdapter, type Snapshot, type Progress, type Plan, type Journal} from './model';
-import {missingNewTexts} from './planner';
+import {missingNewTexts, selectionIssues} from './planner';
 type Hooks = {signal?: AbortSignal; progress?: (p: Progress) => void};
 function check(signal?: AbortSignal) {if (signal?.aborted) throw new Error('Cancelado. Os arquivos já salvos não foram desfeitos.');}
 export async function capture(adapter: ReadAdapter, hooks: Hooks = {}): Promise<Snapshot> {
@@ -49,6 +49,9 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
   });
   // Fill new files first, so the files that use them stop pointing to empty ones as early as possible.
   rows.sort((a, b) => Number(b.base === undefined) - Number(a.base === undefined));
+  // Files that use each other are sent together or not at all.
+  const partial = selectionIssues(plan, selected);
+  if (partial.length) throw new Error('Envio parcial bloqueado: ' + partial.map(p => `${p.path} precisa ir junto com ${p.requires}`).join('; ') + '. Selecione os arquivos juntos.');
   check(hooks.signal);
   assertContext(plan.context, await adapter.context());
   await adapter.refresh();
