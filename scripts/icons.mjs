@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import {iconSizes} from './distribution.mjs';
 // Resize the exact owner-provided logo locally; preserve its proportions and alpha.
 // sharp is a development dependency and is never shipped in the extension.
-const source = path.resolve(import.meta.dirname, '../assets/zirtuno-sync-logo.png');
+const source = path.resolve(import.meta.dirname, '../assets/zirtuno-sync-yampi-logo.png');
 export async function writeIcons(dist) {
   const directory=path.join(dist,'icons');await mkdir(directory,{recursive:true});
   for(const size of iconSizes) await sharp(source)

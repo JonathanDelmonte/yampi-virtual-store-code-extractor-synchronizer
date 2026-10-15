@@ -1,13 +1,13 @@
 {
-  "name": "zirtuno-sync",
-  "version": "0.3.5",
+  "name": "zirtuno-sync-yampi",
+  "version": "0.3.6",
   "author": {"name": "Zirtuno", "url": "https://www.instagram.com/zirtuno/"},
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=24"
   },
-  "description": "Zirtuno Sync: edição local e sincronização de código para Yampi",
+  "description": "Zirtuno Sync Yampi: edição local e sincronização do código da loja",
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/dev.mjs",

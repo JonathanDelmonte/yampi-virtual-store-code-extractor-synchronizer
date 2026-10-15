@@ -2,11 +2,11 @@
 
 ## Nomes aprovados
 
-Repositório, pacote npm e pasta de desenvolvimento: **zirtuno-sync**.
+Repositório, pacote npm e pasta de desenvolvimento: **zirtuno-sync-yampi**.
 
-Nome de exibição no Chrome e no painel: **Zirtuno Sync**. Autoria: **Zirtuno**. Descrição: **Edição local e sincronização de código para Yampi.**
+Nome de exibição no Chrome e no painel: **Zirtuno Sync Yampi**. Autoria: **Zirtuno**. Descrição: **Edição local e sincronização do código da sua loja Yampi.**
 
-Zirtuno identifica o desenvolvedor da ferramenta; Sync descreve a cópia do código para edição local e a sincronização dos textos escolhidos com o editor Yampi. A descrição informa a plataforma compatível. O nome curto cabe no cabeçalho da extensão. Os identificadores internos de arquivos, backups e histórico são preservados para aceitar exportações anteriores.
+Zirtuno identifica o desenvolvedor da ferramenta; Sync descreve a cópia do código para edição local e a sincronização dos textos escolhidos; Yampi identifica a plataforma compatível. O nome cabe no cabeçalho da extensão. Os identificadores internos de arquivos, backups e histórico são preservados para aceitar exportações anteriores.
 
 A versão 0.3.3 usa a logo Y/código fornecida pelo proprietário, redimensionada com proporções e transparência preservadas. A pequena assinatura Zirtuno continua no cabeçalho. O Chrome controla a composição e o espaço entre descrição e ID na sua página de extensões; a descrição foi reduzida para uma frase curta, sem HTML ou artifícios de quebra de linha.
 

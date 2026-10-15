@@ -1,5 +1,11 @@
 # Validação
 
+## Nome aprovado e distribuição na 0.3.6
+
+Execução em 15/10/2026, Windows, Node.js 24.19.0. O nome aprovado é **Zirtuno Sync Yampi**, e o repositório/pacote usa **zirtuno-sync-yampi**. `npm run package` passou, incluindo TypeScript, 145 testes em dez arquivos e build. O ZIP `zirtuno-sync-yampi-0.3.6.zip` contém 17 arquivos permitidos e teve seu SHA-256 conferido.
+
+O pacote foi carregado em Chromium temporário e informou o nome aprovado, versão **0.3.6** e a página `https://github.com/ZIRTUNO/zirtuno-sync-yampi`. O painel fictício e a orientação foram conferidos em 280, 360 e 800 pixels, sem transbordamento, sobreposição entre nome e versão ou erros JavaScript; as capturas foram inspecionadas visualmente. Permissões, CSP, formatos de exportação e identificadores de armazenamento permanecem iguais. Nenhuma loja real foi acessada ou alterada.
+
 ## Identidade e distribuição na 0.3.5
 
 Execução em 15/10/2026, Windows, Node.js 24.19.0. `npm ci` e `npm run package` passaram; este último executou `npm run check`, com TypeScript, 145 testes em dez arquivos e build da extensão. O ZIP `zirtuno-sync-0.3.5.zip` contém 17 arquivos permitidos, e seu SHA-256 foi conferido.
@@ -85,7 +91,7 @@ Os testes de navegador usam Chromium instalado pelo Playwright. Portas de teste 
 
 ## Nova exportação e projetos existentes
 
-Recarregue a extensão 0.3.5 na mesma pasta instalada, feche o painel antigo e recarregue o editor sem rascunhos pendentes. Confira a loja e confirme a cópia com captura visual habilitada. Autorize somente as origens apresentadas; se negar, a extensão indica a prévia parcial/demonstrativa. Extraia em uma pasta nova e execute os quatro comandos de integridade, compilação, prévia e retorno descritos no README.
+Recarregue a extensão 0.3.6 na mesma pasta instalada, feche o painel antigo e recarregue o editor sem rascunhos pendentes. Confira a loja e confirme a cópia com captura visual habilitada. Autorize somente as origens apresentadas; se negar, a extensão indica a prévia parcial/demonstrativa. Extraia em uma pasta nova e execute os quatro comandos de integridade, compilação, prévia e retorno descritos no README.
 
 Para trocar apenas ferramentas antigas, use `node scripts/update-project.mjs "C:/projeto"` e depois `--apply`. Dry-run não escreve. Ferramentas modificadas pelo usuário e dependências diferentes são recusadas antes da gravação; scripts personalizados, dados, configuração, tema, baseline e manifesto são preservados. Backup/journal precedem a atualização, com rechecagem contra edições concorrentes. Uma atualização não inventa contexto ausente: uma nova captura separada é necessária para isso.
 
