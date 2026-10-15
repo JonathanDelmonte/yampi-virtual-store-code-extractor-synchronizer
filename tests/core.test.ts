@@ -1,6 +1,6 @@
 import {describe, test, expect} from 'vitest';
 import {zipSync, strToU8} from 'fflate';
-import {makePlan} from '../src/core/planner';
+import {makePlan, missingNewTexts} from '../src/core/planner';
 import {capture, applyPlan} from '../src/core/workflow';
 import {encodeSnapshot, decodeProject} from '../src/core/archive';
 import {safeFiles, validatePath, validatePaths, type Context, type Snapshot, type Files, type Adapter, type Journal, type Plan} from '../src/core/model';
@@ -22,6 +22,21 @@ describe('comparação entre três versões', () => {
     const a = 'elements/head.twig', b = 'elements/header/head.twig';
     const plan = makePlan(snapshot({[a]: 'a', [b]: 'b'}), {[a]: 'novo', [b]: 'b'}, snapshot({[a]: 'a', [b]: 'b'}));
     expect(plan.rows.find(r => r.path === a)?.status).toBe('update'); expect(plan.rows.find(r => r.path === b)?.status).toBe('unchanged');
+  });
+  test.each([
+    ['', 'update'], [' \n\t', 'update'], ['novo', 'already-applied'], ['criado com outro conteúdo', 'conflict']
+  ])('arquivo novo criado à mão com %j → %s', (remote, expected) => {
+    expect(makePlan(snapshot({}), {[file]: 'novo'}, snapshot({[file]: remote})).rows[0].status).toBe(expected);
+  });
+  test('arquivo novo vazio de tipo sem suporte não é preenchido', () => {
+    expect(makePlan(snapshot({}), {'assets/images/novo.md': 'texto'}, snapshot({'assets/images/novo.md': ''})).rows[0].status).toBe('unsupported');
+  });
+  test('imagem nova enviada à mão é conferida pelos bytes e só textos novos ausentes bloqueiam', () => {
+    const png = (last: number) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, last]);
+    const image = 'assets/images/hero/capa.png', status = (remote?: Uint8Array) => makePlan(snapshot({}), {}, {...snapshot({}), ...(remote ? {assets: {[image]: remote}} : {})}, {[image]: png(1)}).rows[0].status;
+    expect([status(), status(png(1)), status(png(2))]).toEqual(['new-local', 'already-applied', 'conflict']);
+    const plan = makePlan(snapshot({}), {[file]: 'novo'}, snapshot({}), {[image]: png(1)});
+    expect(missingNewTexts(plan)).toEqual([file]);
   });
 });
 describe('caminhos e arquivos inseguros', () => {
@@ -138,6 +153,27 @@ describe('envio com preflight, backup e conferência', () => {
   test('verificação após reload detecta save que não persistiu', async () => {
     const adapter = new FakeAdapter({[file]: 'a'}); adapter.refreshHook = () => {adapter.files[file] = 'a';};
     await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b'}), [file], hooks())).rejects.toThrow('não persistiu');
+  });
+  test('save recusado pelo servidor para antes do próximo arquivo', async () => {
+    // The editor buffer shows the new text, but the platform still has the old one after reload.
+    const other = 'templates/product.twig', adapter = new FakeAdapter({[file]: 'a', [other]: 'a'}), h = hooks();
+    adapter.refreshHook = () => {if (adapter.writes.includes(file)) adapter.files[file] = 'a';};
+    await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b', [other]: 'b'}), [file, other], h)).rejects.toThrow(`não persistiu após recarregar: ${file}`);
+    expect(adapter.writes).toEqual([file]); expect(adapter.files[other]).toBe('a');
+    expect(h.journals.at(-1)).toMatchObject({status: 'stopped', pending: file, verified: []});
+  });
+  test('texto novo ausente na loja bloqueia todo envio, antes de qualquer registro', async () => {
+    const adapter = new FakeAdapter({[file]: 'a'}), h = hooks();
+    const plan = makePlan(snapshot({[file]: 'a'}), {[file]: 'b', 'elements/novo.twig': 'novo'}, snapshot({[file]: 'a'}));
+    await expect(applyPlan(adapter, plan, [file], h)).rejects.toThrow('Crie vazios no editor da Yampi');
+    expect(adapter.writes).toEqual([]); expect(adapter.refreshed).toBe(false); expect(h.events).toEqual([]);
+  });
+  test('arquivo novo criado vazio à mão é preenchido antes dos arquivos que dependem dele', async () => {
+    const created = 'elements/novo.twig', adapter = new FakeAdapter({[file]: 'a', [created]: ''}), h = hooks();
+    const plan = makePlan(snapshot({[file]: 'a'}), {[file]: "{% include 'elements/novo.twig' %}", [created]: 'novo'}, snapshot(adapter.files));
+    const result = await applyPlan(adapter, plan, [file, created], h);
+    expect(adapter.writes).toEqual([created, file]); expect(result.status).toBe('completed');
+    expect(adapter.files[created]).toBe('novo'); expect(result.before[created]).toBe('');
   });
   test('conflitos e caminhos duplicados não podem ser enviados', async () => {
     const adapter = new FakeAdapter({[file]: 'a'});

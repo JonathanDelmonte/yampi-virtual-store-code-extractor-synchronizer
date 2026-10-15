@@ -2,9 +2,9 @@
 
 Extensão independente para copiar o código do editor Yampi, trabalhar no computador e devolver os textos escolhidos com comparação e backup. O repositório público contém somente a ferramenta e exemplos fictícios; projetos e dados de lojas ficam fora dele.
 
-## Versão 0.3.6
+## Versão 0.3.7
 
-**Edição local e sincronização do código da sua loja Yampi.** A versão 0.3.6 adota o nome Zirtuno Sync Yampi no Chrome, no painel, no repositório e no instalador. Exportações e backups anteriores continuam usando os mesmos formatos e identificadores internos. Esta versão mantém as melhorias de desempenho da 0.3.4 descritas abaixo.
+**Edição local e sincronização do código da sua loja Yampi.** A versão 0.3.7 confere cada arquivo na Yampi, depois de recarregar o editor, antes de enviar o próximo. Ela também reconhece arquivos novos criados vazios à mão no editor da Yampi: a extensão preenche o conteúdo e bloqueia o envio enquanto faltar algum texto novo na loja. O nome Zirtuno Sync Yampi, adotado na 0.3.6, e as melhorias de desempenho da 0.3.4 descritas abaixo continuam valendo. Exportações e backups anteriores continuam usando os mesmos formatos e identificadores internos.
 
 A cópia usa uma única chamada ao adaptador por comando após a conexão. Imagens, fontes e estilos públicos são baixados em até quatro requisições simultâneas, com reaproveitamento das respostas válidas dentro da mesma exportação quando outra origem exige autorização. A compactação ocorre em um worker local, mantendo o painel responsivo. PNG/JPEG/WebP/WOFF2 preservam seus bytes no ZIP, sem uma segunda compressão desnecessária. A navegação pelos arquivos do editor permanece sequencial, com as mesmas verificações de estabilidade e integridade. [Auditoria e medições reproduzíveis](docs/AUDITORIA.md).
 
@@ -74,11 +74,15 @@ Execute `npm run pack` e importe `retorno-yampi.zip` em **Enviar alterações**,
 | Mudou só na loja | Preserva a loja |
 | Ambos mudaram de formas diferentes | Bloqueia conflito |
 | Arquivo ausente localmente | Não exclui |
-| Arquivo novo ou imagem alterada | Bloqueia envio |
+| Texto novo ainda ausente na loja | Bloqueia todo o envio até ser criado vazio na Yampi |
+| Texto novo criado vazio na Yampi | Pode ser selecionado: a extensão preenche |
+| Imagem nova ou alterada | Não é enviada; envie pelo editor da Yampi |
 
-Após revisar, digite o nome para confirmar o destino. Backup persistido/baixado precede a gravação; cada texto é relido antes de salvar e conferido após reload. A operação para no primeiro erro e mantém o registro parcial. **Comparar para restaurar** protege alterações posteriores. Não há sobrescrita forçada nem publicação automática.
+Após revisar, digite o nome para confirmar o destino. Backup persistido/baixado precede a gravação. Cada texto é relido antes de salvar e, depois de salvar, conferido na Yampi após recarregar o editor, antes do próximo; arquivos novos são preenchidos primeiro. A operação para no primeiro erro e mantém o registro parcial. **Comparar para restaurar** protege alterações posteriores. Não há sobrescrita forçada nem publicação automática. Regras completas: [SPEC.md](docs/SPEC.md).
 
-Sem transação atômica do servidor, uma edição externa entre ler e salvar ainda pode ocorrer. Não edite simultaneamente nem troque loja/tema durante o envio. Imagens alteradas, criação, renomeação e exclusão permanecem bloqueadas. Confira na Yampi antes de publicar manualmente. Gravações reais exigem ambiente/arquivo de teste expressamente escolhido pelo proprietário.
+A extensão não cria arquivos nem pastas. Um texto novo é criado vazio, à mão, no editor da Yampi, na pasta do caminho indicado; depois, compare novamente. Se a Yampi preencher o arquivo novo com um modelo, ele aparece como conflito: apague o conteúdo na Yampi, salve e compare de novo (só espaços também contam como vazio). Imagens novas também são enviadas à mão. Ainda não foi validado numa loja real se `assets/images` aceita subpastas, qual endereço `assets_url` gera para elas e se a extensão consegue ler imagens enviadas (CORS). Se não conseguir, a comparação seguinte para com erro, sem gravar nada; por isso, envie as imagens novas depois dos textos.
+
+Sem transação atômica do servidor, uma edição externa entre ler e salvar ainda pode ocorrer. Não edite simultaneamente nem troque loja/tema durante o envio. Salvar muda só a prévia da Yampi; confira em **Ver prévia** antes de publicar manualmente. Imagens alteradas, criação, renomeação e exclusão permanecem bloqueadas. Gravações reais exigem ambiente/arquivo de teste expressamente escolhido pelo proprietário.
 
 ## Atualizar projetos antigos
 
@@ -105,7 +109,7 @@ npm run audit:performance
 npm run package
 ```
 
-`npm run dev` oferece a demonstração fictícia em `http://127.0.0.1:5181/demo.html?demo=1`. O pacote contém 17 arquivos permitidos e sai temporariamente em `.cache/package/zirtuno-sync-yampi-0.3.6.zip`, com SHA-256. Esses dois arquivos podem ser removidos depois de confirmar o upload em Releases; a geração não acumula instaladores em `releases/`. Ícones são redimensionados localmente a partir da logo autorizada, preservando proporções e transparência. Sharp é uma dependência de desenvolvimento e não integra o pacote da extensão. A assinatura exibida em 18 px usa uma versão de 72×72 px gerada de `assets/zirtuno-logo-source.png`; a imagem original permanece somente no código de desenvolvimento. Chrome/Edge com `sidePanel` são necessários; outros navegadores não foram validados. O painel global fica desativado e cada aba exige clique no ícone. Vue 2 é usado por compatibilidade, fora de manutenção; use projetos confiáveis e mantenha o servidor em localhost.
+`npm run dev` oferece a demonstração fictícia em `http://127.0.0.1:5181/demo.html?demo=1`. O pacote contém 17 arquivos permitidos e sai temporariamente em `.cache/package/zirtuno-sync-yampi-0.3.7.zip`, com SHA-256. Esses dois arquivos podem ser removidos depois de confirmar o upload em Releases; a geração não acumula instaladores em `releases/`. Ícones são redimensionados localmente a partir da logo autorizada, preservando proporções e transparência. Sharp é uma dependência de desenvolvimento e não integra o pacote da extensão. A assinatura exibida em 18 px usa uma versão de 72×72 px gerada de `assets/zirtuno-logo-source.png`; a imagem original permanece somente no código de desenvolvimento. Chrome/Edge com `sidePanel` são necessários; outros navegadores não foram validados. O painel global fica desativado e cada aba exige clique no ícone. Vue 2 é usado por compatibilidade, fora de manutenção; use projetos confiáveis e mantenha o servidor em localhost.
 
 Testes cobrem leitura integral, escrita somente fictícia, backup, conflitos, restauração, parser, privacidade e isolamento. Duas lojas fictícias, escura/clara, têm identidade, fontes, cores, produtos e rotas distintas. ZIPs são movidos e executados com acesso à loja bloqueado. Capturas independentes de referência são comparadas com a mesma home/estado/viewport após fontes/imagens carregarem. [Resultados e evidências](docs/VALIDACAO.md).
 

@@ -1,5 +1,17 @@
 # Validação
 
+## Envio conferido arquivo a arquivo na 0.3.7
+
+Execução em 15/10/2026, Windows, Node.js 26.2.0; o alvo do projeto continua Node 24 e `engines` aceita a partir dele. `npm ci` e `npm run check` passaram: TypeScript, 154 testes em dez arquivos e build. `npm run test:e2e` passou no painel lateral nativo com o editor fictício.
+
+Casos novos: uma gravação que o editor mostra mas o servidor não persistiu interrompe o envio antes do arquivo seguinte; o mesmo teste falha no código da 0.3.6, que gravava o segundo arquivo. Um texto novo ausente na loja bloqueia o envio antes de qualquer registro, recarregamento ou gravação. Um arquivo novo criado vazio à mão é preenchido antes dos arquivos que dependem dele, e o backup guarda o conteúdo vazio. Criado com conteúdo igual, fica "Já está na loja"; com outro conteúdo, fica em conflito. Uma imagem nova enviada à mão é conferida pelos bytes e não bloqueia os textos.
+
+O e2e simula a criação manual. Com um texto novo local, o envio fica bloqueado mesmo com a loja confirmada. Depois que o arquivo vazio é criado no editor fictício, a nova comparação mostra dois arquivos prontos; o envio preenche o novo, altera o existente e confere ambos após recarregar, e a restauração prepara os dois. Publicações e acionamentos de criar, excluir ou renomear continuam em zero.
+
+Uma exportação real de redesign, privada e fora deste repositório, foi usada somente para leitura, com uma loja simulada em memória. O pacote de retorno gerado pelas ferramentas 0.2.4 do projeto foi aceito pelo importador. Com a loja igual à exportação, o envio foi recusado sem gravar. Com os textos novos vazios na loja, o envio terminou com os arquivos novos primeiro e o conteúdo final idêntico ao projeto local. Nenhuma requisição alcançou a Yampi e não houve gravação real.
+
+`npm run test:preview`, `npm run test:compression` e `npm run audit:performance` não foram repetidos: prévia, compactação e captura não mudaram, exceto a versão registrada nos pacotes de prévia.
+
 ## Nome aprovado e distribuição na 0.3.6
 
 Execução em 15/10/2026, Windows, Node.js 24.19.0. O nome aprovado é **Zirtuno Sync Yampi**, e o repositório/pacote usa **zirtuno-sync-yampi**. `npm run package` passou, incluindo TypeScript, 145 testes em dez arquivos e build. O ZIP `zirtuno-sync-yampi-0.3.6.zip` contém 17 arquivos permitidos e teve seu SHA-256 conferido.
@@ -91,7 +103,7 @@ Os testes de navegador usam Chromium instalado pelo Playwright. Portas de teste 
 
 ## Nova exportação e projetos existentes
 
-Recarregue a extensão 0.3.6 na mesma pasta instalada, feche o painel antigo e recarregue o editor sem rascunhos pendentes. Confira a loja e confirme a cópia com captura visual habilitada. Autorize somente as origens apresentadas; se negar, a extensão indica a prévia parcial/demonstrativa. Extraia em uma pasta nova e execute os quatro comandos de integridade, compilação, prévia e retorno descritos no README.
+Recarregue a extensão 0.3.7 na mesma pasta instalada, feche o painel antigo e recarregue o editor sem rascunhos pendentes. Confira a loja e confirme a cópia com captura visual habilitada. Autorize somente as origens apresentadas; se negar, a extensão indica a prévia parcial/demonstrativa. Extraia em uma pasta nova e execute os quatro comandos de integridade, compilação, prévia e retorno descritos no README.
 
 Para trocar apenas ferramentas antigas, use `node scripts/update-project.mjs "C:/projeto"` e depois `--apply`. Dry-run não escreve. Ferramentas modificadas pelo usuário e dependências diferentes são recusadas antes da gravação; scripts personalizados, dados, configuração, tema, baseline e manifesto são preservados. Backup/journal precedem a atualização, com rechecagem contra edições concorrentes. Uma atualização não inventa contexto ausente: uma nova captura separada é necessária para isso.
 

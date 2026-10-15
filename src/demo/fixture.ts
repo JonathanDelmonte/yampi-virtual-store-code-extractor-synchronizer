@@ -54,6 +54,8 @@ function open(path: string, li: HTMLElement) {
 }
 // Assertions use counters independently of persisted file contents, to catch edit-and-undo attempts.
 Object.assign(window, {fictitiousUnchanged: () => !saves && !textChanges && sessionStorage.getItem('fixture-files') === initialFiles});
+// Test only: the owner creates an empty file by hand in the Yampi editor. Reload the page to show it in the tree.
+Object.assign(window, {fictitiousCreateEmpty: (path: string) => {if (path in files) throw new Error('Arquivo fictício já existe.'); files[path] = ''; store();}});
 function folder(parent: HTMLElement, name: string): HTMLElement {
   const holder = document.createElement('div'); holder.className = 'collapse-list';
   const title = document.createElement('div'); title.className = 'folder-title';

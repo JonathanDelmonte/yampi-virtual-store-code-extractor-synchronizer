@@ -1,6 +1,6 @@
 # Instalação local
 
-1. Extraia `zirtuno-sync-yampi-0.3.6.zip` em uma pasta fixa. Não carregue o ZIP diretamente. Depois de extrair, pode apagar o ZIP e seu arquivo SHA-256; mantenha a pasta carregada no Chrome.
+1. Extraia `zirtuno-sync-yampi-0.3.7.zip` em uma pasta fixa. Não carregue o ZIP diretamente. Depois de extrair, pode apagar o ZIP e seu arquivo SHA-256; mantenha a pasta carregada no Chrome.
 2. Abra a página de extensões do Chrome (`chrome://extensions`) ou Edge (`edge://extensions`). O painel lateral depende da API `sidePanel`, disponível no Chrome 120 ou posterior. Outros navegadores não foram validados.
 3. Ative o modo de desenvolvedor e escolha **Carregar sem compactação** / **Load unpacked**.
 4. Selecione a pasta que contém `manifest.json`. Mantenha os demais arquivos e as pastas `icons/` e `brand/` juntos.

@@ -5,7 +5,7 @@ import {PanelConnection} from './browser/panel-connection';
 import {zipInWorker} from './browser/zip-client';
 import {capture, applyPlan} from './core/workflow';
 import {encodeSnapshot, decodeProject, readProjectDirectory} from './core/archive';
-import {makePlan} from './core/planner';
+import {makePlan, missingNewTexts} from './core/planner';
 import {assertContext, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Context, type Assets, type Snapshot, type Files, type Plan, type PlanRow, type Journal, type Progress} from './core/model';
 import {put, get, clearLocal, saveJournal, journalHistory, contextKey} from './storage';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -73,7 +73,7 @@ if (isDemo) $('demo-local').addEventListener('click', () => {
   sample['assets/styles/global/main.scss'] += 'body { background: white; }\n';
   sample['assets/images/readme.md'] += 'Mudança não suportada\n';
   sample['templates/new.twig'] = '<p>Novo</p>\n';
-  setLocal(sample, baseline.assets); controls(); status('Alterações fictícias carregadas', 'Amostra com alterações de código, um arquivo novo e um tipo sem suporte.');
+  setLocal(sample, baseline.assets); controls(); status('Alterações fictícias carregadas', 'Amostra com alterações de código, um arquivo novo que bloqueia o envio até existir na loja e um tipo sem suporte.');
 });
 function status(text: string, detail = '', error = false): void {
   $('status').textContent = text; $('detail').textContent = detail;
@@ -87,12 +87,13 @@ function progress(p: Progress): void {
 function controls(): void {
   $('export').toggleAttribute('disabled', working || !connected || !!pendingPreview);
   $('export').title = working ? 'Aguarde a operação atual terminar.' : !connected ? 'Abra o Editor de código da Yampi e conecte a extensão.' : pendingPreview ? 'Finalize ou descarte a captura visual em preparação.' : 'Ler os arquivos da loja e baixar uma cópia em ZIP.';
+  const missing = plan ? missingNewTexts(plan).length : 0;
   $('include-preview').toggleAttribute('disabled',working);
   $('preview-pending').hidden=!pendingPreview;
   for(const id of ['preview-allow','preview-partial','preview-discard'])$(id).toggleAttribute('disabled',working||!pendingPreview);
   $('compare').toggleAttribute('disabled', working || !connected || !baseline || !local);
-  $('apply').toggleAttribute('disabled', working || !connected || !plan || !selected.size || $<HTMLInputElement>('confirm-store').value !== plan.context.storeName);
-  $('apply').title = working ? 'Aguarde a operação atual terminar.' : !connected ? 'Conecte ao Editor de código da Yampi.' : !plan || !selected.size ? 'Compare o projeto e selecione arquivos compatíveis para envio.' : $<HTMLInputElement>('confirm-store').value !== plan.context.storeName ? 'Digite o nome da loja de destino para confirmar.' : 'Salvar os arquivos selecionados com backup e conferência após recarregar.';
+  $('apply').toggleAttribute('disabled', working || !connected || !plan || !selected.size || !!missing || $<HTMLInputElement>('confirm-store').value !== plan.context.storeName);
+  $('apply').title = working ? 'Aguarde a operação atual terminar.' : !connected ? 'Conecte ao Editor de código da Yampi.' : !plan || !selected.size ? 'Compare o projeto e selecione arquivos compatíveis para envio.' : missing ? `Crie vazios no editor da Yampi os arquivos novos marcados (${missing}) e compare novamente.` : $<HTMLInputElement>('confirm-store').value !== plan.context.storeName ? 'Digite o nome da loja de destino para confirmar.' : 'Salvar os arquivos selecionados com backup e conferência após recarregar.';
   for (const id of ['baseline', 'folder', 'confirm-store', 'clear', 'filter', 'demo-local', 'history', 'download-journal', 'retry', 'mode-export', 'mode-import', 'go-import']) $(id).toggleAttribute('disabled', working);
   $('retry').hidden = connected || !editorTab && !isDemo;
   $('restore').toggleAttribute('disabled', working || !connected || !journal);
@@ -151,8 +152,9 @@ function setLocal(files: Files, assets: Assets = {}): void {
   $('local-info').textContent = `${Object.keys(files).length} textos e ${images} ${images === 1 ? 'imagem' : 'imagens'} carregados do computador.`;
 }
 const labels: Record<PlanRow['status'], string> = {
-  update: 'Pronto para envio', unchanged: 'Sem alterações', 'remote-only': 'Mudou apenas na loja', 'already-applied': 'Já está na loja', conflict: 'Conflito', 'missing-local': 'Ausente localmente · preservado', 'missing-remote': 'Removido na loja · bloqueado', 'new-local': 'Novo arquivo · bloqueado', unsupported: 'Tipo sem suporte · bloqueado'
+  update: 'Pronto para envio', unchanged: 'Sem alterações', 'remote-only': 'Mudou apenas na loja', 'already-applied': 'Já está na loja', conflict: 'Conflito', 'missing-local': 'Ausente localmente · preservado', 'missing-remote': 'Removido na loja · bloqueado', 'new-local': 'Novo · crie vazio na Yampi', unsupported: 'Tipo sem suporte · bloqueado'
 };
+const label = (row: PlanRow) => row.status === 'new-local' && row.image ? 'Imagem nova · envie pela Yampi' : row.status === 'update' && row.base === undefined ? 'Novo · pronto para preencher' : labels[row.status];
 function showDiff(row: PlanRow, pointerClick: boolean): void {
   $('diff-title').textContent = row.path;
   for (const [kind, id] of [['base', 'diff-base'], ['local', 'diff-local'], ['remote', 'diff-remote']] as const) {
@@ -169,7 +171,8 @@ function renderPlan(): void {
   const filter = $<HTMLSelectElement>('filter').value;
   $('rows').replaceChildren();
   const counts = plan.rows.reduce((map, row) => {map[row.status] = (map[row.status] || 0) + 1; return map;}, {} as Record<string, number>);
-  $('summary').textContent = `${selected.size} selecionados · ${counts.update || 0} prontos · ${counts.conflict || 0} conflitos · ${plan.rows.length} caminhos comparados`;
+  const missing = missingNewTexts(plan).length;
+  $('summary').textContent = `${selected.size} selecionados · ${counts.update || 0} prontos · ${counts.conflict || 0} conflitos${missing ? ` · ${missing} para criar na Yampi` : ''} · ${plan.rows.length} caminhos comparados`;
   for (const row of plan.rows) {
     if (filter === 'changes' && ['unchanged', 'already-applied', 'missing-local'].includes(row.status)) continue;
     if (filter === 'update' && row.status !== 'update' || filter === 'conflict' && row.status !== 'conflict') continue;
@@ -180,7 +183,7 @@ function renderPlan(): void {
     checkbox.addEventListener('change', () => {checkbox.checked ? selected.add(row.path) : selected.delete(row.path); renderPlan(); controls();});
     td.append(checkbox);
     const pathCell = document.createElement('td'); pathCell.className = 'path'; pathCell.textContent = row.path;
-    const result = document.createElement('td'), label = document.createElement('span'); label.className = `row-status ${row.status}`; label.textContent = labels[row.status]; result.append(label);
+    const result = document.createElement('td'), badge = document.createElement('span'); badge.className = `row-status ${row.status}`; badge.textContent = label(row); result.append(badge);
     const action = document.createElement('td'), button = document.createElement('button'); button.textContent = 'Ver versões'; button.addEventListener('click', event => showDiff(row, event.detail > 0)); action.append(button);
     tr.append(td, pathCell, result, action); $('rows').append(tr);
   }
@@ -196,7 +199,8 @@ async function compare(): Promise<void> {
   plan = makePlan(baseline, local, remote, localAssets);
   selected.clear(); plan.rows.filter(r => r.status === 'update').forEach(r => selected.add(r.path));
   $<HTMLInputElement>('confirm-store').value = '';
-  renderPlan(); status('Comparação concluída', selected.size ? `${selected.size} ${selected.size === 1 ? 'arquivo pode ser enviado' : 'arquivos podem ser enviados'}. Revise as versões e confirme a loja.` : 'Nenhuma alteração pode ser enviada. Confira os resultados da comparação abaixo.');
+  const missing = missingNewTexts(plan).length;
+  renderPlan(); status('Comparação concluída', missing ? `Crie vazios no editor da Yampi ${missing === 1 ? 'o arquivo novo marcado' : `os ${missing} arquivos novos marcados`}, na mesma pasta, e compare novamente. O envio fica bloqueado até lá.` : selected.size ? `${selected.size} ${selected.size === 1 ? 'arquivo pode ser enviado' : 'arquivos podem ser enviados'}. Revise as versões e confirme a loja.` : 'Nenhuma alteração pode ser enviada. Confira os resultados da comparação abaixo.');
 }
 function journalInfo(): void {
   $('journal-info').textContent = journal ? `${journal.verified.length}/${journal.selected.length} arquivos conferidos · ${journal.status === 'completed' ? 'concluído' : 'envio interrompido ou pendente'} · ${new Date(journal.startedAt).toLocaleString('pt-BR')}` : 'Nenhum envio nesta instalação.';

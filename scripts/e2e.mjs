@@ -162,7 +162,7 @@ try {
   assert.deepEqual(await preview.evaluate(() => window.__yampiLocalMessages || []), []);
   console.log('E2E: Vue interativo e PNG local conferidos.');
   await writeFile(path.join(project, 'tema/elements/head.twig'), '<meta name="description" content="Editado localmente">\n');
-  await writeFile(path.join(project, 'tema/templates/new.twig'), '<p>Arquivo novo bloqueado</p>\n');
+  await writeFile(path.join(project, 'tema/templates/new.twig'), '<p>Arquivo novo preenchido pela extensão</p>\n');
   await command(process.execPath, [path.join(project, '.yampi-sync/tools/pack.mjs')], project);
   const folderImport = path.join(temporary, 'folder-import');
   await mkdir(folderImport);
@@ -178,23 +178,36 @@ try {
   await panel.locator('#baseline').setInputFiles(path.join(project, 'retorno-yampi.zip'));
   await panel.waitForFunction(() => !document.querySelector('#baseline').disabled);
   await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Comparação concluída');
-  assert.match(await panel.locator('#summary').textContent(), /1 prontos/);
-  assert.match(await panel.locator('#rows').textContent(), /Novo arquivo · bloqueado/);
+  assert.match(await panel.locator('#summary').textContent(), /1 prontos · 0 conflitos · 1 para criar na Yampi/);
+  assert.match(await panel.locator('#rows').textContent(), /Novo · crie vazio na Yampi/);
   assert.equal(await panel.evaluate(() => document.querySelector('#send-section').hidden), false);
   assert.equal(await panel.evaluate(() => document.querySelector('#apply').disabled), true);
   await panel.screenshot({path: path.join(repository, '.cache/panel-import-e2e.png')});
+  // A new text missing from the store blocks every send, even with the store confirmed.
+  await panel.locator('#confirm-store').fill('Loja de testes');
+  assert.equal(await panel.evaluate(() => document.querySelector('#apply').disabled), true);
+  assert.match(await panel.evaluate(() => document.querySelector('#apply').title), /Crie vazios no editor da Yampi/);
+  // The owner creates it empty by hand in the editor; the extension only fills existing files.
+  await editor.evaluate(() => window.fictitiousCreateEmpty('templates/new.twig'));
+  await editor.reload(); await editor.waitForFunction(() => document.querySelector('yampi-code-editor')?.shadowRoot?.querySelector('aside .file-name'));
+  await panel.locator('#compare').click();
+  await panel.waitForFunction(() => /2 prontos · 0 conflitos · \d+ caminhos/.test(document.querySelector('#summary').textContent) && !document.querySelector('#compare').disabled);
+  assert.equal(await panel.locator('#status').textContent(), 'Comparação concluída');
+  assert.match(await panel.locator('#rows').textContent(), /Novo · pronto para preencher/);
   await panel.locator('#confirm-store').fill('Loja de testes');
   const backup = driver.waitDownload(); await panel.locator('#apply').click(); await (await backup).saveAs(path.join(temporary, 'backup.zip'));
   await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Arquivos salvos e conferidos após recarregar');
-  console.log('E2E: envio, backup e reload conferidos.');
+  console.log('E2E: arquivo novo criado vazio à mão e preenchido; envio, backup e reload conferidos arquivo a arquivo.');
   assert.match(await editor.locator('#test-info').textContent(), /Publicações: 0/);
-  assert.equal(await editor.evaluate(() => JSON.parse(sessionStorage.getItem('fixture-files'))['elements/head.twig']), '<meta name="description" content="Editado localmente">\n');
+  const sent = await editor.evaluate(() => JSON.parse(sessionStorage.getItem('fixture-files')));
+  assert.equal(sent['elements/head.twig'], '<meta name="description" content="Editado localmente">\n');
+  assert.equal(sent['templates/new.twig'], '<p>Arquivo novo preenchido pela extensão</p>\n');
   await panel.reload(); await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Editor conectado');
   assert.equal(await worker.evaluate(async () => Object.values(await chrome.storage.session.get(null))[0].access), undefined);
-  assert.match(await panel.locator('#journal-info').textContent(), /1\/1/);
+  assert.match(await panel.locator('#journal-info').textContent(), /2\/2/);
   await panel.evaluate(() => document.querySelector('.recovery').open = true);
   await panel.locator('#restore').click(); await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Restauração preparada para revisão');
-  assert.match(await panel.locator('#summary').textContent(), /1 prontos/);
+  assert.match(await panel.locator('#summary').textContent(), /2 prontos/);
   // A remote edit after the send must be protected during restore.
   await editor.locator('#remote-file').selectOption('elements/head.twig'); await editor.locator('#external-change').click();
   await panel.locator('#restore').click(); await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Restauração preparada para revisão');

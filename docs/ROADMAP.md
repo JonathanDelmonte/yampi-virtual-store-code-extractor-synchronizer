@@ -1,5 +1,7 @@
 # Próximas etapas
 
+**Estado em 15/10/2026:** versão 0.3.7, validada somente com o editor fictício; nenhuma gravação real foi feita. Próxima etapa: validação controlada do envio real, com loja e arquivo de teste escolhidos pelo proprietário. Histórico em [JOURNAL.md](JOURNAL.md).
+
 ## Validação controlada do adaptador real
 
 1. Instalar a versão local e validar `activeTab`, isolamento de painel/worker e permissões no navegador utilizado.
@@ -9,7 +11,7 @@
 
 ## Arquivos novos e imagens do tema
 
-Exportação de imagens PNG/JPG/JPEG/WebP/SVG implementada, com ciclo completo de PNG testado no editor fictício; conferir os demais formatos, preview/CORS e a equivalência dos bytes na Yampi real. Investigar controles reais de criação e substituição de imagens. Novos caminhos devem ter etapa explícita de criação, conferir a ausência e impedir duplicatas. A Yampi não permite criar pastas livremente. Upload binário exige backup/restauração de bytes e conferência após reload; permanece bloqueado. Renomear e excluir exigem um desenho separado de recuperação; continuam desativados.
+Exportação de imagens PNG/JPG/JPEG/WebP/SVG implementada, com ciclo completo de PNG testado no editor fictício; conferir os demais formatos, preview/CORS e a equivalência dos bytes na Yampi real. Investigar controles reais de criação e substituição de imagens. Desde a 0.3.7, um texto novo criado vazio à mão no editor da Yampi é preenchido pela extensão, e texto novo ausente na loja bloqueia o envio ([SPEC.md](SPEC.md)); a criação continua manual. Confirmar na Yampi real se `assets/images` aceita subpastas e qual URL `assets_url` gera para elas. A Yampi não permite criar pastas livremente. Upload binário exige backup/restauração de bytes e conferência após reload; permanece bloqueado. Renomear e excluir exigem um desenho separado de recuperação; continuam desativados.
 
 ## Configurações e catálogo
 

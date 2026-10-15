@@ -118,7 +118,7 @@ export function previewType(bytes: Uint8Array, mime: string): string {
 }
 export function demonstration(context: Context, reason: string): PreviewBundle {
   validateContext(context);
-  return {format:'yampi-local-preview',version:1,toolVersion:'0.3.6',capturedAt:new Date().toISOString(),source:{kind:'demonstration',origin:context.previewOrigin,association:'unavailable'},limits:{...PREVIEW_LIMITS},data:{},pages:[],assets:{},resources:[],styles:[],issues:[{code:'visual-context-unavailable',reason}]};
+  return {format:'yampi-local-preview',version:1,toolVersion:'0.3.7',capturedAt:new Date().toISOString(),source:{kind:'demonstration',origin:context.previewOrigin,association:'unavailable'},limits:{...PREVIEW_LIMITS},data:{},pages:[],assets:{},resources:[],styles:[],issues:[{code:'visual-context-unavailable',reason}]};
 }
 export async function previewEntries(bundle: PreviewBundle): Promise<Assets> {
   if(bundle.format!=='yampi-local-preview'||bundle.version!==1||!Number.isFinite(Date.parse(bundle.capturedAt)))throw new Error('Prévia inválida.');

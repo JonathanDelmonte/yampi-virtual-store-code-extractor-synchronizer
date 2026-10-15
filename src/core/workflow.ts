@@ -1,4 +1,5 @@
 import {assertContext, safeFiles, safeSnapshot, imagePath, writable, validatePaths, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Assets, type Adapter, type ReadAdapter, type Snapshot, type Progress, type Plan, type Journal} from './model';
+import {missingNewTexts} from './planner';
 type Hooks = {signal?: AbortSignal; progress?: (p: Progress) => void};
 function check(signal?: AbortSignal) {if (signal?.aborted) throw new Error('Cancelado. Os arquivos já salvos não foram desfeitos.');}
 export async function capture(adapter: ReadAdapter, hooks: Hooks = {}): Promise<Snapshot> {
@@ -39,11 +40,15 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
 }): Promise<Journal> {
   if (!selected.length || new Set(selected).size !== selected.length) throw new Error('Selecione arquivos sem duplicatas.');
   validatePaths(selected);
+  const missing = missingNewTexts(plan);
+  if (missing.length) throw new Error(`Crie vazios no editor da Yampi os arquivos novos e compare novamente: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ` e mais ${missing.length - 3}` : ''}.`);
   const rows = selected.map(path => {
     const matches = plan.rows.filter(r => r.path === path);
     if (matches.length !== 1 || matches[0].status !== 'update' || !writable(path) || matches[0].image || matches[0].local === undefined || matches[0].remote === undefined) throw new Error(`Arquivo não elegível para envio: ${path}`);
     return matches[0];
   });
+  // Fill new files first, so the files that use them stop pointing to empty ones as early as possible.
+  rows.sort((a, b) => Number(b.base === undefined) - Number(a.base === undefined));
   check(hooks.signal);
   assertContext(plan.context, await adapter.context());
   await adapter.refresh();
@@ -70,8 +75,10 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
       await hooks.persist(journal);
       // Adapter checks the expected content again inside the editor immediately before saving.
       await adapter.write(row.path, row.remote!, row.local!);
-      const saved = await adapter.read(row.path);
-      if (saved !== row.local) throw new Error(`Falha na conferência após salvar: ${row.path}`);
+      // CodeMirror can keep text the server rejected. Confirm on the platform before the next file.
+      await adapter.refresh();
+      assertContext(plan.context, await adapter.context());
+      if (await adapter.read(row.path) !== row.local) throw new Error(`Arquivo não persistiu após recarregar: ${row.path}`);
       journal.verified.push(row.path);
       delete journal.pending;
       await hooks.persist(journal);
