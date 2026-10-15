@@ -2,7 +2,7 @@
 
 ## Nomes aprovados
 
-Repositório, pacote npm e pasta de desenvolvimento: **zirtuno-sync-yampi**.
+O repositório principal continua **JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer**, assim como a pasta de desenvolvimento existente. O pacote npm usa **zirtuno-sync-yampi**, nome trazido do repositório **ZIRTUNO/zirtuno-sync-yampi** na integração de 15/10/2026.
 
 Nome de exibição no Chrome e no painel: **Zirtuno Sync Yampi**. Autoria: **Zirtuno**. Descrição: **Edição local e sincronização do código da sua loja Yampi.**
 

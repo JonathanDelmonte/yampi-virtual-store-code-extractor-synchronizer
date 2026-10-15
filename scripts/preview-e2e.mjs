@@ -41,14 +41,19 @@ try {
   const harnessOrigin='http://127.0.0.1:'+harnessServer.address().port;
   browser=await chromium.launch({headless:true});const captureContext=await browser.newContext();const capturePage=await captureContext.newPage();await capturePage.goto(harnessOrigin);
   const fixtures={dark:await capturePage.evaluate(()=>VisualHarness.visualStore('dark')),light:await capturePage.evaluate(()=>VisualHarness.visualStore('light'))};
+  // Real-format store: served theme CSS is compiled here with the platform-like minifier.
+  await build({entryPoints:[path.join(repository,'tests/fixtures/rocket-like.ts')],bundle:true,platform:'node',format:'esm',outfile:path.join(temporary,'rocket-like.mjs'),logLevel:'silent'});
+  const rocketModule=await import(pathToFileURL(path.join(temporary,'rocket-like.mjs'))),{compileStyles}=await import(pathToFileURL(path.join(repository,'local-runtime/engine.mjs')));
+  const rocket=rocketModule.rocketLike({flagsRoute:true}),rocketResources={...rocket.resources,...Object.fromEntries(Object.entries(rocket.themeSheets).map(([url,entries])=>[url,{type:'text/css',text:entries.length?rocketModule.platformMinify(compileStyles(rocket.snapshot.files,entries,{style:'compressed',assets:rocketModule.ASSETS})):''}]))};
   const network=[];
-  await captureContext.route('https://**/*',async route=>{const url=route.request().url(),resource=fixtures.dark.resources[url]||fixtures.light.resources[url];assert.ok(resource,'URL externa inesperada: '+url);assert.equal(route.request().method(),'GET');assert.equal(route.request().headers()['cookie'],undefined);network.push(url);await route.fulfill({contentType:resource.type,body:resource.base64?Buffer.from(resource.base64,'base64'):resource.text,headers:{'Access-Control-Allow-Origin':'*'}});});
-  const captures={dark:await capturePage.evaluate(()=>VisualHarness.capture('dark')),light:await capturePage.evaluate(()=>VisualHarness.capture('light'))};
+  await captureContext.route('https://**/*',async route=>{const url=route.request().url(),resource=fixtures.dark.resources[url]||fixtures.light.resources[url]||rocketResources[url];assert.ok(resource,'URL externa inesperada: '+url);assert.equal(route.request().method(),'GET');assert.equal(route.request().headers()['cookie'],undefined);network.push(url);await route.fulfill({contentType:resource.type,body:resource.base64?Buffer.from(resource.base64,'base64'):resource.text,headers:{'Access-Control-Allow-Origin':'*'}});});
+  const captures={dark:await capturePage.evaluate(()=>VisualHarness.capture('dark')),light:await capturePage.evaluate(()=>VisualHarness.capture('light'))},rocketCapture=await capturePage.evaluate(()=>VisualHarness.captureRocket());
+  assert.ok(!network.some(url=>/\.scss|fictional-cyrillic/.test(url)),'Requisição derivada de Sass ou fonte fora de latin.');
   await captureContext.close();await new Promise(r=>harnessServer.close(r));harnessServer=null;
   const summary=[];
   for(const tone of ['dark','light']) {
     const captured=captures[tone],fixture=fixtures[tone],source=path.join(temporary,tone+'-source'),moved=path.join(temporary,tone+'-moved');
-    assert.equal(captured.source.association,'published-unverified');assert.equal(captured.pages.length,5);assert.equal(captured.resources.length,6);assert.deepEqual(captured.issues.map(i=>i.code),['published-association']);
+    assert.equal(captured.source.association,'published-unverified');assert.deepEqual(captured.pages.map(p=>p.kind+(p.context?':'+p.context:'')),['home','category','product','category:search','product','category']);assert.equal(captured.resources.length,6);assert.deepEqual(captured.issues.map(i=>i.code).sort(),['page-kind-missing','page-kind-missing','published-association']);
     await extract(Buffer.from(captured.zip,'base64'),source);
     // Move the entire ZIP project before installing dependencies. The exporter,
     // network cache and original extraction directory are unavailable thereafter.
@@ -84,7 +89,37 @@ try {
     summary.push({store:e.title,source:captured.source,pages:captured.pages.length,assets:captured.resources.length,portable:true,integrity:true,returnExcludesPreview:true,offline:true,measurements,visuals});
     console.log('Prévia '+tone+': identidade, CSS, fontes, imagens/cache, filtros, rotas distintas e comparação visual passaram.');
   }
-  await writeFile(path.join(evidence,'report.json'),JSON.stringify({fictionalOnly:true,realStoreVisualValidation:false,networkRequests:network.length,stores:summary},null,2));console.log('Duas lojas fictícias validadas. Evidências em .cache/visual-validation/. Nenhuma certificação visual de loja real.');
+  // Section 9.3: real capture format in a browser, using only the tools of the exported ZIP.
+  const rocketSource=path.join(temporary,'rocket-source'),rocketMoved=path.join(temporary,'rocket-moved');
+  await extract(Buffer.from(rocketCapture.zip,'base64'),rocketSource);await cp(rocketSource,rocketMoved,{recursive:true});await rm(rocketSource,{recursive:true});
+  console.log('Prévia formato real: npm ci e checks no projeto movido.');
+  await command(['ci','--ignore-scripts','--no-audit','--no-fund'],rocketMoved);
+  const rocketCheck=await command(['run','check'],rocketMoved);assert.match(rocketCheck,/published-verified-by-css/);assert.doesNotMatch(rocketCheck,/Seções visíveis não renderizadas/);
+  const {createLocalServer:createRocketServer}=await import(pathToFileURL(path.join(rocketMoved,'.yampi-sync/tools/dev.mjs'))+'?rocket');const rocketLocal=await createRocketServer(rocketMoved);localServer=rocketLocal.server;await new Promise(r=>localServer.listen(0,'127.0.0.1',r));const rocketBase='http://127.0.0.1:'+localServer.address().port;
+  const rocketContext=await browser.newContext(),rocketForeign=[];await rocketContext.route('**/*',route=>{if(route.request().url().startsWith(rocketBase+'/'))return route.continue();rocketForeign.push(route.request().url());return route.abort();});
+  const rocketPages=[];
+  for(const [route,expectedSections] of [['/',3],['/categoria-a',1],['/produto-ficticio-1',2],['/sobre',1],['/promocao',1]]) {
+    const page=await rocketContext.newPage(),consoleMessages=[];page.on('console',message=>consoleMessages.push(message.text()));page.on('pageerror',error=>consoleMessages.push(error.message));
+    await page.goto(rocketBase+route);await page.waitForFunction(()=>window.__yampiLocalState);await page.waitForLoadState('networkidle');
+    if(route==='/produto-ficticio-1')await page.locator('.flags').filter({hasText:'rota ausente'}).waitFor();
+    if(route==='/')await page.locator('.shelf-image').nth(1).waitFor();
+    const state=await page.evaluate(async()=>{await document.fonts.load('16px "Fictional Sans"');await document.fonts.ready;const icon=document.querySelector('.icon-cart');const iconUrl=icon&&getComputedStyle(icon).backgroundImage.match(/url\("?([^")]+)"?\)/)?.[1];return {ready:window.__yampiLocalReady,local:window.__yampiLocalState,fonts:[...document.fonts].filter(f=>f.family.includes('Fictional')).map(f=>f.status),images:[...document.images].map(i=>({src:i.currentSrc,width:i.naturalWidth})),iconStatus:iconUrl?(await fetch(iconUrl)).status:0,iconUrl,summary:document.querySelector('#yampi-preview-status [data-summary]')?.textContent};});
+    assert.equal(state.ready,true,route+': '+JSON.stringify(state.local));assert.equal(state.local.renderedSections,expectedSections,route);assert.equal(state.local.expectedSections,expectedSections,route);
+    assert.ok(state.fonts.length&&state.fonts.every(status=>status==='loaded'),route+' fontes: '+state.fonts);assert.ok(!consoleMessages.some(text=>/OTS|Failed to decode downloaded font/.test(text)),route+': '+consoleMessages.join(' | '));
+    assert.ok(state.images.length&&state.images.every(image=>image.src.includes('/preview/assets/')&&image.width>0),route+' imagens: '+JSON.stringify(state.images));assert.equal(state.local.placeholders,0);
+    assert.equal(state.iconStatus,200,route+' ícone '+state.iconUrl);assert.ok(state.iconUrl.includes('/__platform/assets/img/themes/vitrine/icons/cart.svg'));
+    if(route==='/produto-ficticio-1')assert.deepEqual(state.local.missingRoutes,['GET catalog/products/1/flags']);else assert.deepEqual(state.local.missingRoutes,[],route);
+    rocketPages.push({route,state});await page.close();
+  }
+  // A template that stops rendering its sections is reported as incomplete.
+  await writeFile(path.join(rocketMoved,'tema/templates/promotion.twig'),'<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"><p>Sem seções</p></div></body></html>');
+  const broken=await rocketContext.newPage();await broken.goto(rocketBase+'/promocao');await broken.waitForFunction(()=>window.__yampiLocalState);
+  assert.equal(await broken.evaluate(()=>window.__yampiLocalReady),false);assert.match(await broken.locator('#yampi-preview-status [data-summary]').textContent(),/Prévia incompleta: 0 de 1 seções/);
+  const uncaptured=await fetch(rocketBase+'/rota-que-nao-existe');assert.equal(uncaptured.status,404);assert.match(await uncaptured.text(),/Rota não capturada/);
+  assert.deepEqual(rocketForeign,[]);await rocketContext.close();await new Promise(r=>localServer.close(r));localServer=null;
+  console.log('Prévia formato real: seções, fontes latin, ícones de $assets, imagens capturadas, rota ausente explícita e prontidão estrutural conferidas.');
+  summary.push({store:'Loja Fictícia Vitrine',format:'real',pages:rocketCapture.pages.map(p=>p.kind),assets:rocketCapture.resources.length,cssParity:'published-verified-by-css',checks:rocketPages.map(p=>({route:p.route,sections:p.state.local.renderedSections+'/'+p.state.local.expectedSections}))});
+  await writeFile(path.join(evidence,'report.json'),JSON.stringify({fictionalOnly:true,realStoreVisualValidation:false,networkRequests:network.length,stores:summary},null,2));console.log('Três lojas fictícias validadas: duas com comparação visual e uma no formato real da vitrine. Evidências em .cache/visual-validation/. Nenhuma certificação visual de loja real.');
 } catch(error) {console.error('Falha na validação visual:',error);throw error;
 } finally {
   await browser?.close();if(harnessServer)await new Promise(r=>harnessServer.close(r));if(localServer)await new Promise(r=>localServer.close(r));

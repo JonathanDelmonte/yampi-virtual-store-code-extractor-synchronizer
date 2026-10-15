@@ -15,7 +15,8 @@ describe('projeto executável e retorno completo', () => {
     const bytes = await encodeSnapshot(clone(), true), entries = unzipSync(bytes);
     expect(entries['package-lock.json']).toBeDefined();
     expect(entries['.yampi-sync/tools/dev.mjs']).toBeDefined();
-    expect(JSON.parse(new TextDecoder().decode(entries['local.data.json'])).merchantData.manifest.name).toBe(demoSnapshot.context.storeName);
+    expect(JSON.parse(new TextDecoder().decode(entries['preview/raw/page-0.json'])).merchant.manifest.name).toBe(demoSnapshot.context.storeName);
+    expect(JSON.parse(new TextDecoder().decode(entries['local.data.json'])).format).toBe('yampi-local-overrides');
     expect(entries['README.md']).toBeDefined(); expect(entries['loja-de-testes.code-workspace']).toBeDefined();
     const result = await decodeProject(bytes);
     expect(result.baseline).toEqual(demoSnapshot); expect(result.localAssets[imagePath]).toEqual(demoImage);
@@ -71,6 +72,17 @@ describe('projeto executável e retorno completo', () => {
     const m = JSON.parse(new TextDecoder().decode(entries['.yampi-sync/manifest.json']));
     m.version = 1; m.files.forEach((f: {kind?: string}) => delete f.kind);
     entries['.yampi-sync/manifest.json'] = strToU8(JSON.stringify(m));
+    expect((await decodeProject(zipSync(entries))).baseline).toEqual(source);
+  });
+  test('manifesto versão 3 registra ferramenta, tema, quebras de linha, ignorados e prévia; versão 2 continua legível', async () => {
+    const source = clone(); source.files['templates/sem-final.twig'] = 'a\r\nb';
+    const entries = unzipSync(await encodeSnapshot(source, true)), m = JSON.parse(new TextDecoder().decode(entries['.yampi-sync/manifest.json']));
+    expect(m).toMatchObject({version: 3, tool: {name: 'yampi-code-sync', version: '0.4.0'}, theme: {state: 'unknown', source: 'unavailable'}, skipped: [{path: 'logs/'}], preview: {manifest: 'preview/manifest.json', format: 2}});
+    expect(m.files.find((f: {path: string}) => f.path === 'templates/home.twig')).toMatchObject({eol: 'lf', finalNewline: true});
+    expect(m.files.find((f: {path: string}) => f.path === 'templates/sem-final.twig')).toMatchObject({eol: 'crlf', finalNewline: false});
+    expect(m.files.find((f: {path: string}) => f.path === imagePath).eol).toBeUndefined();
+    const legacy = {...m, version: 2}; delete legacy.tool; delete legacy.theme; delete legacy.skipped; delete legacy.preview; legacy.files.forEach((f: {eol?: string; finalNewline?: boolean}) => {delete f.eol; delete f.finalNewline;});
+    entries['.yampi-sync/manifest.json'] = strToU8(JSON.stringify(legacy));
     expect((await decodeProject(zipSync(entries))).baseline).toEqual(source);
   });
   test('rejeita arquivo com assinatura de imagem incompatível', () => {

@@ -1,9 +1,9 @@
 import {describe, test, expect} from 'vitest';
 import {zipSync, strToU8} from 'fflate';
-import {makePlan, missingNewTexts} from '../src/core/planner';
+import {makePlan, missingNewTexts, selectionIssues} from '../src/core/planner';
 import {capture, applyPlan} from '../src/core/workflow';
 import {encodeSnapshot, decodeProject} from '../src/core/archive';
-import {safeFiles, validatePath, validatePaths, type Context, type Snapshot, type Files, type Adapter, type Journal, type Plan} from '../src/core/model';
+import {safeFiles, validatePath, validatePaths, sameIgnoringWhitespace, lineEnding, type Context, type Snapshot, type Files, type Adapter, type Journal, type Plan} from '../src/core/model';
 const context: Context = {storeName: 'Loja fictícia', editorOrigin: 'https://app.yampi.com.br', previewOrigin: 'https://loja.invalid'};
 const snapshot = (files: Files): Snapshot => ({context, capturedAt: '2026-01-01T00:00:00Z', files});
 const file = 'templates/home.twig';
@@ -171,9 +171,30 @@ describe('envio com preflight, backup e conferência', () => {
   test('arquivo novo criado vazio à mão é preenchido antes dos arquivos que dependem dele', async () => {
     const created = 'elements/novo.twig', adapter = new FakeAdapter({[file]: 'a', [created]: ''}), h = hooks();
     const plan = makePlan(snapshot({[file]: 'a'}), {[file]: "{% include 'elements/novo.twig' %}", [created]: 'novo'}, snapshot(adapter.files));
+    expect(selectionIssues(plan, [file])).toEqual([{path: file, requires: created}]);
+    await expect(applyPlan(adapter, plan, [file], h)).rejects.toThrow('Envio parcial bloqueado');
+    expect(adapter.writes).toEqual([]); expect(h.events).toEqual([]);
     const result = await applyPlan(adapter, plan, [file, created], h);
     expect(adapter.writes).toEqual([created, file]); expect(result.status).toBe('completed');
     expect(adapter.files[created]).toBe('novo'); expect(result.before[created]).toBe('');
+    const restore = makePlan(snapshot(result.after), result.before, snapshot(adapter.files));
+    await applyPlan(adapter, restore, [file, created], hooks());
+    expect(adapter.files).toEqual({[file]: 'a', [created]: ''});
+  });
+  test('texto novo criado com conteúdo conflitante bloqueia também o arquivo que o inclui', async () => {
+    const created = 'elements/novo.twig', adapter = new FakeAdapter({[file]: 'a', [created]: 'conteúdo da loja'}), h = hooks();
+    const plan = makePlan(snapshot({[file]: 'a'}), {[file]: "{% include 'elements/novo.twig' %}", [created]: 'novo'}, snapshot(adapter.files));
+    expect(plan.rows.find(row => row.path === created)?.status).toBe('conflict');
+    expect(plan.rows.find(row => row.path === file)).toMatchObject({status: 'blocked-dependency', blockedBy: [created]});
+    await expect(applyPlan(adapter, plan, [file], h)).rejects.toThrow('elegível');
+    expect(adapter.writes).toEqual([]); expect(h.events).toEqual([]);
+  });
+  test('troca de loja na conferência após salvar interrompe antes do próximo arquivo', async () => {
+    const other = 'templates/product.twig', adapter = new FakeAdapter({[file]: 'a', [other]: 'a'}), h = hooks();
+    adapter.refreshHook = () => {if (adapter.writes.length) adapter.ctx.previewOrigin = 'https://outra.invalid';};
+    await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b', [other]: 'b'}), [file, other], h)).rejects.toThrow('loja');
+    expect(adapter.writes).toEqual([file]); expect(adapter.files[other]).toBe('a');
+    expect(h.journals.at(-1)).toMatchObject({status: 'stopped', pending: file, verified: []});
   });
   test('conflitos e caminhos duplicados não podem ser enviados', async () => {
     const adapter = new FakeAdapter({[file]: 'a'});
@@ -198,5 +219,51 @@ describe('captura da árvore inteira', () => {
   test('cancelamento não entrega snapshot parcial', async () => {
     const adapter = new FakeAdapter({[file]: 'a'}), controller = new AbortController(); controller.abort();
     await expect(capture(adapter, {signal: controller.signal})).rejects.toThrow('Cópia cancelada');
+  });
+});
+describe('retorno seguro: dependências, envio parcial e espaço em branco', () => {
+  const remote = (files: Files) => snapshot(files);
+  test('arquivo modificado que inclui arquivo novo é bloqueado com o nome dos dois', async () => {
+    const base = {'templates/home.twig': '<main></main>', 'sections/home/a.twig': 'a'};
+    const plan = makePlan(snapshot(base), {...base, 'templates/home.twig': '<main>{% include "sections/home/novo.twig" %}</main>', 'sections/home/novo.twig': 'novo'}, remote(base));
+    const row = plan.rows.find(r => r.path === 'templates/home.twig')!;
+    expect(row.status).toBe('blocked-dependency'); expect(row.blockedBy).toEqual(['sections/home/novo.twig']);
+    expect(plan.rows.find(r => r.path === 'sections/home/novo.twig')?.status).toBe('new-local');
+    await expect(applyPlan(new FakeAdapter(base), plan, ['templates/home.twig'], hooks())).rejects.toThrow('Crie vazios no editor da Yampi');
+  });
+  test('arquivos modificados que se usam vão juntos; envio parcial é recusado antes de gravar', async () => {
+    const base = {'assets/styles/main.scss': '@import "colors";\n', 'assets/styles/_colors.scss': '$a: red;\n', [file]: 'x'};
+    const local = {...base, 'assets/styles/main.scss': '@import "colors";\nbody{color:$b}\n', 'assets/styles/_colors.scss': '$a: red;\n$b: blue;\n'};
+    const adapter = new FakeAdapter(base), plan = makePlan(snapshot(base), local, remote(base));
+    expect(plan.rows.find(r => r.path === 'assets/styles/main.scss')?.dependsOn).toEqual(['assets/styles/_colors.scss']);
+    expect(selectionIssues(plan, ['assets/styles/main.scss'])).toEqual([{path: 'assets/styles/main.scss', requires: 'assets/styles/_colors.scss'}]);
+    expect(selectionIssues(plan, ['assets/styles/_colors.scss'])).toEqual([{path: 'assets/styles/_colors.scss', requires: 'assets/styles/main.scss'}]);
+    await expect(applyPlan(adapter, plan, ['assets/styles/main.scss'], hooks())).rejects.toThrow('Envio parcial bloqueado');
+    expect(adapter.writes).toEqual([]);
+    const result = await applyPlan(adapter, plan, ['assets/styles/main.scss', 'assets/styles/_colors.scss'], hooks());
+    expect(result.verified.sort()).toEqual(['assets/styles/_colors.scss', 'assets/styles/main.scss']);
+  });
+  test('dependência em conflito bloqueia quem a usa', () => {
+    const base = {'assets/styles/main.scss': '@import "colors";\n', 'assets/styles/_colors.scss': '$a: red;\n'};
+    const plan = makePlan(snapshot(base), {'assets/styles/main.scss': '@import "colors";\nbody{color:$b}\n', 'assets/styles/_colors.scss': '$b: blue;\n'}, remote({...base, 'assets/styles/_colors.scss': '$a: green;\n'}));
+    expect(plan.rows.find(r => r.path === 'assets/styles/_colors.scss')?.status).toBe('conflict');
+    expect(plan.rows.find(r => r.path === 'assets/styles/main.scss')).toMatchObject({status: 'blocked-dependency', blockedBy: ['assets/styles/_colors.scss']});
+  });
+  test('alteração só de espaço em branco fica separada e salvar sem editar não gera diferença', () => {
+    const base = {[file]: '<div>\n\t<p>a</p>\n</div>', 'templates/b.twig': 'texto'};
+    const plan = makePlan(snapshot(base), {[file]: '<div>\n    <p>a</p>   \n</div>\n', 'templates/b.twig': 'texto'}, snapshot(base));
+    expect(plan.rows.find(r => r.path === file)).toMatchObject({status: 'update', whitespaceOnly: true});
+    expect(plan.rows.find(r => r.path === 'templates/b.twig')?.status).toBe('unchanged');
+    expect(sameIgnoringWhitespace('a b', 'ab')).toBe(false);
+    const coupled = {'assets/styles/main.scss': '@import "colors";\n', 'assets/styles/_colors.scss': '$a: red;\n'};
+    const cosmetic = makePlan(snapshot(coupled), {'assets/styles/main.scss': '@import "colors";   \n\n', 'assets/styles/_colors.scss': '$a: blue;\n'}, snapshot(coupled));
+    expect(cosmetic.rows.find(r => r.path === 'assets/styles/main.scss')).toMatchObject({status: 'update', whitespaceOnly: true});
+    expect(cosmetic.rows.every(r => !r.dependsOn)).toBe(true); expect(selectionIssues(cosmetic, ['assets/styles/_colors.scss'])).toEqual([]);
+    expect(lineEnding('a\nb')).toEqual({eol: 'lf', finalNewline: false}); expect(lineEnding('a\r\nb\n')).toEqual({eol: 'mixed', finalNewline: true}); expect(lineEnding('')).toEqual({eol: 'none', finalNewline: false});
+  });
+  test('componente novo fora de components.twig gera aviso no retorno', () => {
+    const base = {'elements/scripts/components.twig': "<script src='{{ '/components/A.js' | components_url }}'></script>", 'components/A.vue': '<template><p/></template>'};
+    const plan = makePlan(snapshot(base), {...base, 'components/Novo.vue': '<template><p/></template>'}, snapshot(base));
+    expect(plan.warnings?.some(w => w.path === 'components/Novo.vue' && w.message.includes('components.twig'))).toBe(true);
   });
 });

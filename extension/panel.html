@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="app-header">
-    <div class="brand"><h1><img class="brand-icon" src="icons/icon32.png" alt="" width="24" height="24">Zirtuno Sync Yampi</h1><span class="version">0.3.7</span></div>
+    <div class="brand"><h1><img class="brand-icon" src="icons/icon32.png" alt="" width="24" height="24">Zirtuno Sync Yampi</h1><span class="version">0.4.0</span></div>
     <a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer" aria-label="Desenvolvido por Zirtuno — abrir Instagram"><span>Desenvolvido por</span><img src="brand/zirtuno-logo.png" alt="" width="18" height="18"><span class="maker-name">Zirtuno</span></a>
     <div class="connection"><span id="store">Conectando ao editor…</span><span id="connection-state">Aguardando conexão</span></div>
   </header>
@@ -31,7 +31,7 @@
       <p id="copy-safety">Esta operação apenas lê os arquivos e baixa uma cópia em ZIP. Ela abre os arquivos para leitura, sem editar, salvar, excluir ou publicar conteúdo na Yampi.</p>
       <div class="capture-options">
         <label class="check-label"><input type="checkbox" id="include-preview" checked><span>Incluir contexto visual da vitrine publicada</span></label>
-        <details class="capture-help"><summary>O que está incluído na prévia?</summary><p>O Chrome solicita leitura somente das origens necessárias. Dados publicados podem diferir do rascunho. Nenhum serviço de carrinho, checkout ou gravação é executado. Sem essa captura, a prévia usa dados demonstrativos.</p></details>
+        <details class="capture-help"><summary>O que está incluído na prévia?</summary><p>Uma página de cada tipo da vitrine, com configurações públicas, fontes, ícones e imagens exibidas, além das leituras públicas de catálogo usadas pelas seções visíveis. Tudo é lido sem cookies; segredos, rastreamento e dados pessoais são removidos. O Chrome solicita leitura somente das origens necessárias. Dados publicados podem diferir do rascunho. Nenhum serviço de carrinho, checkout ou gravação é executado. Sem essa captura, a prévia usa dados demonstrativos.</p></details>
       </div>
       <button id="export" class="primary" aria-describedby="copy-safety" disabled>Confirmar e baixar ZIP</button>
       <small id="baseline-info">Nenhuma exportação concluída.</small>
@@ -63,11 +63,13 @@
     <section id="review" aria-labelledby="review-title" hidden>
       <div class="review-heading">
         <h2 id="review-title">Alterações encontradas</h2><p id="summary"></p>
-        <label>Mostrar <select id="filter"><option value="changes">Alterações e conflitos</option><option value="all">Todos os arquivos</option><option value="update">Prontos para envio</option><option value="conflict">Conflitos</option></select></label>
+        <label>Mostrar <select id="filter"><option value="changes">Alterações e conflitos</option><option value="all">Todos os arquivos</option><option value="update">Prontos para envio</option><option value="conflict">Conflitos</option><option value="blocked">Bloqueados por dependência</option><option value="whitespace">Só espaço em branco</option></select></label>
       </div>
+      <ul id="plan-warnings" class="plan-warnings" hidden></ul>
+      <button id="discard-whitespace" class="text-button" hidden>Descartar alterações só de espaço em branco</button>
       <div class="table-wrap" tabindex="0" role="region" aria-label="Comparação de arquivos; role horizontalmente para ver todas as colunas"><table><thead><tr><th scope="col">Enviar</th><th scope="col">Arquivo</th><th scope="col">Resultado</th><th scope="col">Versões</th></tr></thead><tbody id="rows"></tbody></table></div>
       <p class="table-hint">Role para os lados para ver todas as colunas.</p>
-      <p class="note">Só textos existentes e compatíveis são enviados. Arquivo novo: crie-o vazio no editor da Yampi, na mesma pasta, e compare de novo; a extensão preenche o conteúdo. Imagens são enviadas à mão pela Yampi. Nenhum arquivo ausente será excluído.</p>
+      <p class="note">Só textos existentes e compatíveis são enviados. Arquivo novo: crie-o vazio no editor da Yampi, na mesma pasta, e compare de novo; a extensão preenche o conteúdo. Imagens são enviadas à mão pela Yampi. Arquivos que dependem de caminhos ausentes ficam bloqueados; textos alterados que usam uns aos outros são enviados juntos. Nenhum arquivo ausente será excluído.</p>
     </section>
     <section id="diff" class="workspace" aria-labelledby="diff-title" hidden>
       <div class="review-heading"><h3 id="diff-title"></h3><button id="close-diff">Fechar comparação</button></div>

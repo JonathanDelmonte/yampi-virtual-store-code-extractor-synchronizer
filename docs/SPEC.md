@@ -31,7 +31,9 @@ Imagens recebem os mesmos estados por comparação de bytes, mas nunca são envi
 
 A extensão não cria, renomeia nem exclui arquivos ou pastas. Um texto novo é criado vazio, à mão, no editor da Yampi, na pasta indicada pelo caminho. Na comparação seguinte ele aparece como `update`, e a extensão grava o conteúdo com as mesmas garantias de qualquer envio.
 
-Enquanto existir texto local novo sem arquivo correspondente na loja, nenhum envio começa: os arquivos alterados podem incluí-lo (Twig), importá-lo (Sass) ou montá-lo (Vue), e a prévia da Yampi quebraria. Imagens novas não bloqueiam o envio de textos; são enviadas à mão pelo editor da Yampi.
+Enquanto existir texto local novo sem arquivo correspondente na loja, nenhum envio começa: os arquivos alterados podem incluí-lo (Twig), importá-lo (Sass) ou montá-lo (Vue), e a prévia da Yampi quebraria. Imagens novas são enviadas à mão pelo editor da Yampi; bloqueiam os textos que dependem delas, mas não bloqueiam textos independentes.
+
+Arquivos alterados que dependem uns dos outros precisam ser selecionados juntos, inclusive quando um deles foi criado vazio à mão. Uma dependência em conflito ou sem possibilidade de envio bloqueia também quem a utiliza. Diferenças só de espaço em branco aparecem sem seleção inicial e podem ser descartadas.
 
 `elements/scripts/components.twig` é gerado pela Yampi a partir dos componentes existentes: criar o `.vue` no editor da Yampi o registra. Alterações locais nesse arquivo são sobrescritas pela Yampi.
 

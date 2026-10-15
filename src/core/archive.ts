@@ -1,28 +1,37 @@
 import {unzipSync, strToU8} from 'fflate';
 import {compressArchive,type ArchiveEntries} from './compression';
-import {MAX_FILES, MAX_TOTAL_BYTES, MAX_FILE_BYTES, ROOTS, safeFiles, safeSnapshot, hashBytes, imagePath, validateContext, validatePath, type Snapshot, type Manifest, type Files, type Assets} from './model';
-import {previewEntries, demonstration, type PreviewBundle} from './preview';
+import {MAX_FILES, MAX_TOTAL_BYTES, MAX_FILE_BYTES, ROOTS, safeFiles, safeSnapshot, hashBytes, imagePath, lineEnding, validateContext, validatePath, type Snapshot, type Manifest, type Files, type Assets} from './model';
+import {previewEntries, demonstration, TOOL_VERSION, type PreviewBundle} from './preview';
 import {localKit} from './local-kit';
 const metaPath = '.yampi-sync/manifest.json';
 export interface Project {baseline: Snapshot; local: Files; localAssets: Assets}
+export const SKIPPED = [{path: 'logs/', reason: 'Logs do editor não são exportados nem enviados: não fazem parte do tema. Consulte-os no editor da Yampi.'}];
+// The theme identity comes from the published storefront when captured; the
+// editor does not expose whether it edits a draft, so the state stays unknown.
+function themeInfo(preview?: PreviewBundle): Manifest['theme'] {
+  const theme = preview?.source.kind === 'demonstration' ? undefined : preview?.pages[0]?.raw.themeConfig?.theme;
+  const value = theme && typeof theme === 'object' && !Array.isArray(theme) ? theme : {};
+  const pick = (key: string) => typeof value[key] === 'string' || typeof value[key] === 'number' ? value[key] as string | number : null;
+  return {alias: typeof value.alias === 'string' ? value.alias : null, id: pick('id'), name: typeof value.name === 'string' ? value.name : null, state: 'unknown', source: theme ? 'published-storefront' : 'unavailable'};
+}
 export async function encodeSnapshot(snapshot: Snapshot, project = false, preview?: PreviewBundle,options:{signal?:AbortSignal;compress?:(entries:ArchiveEntries,signal?:AbortSignal)=>Promise<Uint8Array>}={}): Promise<Uint8Array> {
   const check=()=>{if(options.signal?.aborted)throw new Error('Preparação do ZIP cancelada. Nenhum arquivo da Yampi foi alterado.');};check();
   const source = safeSnapshot(snapshot);
-  const manifest: Manifest = {format: 'yampi-theme-sync', version: 2, context: source.context, capturedAt: source.capturedAt, files: []};
+  const visual = project ? preview || demonstration(source.context, 'Contexto visual não capturado; prévia demonstrativa.', Object.keys(source.files)) : undefined;
+  const manifest: Manifest = {format: 'yampi-theme-sync', version: 3, tool: {name: 'yampi-code-sync', version: TOOL_VERSION}, theme: themeInfo(visual), context: source.context, capturedAt: source.capturedAt, files: [], skipped: SKIPPED, ...(visual ? {preview: {manifest: 'preview/manifest.json', format: 2}} : {})};
   const entries: Record<string, Uint8Array> = Object.create(null);
   const all = {...Object.fromEntries(Object.entries(source.files).map(([p, v]) => [p, strToU8(v)])), ...source.assets};
   for (const path of Object.keys(all).sort()) {
     check();
-    const bytes = all[path];
+    const bytes = all[path], image = !!source.assets?.[path];
     entries[`tema/${path}`] = bytes;
     entries[`.yampi-sync/baseline/${path}`] = bytes;
-    manifest.files.push({path, sha256: await hashBytes(bytes), bytes: bytes.length, kind: source.assets?.[path] ? 'image' : 'text'});
+    manifest.files.push({path, sha256: await hashBytes(bytes), bytes: bytes.length, kind: image ? 'image' : 'text', ...(image ? {} : lineEnding(source.files[path]))});
   }
   entries[metaPath] = strToU8(JSON.stringify(manifest, null, 2));
-  if (project) {
-    const visual = preview || demonstration(source.context, 'Contexto visual não capturado; prévia demonstrativa.');
+  if (visual) {
     for (const [path,value] of Object.entries(localKit(Object.keys(source.files),source.context.storeName,visual))) entries[path]=strToU8(value);
-    Object.assign(entries,await previewEntries(visual));
+    Object.assign(entries,await previewEntries(visual, source.files));
   }
   check();
   return options.compress?options.compress(entries,options.signal):compressArchive(entries);
@@ -62,7 +71,7 @@ async function decodeEntries(input: Record<string, Uint8Array>): Promise<Project
     archive[p.slice(prefix.length)] = value;
   }
   const m = JSON.parse(text(archive[metaPath])) as Manifest;
-  if (!m || m.format !== 'yampi-theme-sync' || ![1, 2].includes(m.version) || !Array.isArray(m.files) || !m.files.length || m.files.length > MAX_FILES || typeof m.capturedAt !== 'string' || !Number.isFinite(Date.parse(m.capturedAt))) throw new Error('Formato de exportação não reconhecido.');
+  if (!m || m.format !== 'yampi-theme-sync' || ![1, 2, 3].includes(m.version) || !Array.isArray(m.files) || !m.files.length || m.files.length > MAX_FILES || typeof m.capturedAt !== 'string' || !Number.isFinite(Date.parse(m.capturedAt))) throw new Error('Formato de exportação não reconhecido.');
   const context = validateContext(m.context);
   const bases: [string, string][] = [], assets: Assets = Object.create(null);
   const seen = new Set<string>();

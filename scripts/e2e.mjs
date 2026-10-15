@@ -191,7 +191,7 @@ try {
   await editor.evaluate(() => window.fictitiousCreateEmpty('templates/new.twig'));
   await editor.reload(); await editor.waitForFunction(() => document.querySelector('yampi-code-editor')?.shadowRoot?.querySelector('aside .file-name'));
   await panel.locator('#compare').click();
-  await panel.waitForFunction(() => /2 prontos · 0 conflitos · \d+ caminhos/.test(document.querySelector('#summary').textContent) && !document.querySelector('#compare').disabled);
+  await panel.waitForFunction(() => /2 prontos · 0 conflitos · 0 bloqueados por dependência · \d+ caminhos/.test(document.querySelector('#summary').textContent) && !document.querySelector('#compare').disabled);
   assert.equal(await panel.locator('#status').textContent(), 'Comparação concluída');
   assert.match(await panel.locator('#rows').textContent(), /Novo · pronto para preencher/);
   await panel.locator('#confirm-store').fill('Loja de testes');
@@ -265,7 +265,7 @@ try {
   assert.equal(await panel.locator('#status').textContent(),'Código copiado; recursos visuais aguardam autorização',await panel.locator('#detail').textContent());
   const visualDownload=driver.waitDownload();await panel.locator('#preview-allow').click();await panel.waitForFunction(()=>['ZIP da loja baixado','Operação interrompida'].includes(document.querySelector('#status').textContent));assert.equal(await panel.locator('#status').textContent(),'ZIP da loja baixado',await panel.locator('#detail').textContent());
   const visualPath=path.join(temporary,'visual.zip');await (await visualDownload).saveAs(visualPath);const visualEntries=unzipSync(new Uint8Array(await readFile(visualPath))),visualManifest=JSON.parse(new TextDecoder().decode(visualEntries['preview/manifest.json']));
-  assert.equal(visualManifest.source.association,'published-unverified');assert.equal(visualManifest.resources.length,6);assert.equal(JSON.parse(new TextDecoder().decode(visualEntries['preview/data.json'])).pages.length,5);assert.ok((await worker.evaluate(()=>globalThis.testVisualReads)).length>=11);
+  assert.equal(visualManifest.version,2);assert.equal(visualManifest.source.association,'published-unverified');assert.equal(visualManifest.resources.length,6);assert.equal(visualManifest.pages.length,6);assert.ok(visualManifest.pages.every(p=>visualEntries['preview/'+p.file]));assert.ok(JSON.parse(new TextDecoder().decode(visualEntries['preview/raw/page-0.json'])).themeConfig.sections.length>0);assert.ok((await worker.evaluate(()=>globalThis.testVisualReads)).length>=12);
   assert.deepEqual(await currentEditor.evaluate(()=>window.fictitiousOperations),{dispatch:0,save:0,forbidden:0});assert.equal(await currentEditor.evaluate(()=>window.fictitiousUnchanged()),true);assert.match(await panel.locator('#preview-info').textContent(),/rascunho não vinculado/);
   console.log('E2E visual: painel real, autorização por origem, coleta pública estática e ZIP com páginas/assets; zero mutações no editor fictício.');
 } catch (error) {

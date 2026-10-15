@@ -1,4 +1,46 @@
-# Validação
+# Validação da versão 0.4.0
+
+## Integração do repositório ZIRTUNO em 15/10/2026
+
+Windows, Node.js 24.15.0. Os quatro commits até `9654001` foram combinados com o trabalho local da 0.4.0. `npm ci`, `npm run check` e `npm run package` passaram: TypeScript, **182 testes em 12 arquivos**, build e ZIP local `zirtuno-sync-yampi-0.4.0.zip` com 17 arquivos permitidos e SHA-256. O repositório principal e os links de instalação continuam apontando para `JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer`.
+
+`npm run test:e2e` passou no Chromium temporário com painel lateral nativo: exportação sem mutações, importação de pasta/ZIP, bloqueio global de texto novo ausente, criação manual simulada, preenchimento antes dos arquivos existentes, backup, conferência após reload de cada arquivo, recuperação de conexão e proteção de alterações posteriores na restauração. O fluxo de captura pública e ZIP também passou. Nenhuma requisição alcançou a Yampi.
+
+Os testes que combinam os dois trabalhos conferem que um arquivo novo vazio precisa ser selecionado junto com quem o inclui, que a restauração devolve o conteúdo vazio anterior, que conteúdo remoto conflitante bloqueia também seus dependentes e que uma troca de loja na conferência interrompe antes do próximo arquivo. As prévias de três lojas fictícias passaram: duas com comparação visual e uma no formato da vitrine, com seções, fontes, ícones, imagens, erro de rota não capturada e diagnóstico de prévia incompleta.
+
+Nenhuma gravação ou restauração real foi executada. As limitações de validação real e os resultados históricos abaixo continuam com seus escopos originais.
+
+## Validação anterior da 0.4.0
+
+Execução em 14/10/2026, Windows, Node.js 24.15.0. Fixtures, imagens, fontes, temas e respostas de API usados nos testes são inteiramente fictícios. Nenhuma escrita real na Yampi foi realizada e nenhuma requisição alcançou uma loja real. [Relatório da versão](RELATORIO-0.4.0.md).
+
+## Resultados na 0.4.0
+
+`npm run check` passou com 171 testes em 12 arquivos, seguido do build. As suítes novas cobrem o contrato único (`tests/contract.test.ts`), o fluxo de ponta a ponta no formato real da vitrine (`tests/rocket-like.test.ts`) e o retorno seguro (`tests/core.test.ts`). Os principais casos:
+
+- **Formato real, ponta a ponta.** Uma vitrine fictícia com `window.themeConfig` (lista de seções com `position` 0/1/2 e `order`), `window.data` (incluindo `config` da seção principal e `context`) e `window.merchant` (com `company`, `cookies_policy`, `checkout`, `meta`) é capturada pela própria extensão, exportada, extraída e verificada com `check`: cada página captura e renderiza todas as seções visíveis com `position === 1`; aliases `main_category_content` e `main_product_content` resolvem; `products_per_page` vem de `data.config`; `pageConfig.data.sections.1` aponta para o banner; o CSS compilado coincide com o publicado (`published-verified-by-css`).
+- **Fixture negativo.** Sem `company`: o `check` falha citando `sections/global/footer.twig` e o relatório lista `company` como ausente na vitrine. Alias sem arquivo: relatório e `check` citam `secao_inexistente` e a página. Rota da API não gravada: erro explícito com método e caminho.
+- **Captura.** Nenhuma requisição derivada de Sass; somente a face `latin` da fonte é baixada; ícones de `$assets` com base descoberta no CSS servido; uma variante por imagem subjacente, com aliases; leituras públicas só das seções visíveis; ZIP abaixo de 3 MB.
+- **Privacidade.** Lista de bloqueio remove chaves de token, sessão, chave de API e rastreamento; `company` mantém a forma com `"redacted"`; e-mail e CPF não aparecem em nenhum arquivo de `preview/`; a leitura usa `credentials: 'omit'`.
+- **Simulador.** Equivalência Twig PHP × Twing (`raw` em ausente, filtros de texto, `format`, `abs`, `date`, `merge`, `filter`, `json_encode`, `sections.1`, funções de seta, concatenação de booleanos, soma com texto numérico); tag não fechada vira aviso com o arquivo; ordem das folhas e `media` iguais aos de `head.twig`; `body` preservado; só componentes de `components.twig`.
+- **Sobreposições.** Editar um parâmetro de seção da home não altera categoria nem produto; escopos global, por tipo e por captura; seções por `alias@ordem`.
+- **Retorno.** Arquivo modificado que inclui arquivo novo é bloqueado com o nome dos dois; arquivos alterados que se usam só vão juntos e o envio parcial é recusado antes de qualquer gravação; dependência em conflito bloqueia quem a usa; diferenças só de espaço ficam separadas; `.vue` novo fora de `components.twig` gera aviso; o ZIP de retorno é conferido entrada a entrada.
+- **Projeto e atualização.** Manifesto v3 legível junto com v1/v2; `local.data.json` só com sobreposições; `.gitignore` comentado; atualizador com `--preview`, plano antes de aplicar e `--rollback` que recusa arquivos alterados depois.
+
+`npm run test:preview` passou em Chromium com três lojas fictícias, cada uma movida para outra pasta e executada só com as ferramentas do próprio ZIP após `npm ci`:
+
+- Duas lojas, escura e clara, no formato real: seis páginas e seis recursos cada; identidade, CSS, fontes, imagens e cache, filtros, rotas distintas por link e comparação visual com referência independente. Diferença de pixels **0%** nas quatro comparações (desktop 1200×900 e mobile 390×844).
+- Loja no formato real: `check` com `published-verified-by-css`; home 3/3, categoria 1/1, produto 2/2, institucional 1/1 e promoção 1/1 seções; `__yampiLocalReady` verdadeiro; família `Fictional Sans` `loaded` e nenhum aviso OTS; ícone de `$assets` servido com status 200; todas as imagens vindas de `preview/assets/`, sem placeholder; `GET catalog/products/1/flags` listado como rota não capturada. Com um template que deixa de renderizar as seções, a barra mostra "Prévia incompleta: 0 de 1 seções" e `__yampiLocalReady` fica falso. Caminho não capturado responde 404 explícito. Nenhuma requisição saiu de `127.0.0.1`.
+
+`npm run test:e2e` passou no painel lateral nativo de Chromium: exportação sem mutações no editor fictício (CodeMirror antigo e atual), projeto portátil com `npm ci` e `check` na prévia demonstrativa, importação de pasta e ZIP, envio fictício com backup e reload, restauração protegida, reconexão e captura visual pelo worker real (seis páginas e seis recursos no formato v2). `npm run test:compression` e `npm run package` também passaram; o instalador tem os mesmos 17 arquivos permitidos e 176.811 bytes.
+
+Evidências locais, ignoradas pelo Git: `.cache/visual-validation/report.json` e capturas da comparação visual; `.cache/yampi-check.json` em cada projeto testado.
+
+## Limitações e validação real na 0.4.0
+
+Os resultados acima vêm de fixtures fictícios que reproduzem o formato descrito na análise da exportação 0.3.4. A captura 0.4.0 ainda não foi executada numa vitrine real. Rotas da API pública além de coleções, banners e produtos por slug, a equivalência exata com o minificador da plataforma, a URL de produção de `assets_url`, a regeneração de `components.twig`, a associação ao rascunho e gravações/restaurações reais continuam sem validação. Não se deve classificar uma exportação real como visualmente validada com base em HTTP 200, compilação ou hashes internos. [Pendências](ROADMAP.md).
+
+## Histórico importado do repositório ZIRTUNO
 
 ## Envio conferido arquivo a arquivo na 0.3.7
 
@@ -62,7 +104,7 @@ Os ZIPs anteriores tinham código e baseline internamente consistentes. A compar
 
 A correção fica no exportador e no runtime gerado; os arquivos exportados não são alterados para ocultar falhas do simulador. Projetos privados de lojas não foram sobrescritos nesta tarefa. Não foi copiado conteúdo de lojas para este repositório.
 
-## Resultados atuais
+## Resultados da 0.3.4
 
 - 145 testes unitários passaram, em dez arquivos. Incluem parser estático sem eval/getters, Unicode e JSON/base64, allowlist e segredos, URLs privadas, redirecionamento/streaming/limites, SVG ativo, CSS/imports/fonts, hashes, originais byte a byte, exclusão de preview, helpers, configuração local, updater, navegação da orientação, concorrência/cache/compactação e permissões/isolamento do worker. Os casos anteriores de preflight, backup, conflito, cancelamento, gravação parcial e restauração permanecem ativos.
 - `npm run test:e2e` passou no painel lateral nativo, com CodeMirror antigo/atual, captura textual/PNG sem mutações, projeto portátil, importação, envio fictício/backup/reload, conflito na restauração e reconexão. A etapa visual também passa pelo painel real, autorização por origem, worker autenticado e captura estática até gerar ZIP com cinco páginas e seis registros de recursos. Respostas públicas são fornecidas exclusivamente pela fixture dentro do perfil temporário.
@@ -101,13 +143,13 @@ npm run package
 
 Os testes de navegador usam Chromium instalado pelo Playwright. Portas de teste são efêmeras, sem interromper um servidor de projeto já aberto. O pacote distribuído usa allowlist e não contém a fixture, driver, mock do worker ou exports. Acorn e fflate têm licença incluída.
 
-## Nova exportação e projetos existentes
+## Nova exportação e projetos existentes na 0.3.4
 
 Recarregue a extensão 0.3.7 na mesma pasta instalada, feche o painel antigo e recarregue o editor sem rascunhos pendentes. Confira a loja e confirme a cópia com captura visual habilitada. Autorize somente as origens apresentadas; se negar, a extensão indica a prévia parcial/demonstrativa. Extraia em uma pasta nova e execute os quatro comandos de integridade, compilação, prévia e retorno descritos no README.
 
 Para trocar apenas ferramentas antigas, use `node scripts/update-project.mjs "C:/projeto"` e depois `--apply`. Dry-run não escreve. Ferramentas modificadas pelo usuário e dependências diferentes são recusadas antes da gravação; scripts personalizados, dados, configuração, tema, baseline e manifesto são preservados. Backup/journal precedem a atualização, com rechecagem contra edições concorrentes. Uma atualização não inventa contexto ausente: uma nova captura separada é necessária para isso.
 
-## Limitações e validação real
+## Limitações e validação real na 0.3.4
 
 Configuração declarativa do editor é priorizada quando disponível. Complementos publicados podem diferir do rascunho; o vínculo independente ao tema exato não foi comprovado. A captura visual é uma amostra limitada, não um backup de catálogo/configurações operacionais. JSON dinâmico, recursos recusados, limites e falhas constam no diagnóstico. CSS importado em ciclo é recusado explicitamente, preservando as outras regras. Unknown modules e capacidades sem backend têm erro/limitação visível.
 
