@@ -110,6 +110,17 @@ export function imageType(path: string): string {
   const extension = path.split('.').at(-1)!.toLowerCase();
   return extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : extension === 'svg' ? 'image/svg+xml' : 'image/jpeg';
 }
+// The Yampi editor shows a stored image as a data: URL. Decode it in place: the editor
+// page's security policy blocks fetch() even for data: URLs ("Failed to fetch").
+export function dataUrlBytes(href: string): Uint8Array {
+  const comma = href.indexOf(',');
+  if (!/^data:/i.test(href) || comma < 0) throw new Error('Imagem em formato não reconhecido.');
+  const meta = href.slice('data:'.length, comma), payload = href.slice(comma + 1);
+  if (!/;base64$/i.test(meta)) return new TextEncoder().encode(decodeURIComponent(payload));
+  let binary: string;
+  try {binary = atob(payload);} catch {throw new Error('Imagem com codificação inválida.');}
+  return Uint8Array.from(binary, char => char.charCodeAt(0));
+}
 export function validateImage(path: string, bytes: Uint8Array): void {
   if (!imagePath(path) || !bytes.length || bytes.length > MAX_FILE_BYTES) throw new Error(`Imagem inválida ou grande demais: ${path}`);
   const hex = Array.from(bytes.slice(0, 12), b => b.toString(16).padStart(2, '0')).join('');

@@ -44,3 +44,21 @@ Decisões:
 - O editor fictício passa a reproduzir a marcação real (árvore com `.add-item`, `DsModal`, `DsSelect`, `DsInput`, envio de imagens) para que os testes exercitem o mesmo caminho.
 
 Ainda sem validação real: os controles de criação e envio nunca foram acionados numa loja real, a URL gerada por `assets_url` em `assets/images` não foi conferida, e a leitura das imagens enviadas depende de o editor mostrá-las por data URL, como o módulo indica.
+
+## 16/10/2026 — Primeiro envio real e correção 0.5.1
+
+O proprietário iniciou o envio de um redesign numa loja real com a 0.5.0. A loja tinha mudado depois da exportação: três textos alterados no editor e um quarto que o projeto não tocava. As mudanças da loja foram levadas ao projeto do cliente antes do envio; os três conflitos passaram a mostrar a versão do projeto já com elas.
+
+O que funcionou na loja real:
+
+- **Adicionar arquivo** criou os 18 textos novos (Twig, Vue e SCSS) em pastas existentes. Cada um foi relido depois de recarregar, com o conteúdo inicial da Yampi (vazio ou o componente padrão).
+- O envio de imagens gravou a primeira imagem em `assets/images`. O editor a mostra como `data:image/jpeg;base64,…`, com os mesmos bytes do arquivo do projeto.
+- O backup foi baixado antes da primeira gravação, e o registro do envio parcial ficou no histórico com `pending` e `error`.
+
+O que falhou: a conferência da imagem. `readImage` passava o endereço `data:` por `fetch()`, e a política de segurança (CSP) da página do editor bloqueia essa chamada. O envio parou com **Failed to fetch**, como previsto pela regra de parar no primeiro erro, antes de gravar qualquer texto alterado.
+
+Correção na 0.5.1: endereços `data:` são decodificados diretamente (`dataUrlBytes`), sem rede. Endereços `https:` continuam baixados como antes. O editor fictício ganhou `connect-src 'self'`; sem a correção, o teste de ponta a ponta falha com a mesma mensagem da loja real.
+
+Retomada: uma nova comparação reconhece a imagem já enviada como igual e os 18 textos criados como arquivos a preencher.
+
+Pendente para uma próxima versão: quando um texto depende de um arquivo que só a loja mudou, o painel o mostra como bloqueado, mas não explica que esse arquivo mudou na loja nem como trazê-lo para o projeto.

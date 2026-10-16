@@ -1,9 +1,9 @@
 import {sanitizeRaw} from '../core/preview';
 import type {EditorView} from '@codemirror/view';
 import {editorView, readDocument} from './editor-document';
-import {assertContext, validatePath, validatePaths, validateImage, imagePath, writable, creatableName, uploadablePath, imageType, MAX_FILE_BYTES, type Context} from '../core/model';
+import {assertContext, validatePath, validatePaths, validateImage, imagePath, writable, creatableName, uploadablePath, imageType, dataUrlBytes, MAX_FILE_BYTES, type Context} from '../core/model';
 export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write' | 'create' | 'upload'; context?: Context; path?: string; expected?: string; content?: string}
-export const version = '0.5.0';
+export const version = '0.5.1';
 type Reply = {ok: true; value: unknown} | {ok: false; error: string};
 const clean = (e: Element | null) => e?.textContent?.trim() || '';
 type EditorRoot = ShadowRoot | HTMLElement;
@@ -167,11 +167,7 @@ function visibleImage(): HTMLImageElement {
   if (images.length !== 1 || !images[0].complete || !images[0].naturalWidth) throw new Error('Prévia da imagem não reconhecida. Nenhuma exportação parcial será entregue.');
   return images[0];
 }
-async function readImage(path: string, context: Context): Promise<string> {
-  const source = visibleImage().src;
-  const url = new URL(source, location.href);
-  if (url.username || url.password || (!['https:', 'data:', 'blob:'].includes(url.protocol) && url.origin !== location.origin) || (url.protocol === 'blob:' && url.origin !== location.origin)) throw new Error('Origem da imagem não permitida.');
-  if (source.length > MAX_FILE_BYTES * 1.5) throw new Error('Imagem grande demais.');
+async function downloadImage(url: URL): Promise<Uint8Array> {
   const response = await fetch(url.href, {credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(15000)});
   if (!response.ok || Number(response.headers.get('content-length')) > MAX_FILE_BYTES) throw new Error('Não foi possível baixar a imagem dentro dos limites.');
   const reader = response.body?.getReader();
@@ -186,6 +182,15 @@ async function readImage(path: string, context: Context): Promise<string> {
   } finally {await reader.cancel().catch(() => {});}
   const bytes = new Uint8Array(size); let offset = 0;
   for (const chunk of chunks) {bytes.set(chunk, offset); offset += chunk.length;}
+  return bytes;
+}
+async function readImage(path: string, context: Context): Promise<string> {
+  const source = visibleImage().src;
+  const url = new URL(source, location.href);
+  if (url.username || url.password || (!['https:', 'data:', 'blob:'].includes(url.protocol) && url.origin !== location.origin) || (url.protocol === 'blob:' && url.origin !== location.origin)) throw new Error('Origem da imagem não permitida.');
+  if (source.length > MAX_FILE_BYTES * 1.5) throw new Error('Imagem grande demais.');
+  const bytes = url.protocol === 'data:' ? dataUrlBytes(source) : await downloadImage(url);
+  if (bytes.length > MAX_FILE_BYTES) throw new Error('Imagem grande demais.');
   guard(context);
   if (selectedPath() !== path || visibleImage().src !== source) throw new Error('A imagem selecionada mudou durante a leitura.');
   validateImage(path, bytes);

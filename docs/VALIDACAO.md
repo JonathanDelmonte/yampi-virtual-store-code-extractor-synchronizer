@@ -1,5 +1,11 @@
 # Validação
 
+## Correção 0.5.1, em 16/10/2026
+
+Windows, Node.js 26.2.0. `npm run package` passou: TypeScript, 200 testes em 12 arquivos (3 novos para a decodificação de endereços `data:`), build e pacote. O editor fictício passou a declarar `connect-src 'self'`, como a página real. Sem a correção, `npm run test:e2e` falhou na leitura da imagem com **Failed to fetch**, a mesma mensagem do envio real. Com a correção, o teste de ponta a ponta passou inteiro: exportação com PNG, criação de arquivo e de imagem pelos controles do editor, envio com backup e conferência após recarregar, e restauração protegida.
+
+Validado numa loja real, com a 0.5.0: criação de 18 textos novos por **Adicionar arquivo**, conferidos após recarregar; envio de uma imagem para `assets/images`, exibida pelo editor com os mesmos bytes do projeto; backup antes da primeira gravação; parada no primeiro erro com registro parcial. Ainda sem validação real: gravação dos textos alterados, demais imagens, URL de `assets_url` e restauração.
+
 ## Envio automático na 0.5.0, em 15/10/2026
 
 Windows, Node.js 26.2.0; o alvo do projeto continua Node 24 e `engines` aceita a partir dele. `npm ci`, `npm run check` e `npm run package` passaram: TypeScript, 197 testes em 12 arquivos, build e pacote com 17 arquivos permitidos, sem código do editor fictício.

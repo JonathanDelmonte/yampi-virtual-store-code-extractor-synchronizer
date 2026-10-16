@@ -3,7 +3,7 @@ import {zipSync, strToU8} from 'fflate';
 import {makePlan, missingNewTexts, selectionIssues, imageMoves} from '../src/core/planner';
 import {capture, applyPlan} from '../src/core/workflow';
 import {encodeSnapshot, decodeProject} from '../src/core/archive';
-import {safeFiles, validatePath, validatePaths, sameIgnoringWhitespace, lineEnding, yampiImageName, YAMPI_VUE_TEMPLATE, type Context, type Snapshot, type Files, type Adapter, type Journal, type Plan} from '../src/core/model';
+import {safeFiles, validatePath, validatePaths, sameIgnoringWhitespace, lineEnding, yampiImageName, YAMPI_VUE_TEMPLATE, dataUrlBytes, validateImage, type Context, type Snapshot, type Files, type Adapter, type Journal, type Plan} from '../src/core/model';
 const png = (last: number) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, last]);
 const context: Context = {storeName: 'Loja fictícia', editorOrigin: 'https://app.yampi.com.br', previewOrigin: 'https://loja.invalid'};
 const snapshot = (files: Files): Snapshot => ({context, capturedAt: '2026-01-01T00:00:00Z', files});
@@ -389,5 +389,24 @@ describe('envio automático: criar, enviar imagens e preencher', () => {
     const restore = makePlan(snapshot(result.after), result.before, snapshot(adapter.files));
     await applyPlan(adapter, restore, restore.rows.filter(r => r.status === 'update').map(r => r.path), hooks());
     expect(adapter.files[file]).toBe(base[file]); expect(adapter.files['components/NovoCard.vue']).toBe(YAMPI_VUE_TEMPLATE);
+  });
+});
+describe('imagens lidas do editor', () => {
+  // The real editor shows stored images as data: URLs; its page policy blocks fetch() on them.
+  const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 0, 0xff, 0x7f, 0x80, 0xd9]);
+  const base64 = btoa(String.fromCharCode(...jpeg));
+  test('data URL em base64 vira os mesmos bytes enviados', () => {
+    const bytes = dataUrlBytes(`data:image/jpeg;base64,${base64}`);
+    expect([...bytes]).toEqual([...jpeg]);
+    expect(() => validateImage('assets/images/capa.jpg', bytes)).not.toThrow();
+  });
+  test('SVG sem base64 é decodificado como texto', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1"/></svg>';
+    expect(new TextDecoder().decode(dataUrlBytes(`data:image/svg+xml,${encodeURIComponent(svg)}`))).toBe(svg);
+  });
+  test('formato desconhecido ou codificação inválida param a leitura', () => {
+    expect(() => dataUrlBytes('https://cdn.invalid/capa.jpg')).toThrow('formato não reconhecido');
+    expect(() => dataUrlBytes('data:image/jpeg;base64')).toThrow('formato não reconhecido');
+    expect(() => dataUrlBytes('data:image/jpeg;base64,@@@')).toThrow('codificação inválida');
   });
 });

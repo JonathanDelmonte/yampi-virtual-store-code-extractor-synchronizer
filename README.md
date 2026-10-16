@@ -6,7 +6,9 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
-## Versão 0.5.0
+## Versão 0.5.1
+
+A 0.5.1 corrige a conferência das imagens enviadas, encontrada no primeiro envio real. O editor da Yampi mostra cada imagem guardada como endereço `data:`, e a política de segurança da página bloqueia `fetch()` também nesse tipo de endereço (**Failed to fetch**). A extensão agora decodifica a imagem diretamente. O editor fictício passou a ter a mesma restrição, e o teste de ponta a ponta reproduz a falha sem a correção.
 
 **Edição local e sincronização do código da sua loja Yampi.** A 0.5.0 faz o envio inteiro sozinha. Você escolhe a pasta do projeto, confere um resumo e confirma. A extensão cria os textos novos pelo **Adicionar arquivo** do próprio editor, envia as imagens novas pelo envio de imagens da Yampi e salva os arquivos alterados. Cada item é conferido na Yampi depois de recarregar o editor, antes do próximo. Imagens em subpastas vão direto para `assets/images`, porque a Yampi não aceita subpastas, e as referências nos arquivos enviados são ajustadas. O painel mostra só o que precisa da sua decisão, como um arquivo alterado na loja depois da sua cópia. [Contrato do envio](docs/SPEC.md).
 
@@ -98,7 +100,7 @@ Cada texto existente é relido antes de salvar. Depois de criado, enviado ou sal
 
 O projeto local não precisa mudar por causa das imagens: a prévia continua usando as subpastas, e só a loja recebe os caminhos em `assets/images`. Uma referência montada em tempo de execução (por exemplo, `'images/hero/' ~ nome`) não pode ser ajustada e bloqueia o arquivo, com o motivo.
 
-**Validação real pendente.** Os controles do editor (**Adicionar arquivo**, envio de imagens) foram lidos no módulo público do editor e reproduzidos no editor fictício, mas ainda não foram acionados numa loja real. O caminho que `assets_url` gera para imagens em `assets/images` também não foi conferido. No primeiro envio real, acompanhe o painel e confira tudo em **Ver prévia** antes de publicar. Sem transação atômica do servidor, uma edição externa entre ler e salvar ainda pode ocorrer: não edite simultaneamente nem troque de loja ou tema durante o envio. Testes de gravação em loja real exigem ambiente e arquivo expressamente escolhidos pelo proprietário.
+**Validação real parcial (16/10/2026).** Numa loja real, **Adicionar arquivo** criou 18 textos novos (Twig, Vue e SCSS) em pastas existentes, cada um conferido após recarregar, e o envio de imagens gravou uma imagem em `assets/images` com os mesmos bytes do projeto. A conferência dessa imagem parou o envio na 0.5.0 e foi corrigida na 0.5.1. Ainda sem validação real: gravação dos textos alterados, envio das demais imagens, o caminho que `assets_url` gera em `assets/images` e a restauração. No primeiro envio real, acompanhe o painel e confira tudo em **Ver prévia** antes de publicar. Sem transação atômica do servidor, uma edição externa entre ler e salvar ainda pode ocorrer: não edite simultaneamente nem troque de loja ou tema durante o envio. Testes de gravação em loja real exigem ambiente e arquivo expressamente escolhidos pelo proprietário.
 
 `npm run pack` também informa arquivos modificados e adicionados. `npm run check:integrity -- --return-zip retorno-yampi.zip` confere se o ZIP tem exatamente manifesto, originais e `tema/`, com os mesmos hashes; `-- --original` confirma que nada mudou.
 
