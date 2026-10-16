@@ -5,8 +5,9 @@ import {PanelConnection} from './browser/panel-connection';
 import {zipInWorker} from './browser/zip-client';
 import {capture, applyPlan} from './core/workflow';
 import {encodeSnapshot, decodeProject, readProjectDirectory} from './core/archive';
-import {makePlan, missingNewTexts, selectionIssues} from './core/planner';
-import {assertContext, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Context, type Assets, type Snapshot, type Files, type Plan, type PlanRow, type Journal, type Progress} from './core/model';
+import {makePlan, missingNewTexts, selectionIssues, sendable} from './core/planner';
+import {COMPONENTS_FILE} from '../local-runtime/contract.mjs';
+import {assertContext, writable, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Context, type Assets, type Snapshot, type Files, type Plan, type PlanRow, type Journal, type Progress} from './core/model';
 import {put, get, clearLocal, saveJournal, journalHistory, contextKey} from './storage';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const isDemo = ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).get('demo') === '1';
@@ -17,7 +18,9 @@ const editorTab = new URLSearchParams(location.search).get('tab');
 let baseline: Snapshot | undefined, local: Files | undefined, plan: Plan | undefined, journal: Journal | undefined;
 let working = false, connected = false, controller: AbortController | undefined;
 let localAssets: Assets = {}, history: Journal[] = [];
-const selected = new Set<string>();
+// The store as last compared, and the conflicts the user chose to settle with the project version.
+let remote: Snapshot | undefined;
+const selected = new Set<string>(), overrides = new Set<string>();
 let rpc: RPC;
 let connection: PanelConnection | undefined;
 if (isDemo) {
@@ -56,8 +59,8 @@ function mode(importing: boolean, pointerClick = false): void {
   const changed = incoming.hidden;
   $('export-section').hidden = importing; $('import-section').hidden = !importing;
   $('mode-export').setAttribute('aria-pressed', String(!importing)); $('mode-import').setAttribute('aria-pressed', String(importing));
-  $('review').hidden = !importing || !plan; $('send-section').hidden = !importing || !plan || !selected.size;
-  if (!importing) $('diff').hidden = true;
+  $('review').hidden = !importing || !plan; $('confirm-panel').hidden = true;
+  if (!importing) {$('diff').hidden = true; $('done').hidden = true;}
   if (changed) incoming.getAnimations().forEach(animation => animation.cancel());
   if (changed && pointerClick && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
     incoming.animate([{opacity: 0, transform: 'translateY(4px)'}, {opacity: 1, transform: 'translateY(0)'}], {duration: 180, easing: 'cubic-bezier(.23,1,.32,1)'});
@@ -72,8 +75,9 @@ if (isDemo) $('demo-local').addEventListener('click', () => {
   sample['sections/home/main_banner.twig'] += '<!-- Banner revisado -->\n';
   sample['assets/styles/global/main.scss'] += 'body { background: white; }\n';
   sample['assets/images/readme.md'] += 'Mudança não suportada\n';
-  sample['templates/new.twig'] = '<p>Novo</p>\n';
-  setLocal(sample, baseline.assets); controls(); status('Alterações fictícias carregadas', 'Amostra com alterações de código, um arquivo novo que bloqueia o envio até existir na loja e um tipo sem suporte.');
+  sample['templates/new.twig'] = '<p>Novo</p>\n<img src="{{ \'images/demo/nova.png\' | assets_url }}" alt="">\n';
+  const assets: Assets = {...baseline.assets, 'assets/images/demo/nova.png': baseline.assets?.['assets/images/example.png'] || new Uint8Array()};
+  setLocal(sample, assets); controls(); status('Alterações fictícias carregadas', 'Amostra com alterações de código, um arquivo novo, uma imagem em subpasta e um tipo sem suporte.');
 });
 function status(text: string, detail = '', error = false): void {
   $('status').textContent = text; $('detail').textContent = detail;
@@ -92,20 +96,24 @@ function controls(): void {
   $('preview-pending').hidden=!pendingPreview;
   for(const id of ['preview-allow','preview-partial','preview-discard'])$(id).toggleAttribute('disabled',working||!pendingPreview);
   $('compare').toggleAttribute('disabled', working || !connected || !baseline || !local);
-  const partial = plan ? selectionIssues(plan, selected) : [];
-  $('apply').toggleAttribute('disabled', working || !connected || !plan || !selected.size || !!missing || partial.length > 0 || $<HTMLInputElement>('confirm-store').value !== plan.context.storeName);
-  $('apply').title = working ? 'Aguarde a operação atual terminar.' : !connected ? 'Conecte ao Editor de código da Yampi.' : !plan || !selected.size ? 'Compare o projeto e selecione arquivos compatíveis para envio.' : missing ? `Crie vazios no editor da Yampi os arquivos novos marcados (${missing}) e compare novamente.` : partial.length ? 'Arquivos que usam uns aos outros precisam ser enviados juntos.' : $<HTMLInputElement>('confirm-store').value !== plan.context.storeName ? 'Digite o nome da loja de destino para confirmar.' : 'Salvar os arquivos selecionados com backup e conferência após recarregar.';
+  const partial = plan ? selectionIssues(plan, selected) : [], blocked = !!missing || partial.length > 0;
+  $('apply').toggleAttribute('disabled', working || !connected || !plan || !selected.size || blocked);
+  $('apply').textContent = plan && selected.size ? `Enviar ${selected.size} ${selected.size === 1 ? 'item' : 'itens'} para ${plan.context.storeName}` : 'Enviar para a loja';
+  $('apply').title = working ? 'Aguarde a operação atual terminar.' : !connected ? 'Conecte ao Editor de código da Yampi.' : !plan || !selected.size ? 'Nada pronto para enviar. Confira o resumo.' : missing ? 'Ajuste no projeto os arquivos novos que a Yampi não permite criar.' : partial.length ? 'Arquivos que usam uns aos outros precisam ser enviados juntos.' : 'Revise e confirme o envio.';
+  if (working || !plan || !selected.size || blocked) $('confirm-panel').hidden = true;
+  $('confirm-send').toggleAttribute('disabled', working || !connected);
   $('discard-whitespace').hidden = !plan?.rows.some(r => r.status === 'update' && r.whitespaceOnly);
   $('discard-whitespace').toggleAttribute('disabled', working);
-  for (const id of ['baseline', 'folder', 'confirm-store', 'clear', 'filter', 'demo-local', 'history', 'download-journal', 'retry', 'mode-export', 'mode-import', 'go-import']) $(id).toggleAttribute('disabled', working);
+  for (const id of ['baseline', 'folder', 'cancel-send', 'clear', 'filter', 'demo-local', 'history', 'download-journal', 'retry', 'mode-export', 'mode-import', 'go-import']) $(id).toggleAttribute('disabled', working);
   $('retry').hidden = connected || !editorTab && !isDemo;
   $('restore').toggleAttribute('disabled', working || !connected || !journal);
+  $('undo').toggleAttribute('disabled', working || !connected || !journal);
   $('download-backup').toggleAttribute('disabled', working || !journal);
   $('download-journal').toggleAttribute('disabled', working || !journal);
   $('cancel').hidden = !working;
   document.querySelectorAll<HTMLInputElement>('#rows input').forEach(input => {
     const path = input.getAttribute('aria-label')?.slice(7);
-    input.disabled = working || plan?.rows.find(r => r.path === path)?.status !== 'update';
+    input.disabled = working || !sendable(plan?.rows.find(r => r.path === path));
   });
 }
 async function run(job: () => Promise<void>, needsEditor = true, prepare?: () => Promise<void>, access: 'read' | 'write' = 'read'): Promise<void> {
@@ -145,74 +153,113 @@ async function download(bytes: Uint8Array, name: string, type = 'application/zip
   } finally {URL.revokeObjectURL(url);}
 }
 function setBaseline(snapshot: Snapshot): void {
-  baseline = snapshot; plan = undefined; selected.clear(); $('review').hidden = true; $('diff').hidden = true; $('send-section').hidden = true;
+  baseline = snapshot; plan = undefined; selected.clear(); $('review').hidden = true; $('diff').hidden = true; $('done').hidden = true;
   const images = Object.keys(snapshot.assets || {}).length;
   $('baseline-info').textContent = `${Object.keys(snapshot.files).length} textos e ${images} ${images === 1 ? 'imagem' : 'imagens'} · ${snapshot.context.storeName} · ${new Date(snapshot.capturedAt).toLocaleString('pt-BR')}`;
 }
 function setLocal(files: Files, assets: Assets = {}): void {
-  local = files; localAssets = assets; plan = undefined; selected.clear(); $('review').hidden = true; $('diff').hidden = true; $('send-section').hidden = true;
+  local = files; localAssets = assets; plan = undefined; selected.clear(); $('review').hidden = true; $('diff').hidden = true; $('done').hidden = true;
   const images = Object.keys(assets).length;
   $('local-info').textContent = `${Object.keys(files).length} textos e ${images} ${images === 1 ? 'imagem' : 'imagens'} carregados do computador.`;
 }
 const labels: Record<PlanRow['status'], string> = {
-  update: 'Pronto para envio', unchanged: 'Sem alterações', 'remote-only': 'Mudou apenas na loja', 'already-applied': 'Já está na loja', conflict: 'Conflito', 'missing-local': 'Ausente localmente · preservado', 'missing-remote': 'Removido na loja · bloqueado', 'new-local': 'Novo · crie vazio na Yampi', unsupported: 'Tipo sem suporte · bloqueado', 'blocked-dependency': 'Depende de arquivo que não será enviado · bloqueado', 'whitespace-only': 'Só espaço em branco · descartado'
+  update: 'Pronto para envio', create: 'Novo · será criado', upload: 'Imagem nova · será enviada', unchanged: 'Sem alterações', 'remote-only': 'Mudou apenas na loja', 'already-applied': 'Já está na loja', conflict: 'Conflito', 'missing-local': 'Ausente no projeto · preservado', 'missing-remote': 'Removido na loja · bloqueado', 'new-local': 'Novo · a Yampi não permite criar', unsupported: 'Sem suporte · bloqueado', 'blocked-dependency': 'Bloqueado', 'whitespace-only': 'Só espaço em branco · descartado'
 };
-const label = (row: PlanRow) => row.status === 'new-local' && row.image ? 'Imagem nova · envie pela Yampi' : row.status === 'update' && row.base === undefined ? 'Novo · pronto para preencher' : labels[row.status];
+const label = (row: PlanRow) => row.status === 'update' && row.override ? 'Usará a versão do projeto' : row.status === 'update' && row.base === undefined ? 'Novo · será preenchido' : labels[row.status];
+const short = (path: string) => path.replace(/^assets\//, '');
+function rowNote(row: PlanRow): string {
+  return [row.source ? `Do projeto: ${row.source}` : '', row.rewritten ? `${row.rewritten} ${row.rewritten === 1 ? 'referência de imagem ajustada' : 'referências de imagem ajustadas'}` : '', row.reason || '', row.blockedBy?.length ? 'Depende de: ' + row.blockedBy.join(', ') : '', row.dependsOn?.length ? 'Vai junto com: ' + row.dependsOn.join(', ') : ''].filter(Boolean).join(' · ');
+}
 function showDiff(row: PlanRow, pointerClick: boolean): void {
-  $('diff-title').textContent = row.path;
+  $('diff-title').textContent = row.source ? `${row.source} → ${row.path}` : row.path;
   for (const [kind, id] of [['base', 'diff-base'], ['local', 'diff-local'], ['remote', 'diff-remote']] as const) {
-    if (row.image) {
-      const bytes = row.image[kind];
-      $(id).textContent = bytes ? `Imagem · ${bytes.length} bytes. Imagens alteradas não são enviadas nesta versão.` : '(ausente)';
-    } else $(id).textContent = row[kind] ?? '(ausente)';
+    if (row.image) {const bytes = row.image[kind]; $(id).textContent = bytes ? `Imagem · ${bytes.length} bytes` : '(ausente)';}
+    else $(id).textContent = row[kind] ?? '(ausente)';
   }
   $('diff').hidden = false;
   $('diff').scrollIntoView({behavior: pointerClick && !matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'instant', block: 'nearest'});
 }
+function item(text: string, ...actions: HTMLElement[]): HTMLLIElement {
+  const li = document.createElement('li'), span = document.createElement('span'); span.textContent = text; li.append(span, ...actions); return li;
+}
+function action(text: string, run: (event: MouseEvent) => void): HTMLButtonElement {
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button'; button.textContent = text; button.addEventListener('click', run); return button;
+}
+// Only what needs a decision or a fix in the project, in plain words, with the action that solves it.
+function attention(): HTMLLIElement[] {
+  if (!plan) return [];
+  const items: HTMLLIElement[] = [];
+  for (const row of plan.rows) {
+    const view = action('Ver versões', event => showDiff(row, event.detail > 0));
+    if (row.override) items.push(item(`${row.path}: vai a versão do projeto. A versão da loja fica no backup do envio.`, view, action('Manter a versão da loja', () => {overrides.delete(row.path); replan();})));
+    else if (row.status === 'conflict' && !row.image && writable(row.path)) items.push(item(`${row.path} mudou na loja depois da sua cópia. Sem escolha, fica a versão da loja.`, view, action('Usar a versão do projeto', () => {
+      if (!confirm(`Usar a versão do projeto em ${row.path}? A versão atual da loja fica no backup do envio.`)) return;
+      overrides.add(row.path); replan();
+    })));
+    else if (row.status === 'conflict') items.push(item(`${row.path} mudou na loja depois da sua cópia, e a extensão não pode substituí-lo.`, view));
+    else if (row.status === 'new-local' || row.status === 'blocked-dependency' || row.status === 'unsupported' && row.reason && row.path !== COMPONENTS_FILE) items.push(item(`${row.source || row.path}: ${row.reason || (row.blockedBy?.length ? `usa ${row.blockedBy.join(', ')}, que não pode ser enviado.` : 'não pode ser enviado.')}`, view));
+    else if (row.status === 'missing-remote') items.push(item(`${row.path} foi removido da loja e não será recriado.`, view));
+  }
+  for (const issue of selectionIssues(plan, selected)) items.push(item(`${issue.path} precisa ir junto com ${issue.requires}.`));
+  for (const warning of plan.warnings || []) items.push(item(`${warning.path}: ${warning.message}`));
+  return items;
+}
+function replan(): void {
+  if (!baseline || !local || !remote) return;
+  plan = makePlan(baseline, local, remote, localAssets, {overrides});
+  // Whitespace-only differences start unselected; coupled files start together.
+  selected.clear(); plan.rows.filter(r => sendable(r) && !r.whitespaceOnly).forEach(r => selected.add(r.path));
+  renderPlan(); controls();
+}
 function renderPlan(): void {
   if (!plan) return;
+  const count = (test: (row: PlanRow) => boolean) => plan!.rows.filter(test).length;
+  const changed = count(r => r.status === 'update' && !r.whitespaceOnly && r.base !== undefined), created = count(r => r.status === 'create' || r.status === 'update' && r.base === undefined);
+  const images = count(r => r.status === 'upload'), same = count(r => ['unchanged', 'already-applied', 'missing-local', 'remote-only'].includes(r.status));
+  const conflicts = count(r => r.status === 'conflict'), blocked = count(r => ['blocked-dependency', 'new-local', 'missing-remote'].includes(r.status) || r.status === 'unsupported' && !!r.reason && r.path !== COMPONENTS_FILE), whitespace = count(r => r.status === 'update' && !!r.whitespaceOnly);
+  $('count-update').textContent = String(changed); $('count-create').textContent = String(created); $('count-upload').textContent = String(images); $('count-same').textContent = String(same);
+  $('summary').textContent = `${selected.size} para enviar · ${changed} alterados · ${created} novos · ${images} imagens · ${conflicts} conflitos · ${blocked} bloqueados${whitespace ? ` · ${whitespace} só espaço em branco` : ''} · ${plan.rows.length} caminhos comparados`;
+  const moved = plan.rows.filter(r => r.status === 'upload' && r.source);
+  $('moves-title').textContent = moved.length ? `${moved.length} ${moved.length === 1 ? 'imagem vai' : 'imagens vão'} direto para assets/images, porque a Yampi não aceita subpastas. As referências nos arquivos enviados são ajustadas automaticamente.` : '';
+  $('moves-list').replaceChildren(...moved.map(r => item(`${short(r.source!)} → ${short(r.path)}`)));
+  $('moves').hidden = !moved.length;
+  const items = attention();
+  $('attention-list').replaceChildren(...items);
+  $('attention').hidden = !items.length;
+  $('review-title').textContent = missingNewTexts(plan).length ? 'Ajuste o projeto antes de enviar.' : !selected.size ? 'Nada para enviar.' : items.length ? 'Revise antes de enviar.' : 'Pronto para enviar.';
   const filter = $<HTMLSelectElement>('filter').value;
   $('rows').replaceChildren();
-  const counts = plan.rows.reduce((map, row) => {map[row.status] = (map[row.status] || 0) + 1; return map;}, {} as Record<string, number>);
-  const missing = missingNewTexts(plan).length;
-  const partial = selectionIssues(plan, selected), whitespace = plan.rows.filter(r => r.status === 'update' && r.whitespaceOnly).length;
-  $('summary').textContent = `${selected.size} selecionados · ${counts.update || 0} prontos · ${counts.conflict || 0} conflitos${missing ? ` · ${missing} para criar na Yampi` : ''} · ${counts['blocked-dependency'] || 0} bloqueados por dependência${whitespace ? ` · ${whitespace} só espaço em branco` : ''} · ${plan.rows.length} caminhos comparados`;
-  $('plan-warnings').replaceChildren(...[...partial.map(p => `Envio parcial bloqueado: ${p.path} precisa ir junto com ${p.requires}.`), ...(plan.warnings || []).map(w => `${w.path}: ${w.message}`)].map(text => {const item = document.createElement('li'); item.textContent = text; return item;}));
-  $('plan-warnings').hidden = !partial.length && !plan.warnings?.length;
   for (const row of plan.rows) {
     if (filter === 'changes' && ['unchanged', 'already-applied', 'missing-local'].includes(row.status)) continue;
-    if (filter === 'update' && row.status !== 'update' || filter === 'conflict' && row.status !== 'conflict' || filter === 'whitespace' && !row.whitespaceOnly && row.status !== 'whitespace-only' || filter === 'blocked' && row.status !== 'blocked-dependency') continue;
+    if (filter === 'update' && !sendable(row) || filter === 'conflict' && row.status !== 'conflict' || filter === 'whitespace' && !row.whitespaceOnly && row.status !== 'whitespace-only' || filter === 'blocked' && !['blocked-dependency', 'new-local', 'missing-remote', 'unsupported'].includes(row.status)) continue;
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', `Enviar ${row.path}`);
-    checkbox.disabled = row.status !== 'update' || working; checkbox.checked = selected.has(row.path);
+    checkbox.disabled = !sendable(row) || working; checkbox.checked = selected.has(row.path);
     checkbox.addEventListener('change', () => {checkbox.checked ? selected.add(row.path) : selected.delete(row.path); renderPlan(); controls();});
     td.append(checkbox);
     const pathCell = document.createElement('td'); pathCell.className = 'path'; pathCell.textContent = row.path;
     const result = document.createElement('td'), badge = document.createElement('span'); badge.className = `row-status ${row.status}`; badge.textContent = label(row) + (row.status === 'update' && row.whitespaceOnly ? ' · só espaço em branco' : ''); result.append(badge);
-    const detail = row.blockedBy?.length ? 'Depende de: ' + row.blockedBy.join(', ') : row.dependsOn?.length ? 'Envie junto com: ' + row.dependsOn.join(', ') : '';
+    const detail = rowNote(row);
     if (detail) {const note = document.createElement('small'); note.className = 'row-detail'; note.textContent = detail; result.append(note);}
-    const action = document.createElement('td'), button = document.createElement('button'); button.textContent = 'Ver versões'; button.addEventListener('click', event => showDiff(row, event.detail > 0)); action.append(button);
-    tr.append(td, pathCell, result, action); $('rows').append(tr);
+    const cell = document.createElement('td'), button = document.createElement('button'); button.textContent = 'Ver versões'; button.addEventListener('click', event => showDiff(row, event.detail > 0)); cell.append(button);
+    tr.append(td, pathCell, result, cell); $('rows').append(tr);
   }
   $('review').hidden = false;
-  $('send-section').hidden = !selected.size;
-  $('target-store').textContent = plan.context.storeName; $('confirm-name').textContent = plan.context.storeName;
+  $('target-store').textContent = plan.context.storeName;
 }
 async function compare(): Promise<void> {
   if (!baseline || !local) throw new Error('Carregue a exportação original e a pasta editada.');
   status('Relendo o estado atual da loja…');
+  $('done').hidden = true; $('confirm-panel').hidden = true;
   await adapter.refresh();
-  const remote = await capture(adapter, {signal: controller?.signal, progress});
-  plan = makePlan(baseline, local, remote, localAssets);
-  // Whitespace-only differences start unselected; coupled files start together.
-  selected.clear(); plan.rows.filter(r => r.status === 'update' && !r.whitespaceOnly).forEach(r => selected.add(r.path));
-  $<HTMLInputElement>('confirm-store').value = '';
-  const missing = missingNewTexts(plan).length;
-  renderPlan(); status('Comparação concluída', missing ? `Crie vazios no editor da Yampi ${missing === 1 ? 'o arquivo novo marcado' : `os ${missing} arquivos novos marcados`}, na mesma pasta, e compare novamente. O envio fica bloqueado até lá.` : selected.size ? `${selected.size} ${selected.size === 1 ? 'arquivo pode ser enviado' : 'arquivos podem ser enviados'}. Revise as versões e confirme a loja.` : 'Nenhuma alteração pode ser enviada. Confira os resultados da comparação abaixo.');
+  remote = await capture(adapter, {signal: controller?.signal, progress});
+  overrides.clear(); replan();
+  const created = plan!.rows.filter(r => r.status === 'create').length, images = plan!.rows.filter(r => r.status === 'upload').length;
+  status('Comparação concluída', missingNewTexts(plan!).length ? 'Há arquivos novos que a Yampi não permite criar. Veja abaixo o que ajustar no projeto.' : selected.size ? `Confira o resumo e clique em enviar.${created || images ? ` A extensão cria ${created} ${created === 1 ? 'arquivo' : 'arquivos'} e envia ${images} ${images === 1 ? 'imagem' : 'imagens'} pelo próprio editor da Yampi.` : ''}` : 'Nada para enviar: a loja já está igual ao projeto, ou os itens abaixo precisam de ajuste.');
 }
 function journalInfo(): void {
-  $('journal-info').textContent = journal ? `${journal.verified.length}/${journal.selected.length} arquivos conferidos · ${journal.status === 'completed' ? 'concluído' : 'envio interrompido ou pendente'} · ${new Date(journal.startedAt).toLocaleString('pt-BR')}` : 'Nenhum envio nesta instalação.';
+  $('journal-info').textContent = journal ? `${journal.verified.length + (journal.uploaded?.length || 0)}/${journal.selected.length} conferidos · ${journal.status === 'completed' ? 'concluído' : 'envio interrompido ou pendente'} · ${new Date(journal.startedAt).toLocaleString('pt-BR')}` : 'Nenhum envio nesta instalação.';
 }
 async function updateHistory(): Promise<void> {
   if (!journal) return;
@@ -307,21 +354,29 @@ $('discard-whitespace').addEventListener('click', () => {
   for (const row of plan.rows) if (row.status === 'update' && row.whitespaceOnly) {row.status = 'whitespace-only'; selected.delete(row.path);}
   renderPlan(); controls(); status('Alterações só de espaço em branco descartadas', 'Esses arquivos não serão enviados. Compare novamente para reavaliar.');
 });
-$('confirm-store').addEventListener('input', controls);
 $('filter').addEventListener('change', renderPlan);
 $('close-diff').addEventListener('click', () => {$('diff').hidden = true;});
 $('cancel').addEventListener('click', () => {controller?.abort(); status('Interrupção solicitada', 'A operação para após conferir o arquivo em andamento.');});
-$('apply').addEventListener('click', () => void run(async () => {
-  if (!plan || $<HTMLInputElement>('confirm-store').value !== plan.context.storeName) throw new Error('Confirme o nome da loja antes de enviar.');
+$('apply').addEventListener('click', () => {
+  if (!plan || !selected.size || working) return;
+  $('target-store').textContent = plan.context.storeName; $('confirm-panel').hidden = false; $('confirm-send').focus();
+});
+$('cancel-send').addEventListener('click', () => {$('confirm-panel').hidden = true; $('apply').focus();});
+$('confirm-send').addEventListener('click', () => void run(async () => {
+  if (!plan) throw new Error('Compare novamente antes de enviar.');
   const current = plan;
   // Freeze selection and invalidate the plan; retries always require another comparison.
-  const chosen = [...selected]; plan = undefined; selected.clear(); $('send-section').hidden = true;
-  await applyPlan(adapter, current, chosen, {
+  const chosen = [...selected]; plan = undefined; selected.clear(); $('confirm-panel').hidden = true; $('review').hidden = true; $('diff').hidden = true;
+  const result = await applyPlan(adapter, current, chosen, {
     signal: controller?.signal, progress,
     persist: async value => {await saveJournal(value); journal = structuredClone(value); journalInfo(); await updateHistory();},
     backup: async value => {const zip = await encodeSnapshot(value); await put(`backup:${journal!.id}`, {journalId: journal!.id, bytes: zip}); await download(zip, fileName('backup-antes-do-envio'));}
   });
-  $('review').hidden = true; $('diff').hidden = true;
+  const texts = result.verified.length, created = result.created?.length || 0, images = result.uploaded?.length || 0;
+  $('done-summary').textContent = `${texts} ${texts === 1 ? 'arquivo salvo' : 'arquivos salvos'}${created ? `, ${created} ${created === 1 ? 'deles criado' : 'deles criados'} pela extensão` : ''}${images ? ` e ${images} ${images === 1 ? 'imagem enviada' : 'imagens enviadas'}` : ''}. Cada item foi conferido na Yampi depois de recarregar o editor.`;
+  $('done-warnings').replaceChildren(...(result.warnings || []).map(text => item(text)));
+  $('done-warnings').hidden = !result.warnings?.length;
+  $('done').hidden = false;
   status('Arquivos salvos e conferidos após recarregar', 'Abra Ver prévia na Yampi e valide a loja. A extensão não publicou as alterações.');
 }, true, undefined, 'write'));
 $('download-backup').addEventListener('click', () => void run(async () => {
@@ -335,16 +390,19 @@ $('download-journal').addEventListener('click', () => void run(async () => {
   await download(new TextEncoder().encode(JSON.stringify(journal, null, 2)), `registro-${journal.id}.json`, 'application/json');
   status('Registro do envio baixado', 'Contém versões anteriores, propostas e caminhos pendentes para recuperação. Guarde fora do repositório.');
 }, false));
-$('restore').addEventListener('click', () => void run(async () => {
+// Undo is a new comparison from the send record: the sent version becomes the original, the previous one the project.
+async function prepareRestore(): Promise<void> {
   if (!journal) return;
   setBaseline({context: journal.context, capturedAt: journal.startedAt, files: journal.after});
   setLocal(journal.before); mode(true); await compare();
-  status('Restauração preparada para revisão', 'Apenas arquivos ainda iguais ao último envio poderão voltar ao estado anterior. Alterações posteriores ficam como conflitos.');
-}));
+  status('Restauração preparada para revisão', 'Apenas arquivos ainda iguais ao último envio voltam ao estado anterior; alterações posteriores ficam como conflitos. Arquivos criados voltam a ficar vazios, e imagens enviadas continuam na loja.');
+}
+for (const id of ['restore', 'undo']) $(id).addEventListener('click', () => void run(prepareRestore));
 $('clear').addEventListener('click', async () => {
   if (!confirm('Apagar as cópias originais e o último backup guardados nesta extensão? Os ZIPs já baixados continuam no computador. Nenhum arquivo da loja será alterado.')) return;
   await clearLocal(); baseline = undefined; local = undefined; localAssets = {}; plan = undefined; journal = undefined; history = []; $('history').replaceChildren(); selected.clear();
-  $('review').hidden = true; $('diff').hidden = true; $('send-section').hidden = true; $('baseline-info').textContent = 'Nenhuma exportação concluída.'; $('local-info').textContent = 'Nenhum projeto editado selecionado.';
+  remote = undefined; overrides.clear();
+  $('review').hidden = true; $('diff').hidden = true; $('done').hidden = true; $('baseline-info').textContent = 'Nenhuma exportação concluída.'; $('local-info').textContent = 'Nenhum projeto escolhido.';
   journalInfo(); status('Dados locais da extensão apagados'); controls();
 });
 async function connect(): Promise<void> {
@@ -354,7 +412,6 @@ async function connect(): Promise<void> {
   status('Conectando ao editor…');
   const context = await adapter.context(); currentContext=context; connected = true;
   $('store').textContent = context.storeName; $('connection-state').textContent = 'Editor conectado';
-  $<HTMLInputElement>('confirm-store').placeholder = context.storeName;
   const previous = await get<Snapshot>(`baseline:${await contextKey(context)}`) || await get<Snapshot>('baseline');
   if (previous) try {assertContext(previous.context, context); setBaseline(previous);} catch { /* A backup from another shop is never selected implicitly. */ }
   history = await journalHistory(context); journal = history[0] || await get<Journal>('journal');

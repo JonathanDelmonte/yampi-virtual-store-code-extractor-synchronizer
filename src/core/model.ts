@@ -26,8 +26,10 @@ export interface Manifest {
   skipped?: {path: string; reason: string}[];
   preview?: {manifest: string; format: number};
 }
-export type Status = 'update' | 'unchanged' | 'remote-only' | 'already-applied' | 'conflict' | 'missing-local' | 'missing-remote' | 'new-local' | 'unsupported' | 'blocked-dependency' | 'whitespace-only';
-export interface PlanRow {path: string; status: Status; base?: string; local?: string; remote?: string; image?: {base?: Uint8Array; local?: Uint8Array; remote?: Uint8Array}; whitespaceOnly?: boolean; blockedBy?: string[]; dependsOn?: string[]}
+export type Status = 'update' | 'create' | 'upload' | 'unchanged' | 'remote-only' | 'already-applied' | 'conflict' | 'missing-local' | 'missing-remote' | 'new-local' | 'unsupported' | 'blocked-dependency' | 'whitespace-only';
+// source: local path of an image the store keeps elsewhere. rewritten: image references adjusted in a text.
+// override: a conflict the user chose to resolve with the project version. reason: why a row cannot be sent.
+export interface PlanRow {path: string; status: Status; base?: string; local?: string; remote?: string; image?: {base?: Uint8Array; local?: Uint8Array; remote?: Uint8Array}; whitespaceOnly?: boolean; blockedBy?: string[]; dependsOn?: string[]; source?: string; rewritten?: number; override?: boolean; reason?: string}
 export interface Plan {context: Context; rows: PlanRow[]; createdAt: string; warnings?: {path: string; message: string}[]}
 export interface Adapter {
   context(): Promise<Context>;
@@ -36,6 +38,9 @@ export interface Adapter {
   readAsset?(path: string): Promise<Uint8Array>;
   write(path: string, expected: string, content: string): Promise<void>;
   refresh(): Promise<void>;
+  // Through the editor's own controls: a text in an existing folder, an image in assets/images.
+  create?(path: string): Promise<void>;
+  upload?(path: string, bytes: Uint8Array): Promise<void>;
 }
 export type ReadAdapter = Pick<Adapter, 'context' | 'inventory' | 'read' | 'readAsset'>;
 export interface Progress {done: number; total: number; path: string; phase: string}
@@ -44,6 +49,8 @@ export interface Journal {
   status: 'prepared' | 'running' | 'completed' | 'stopped';
   selected: string[]; verified: string[]; pending?: string; error?: string;
   before: Files; after: Files;
+  // Files the extension created (their "before" is the content Yampi gave them) and images it uploaded.
+  created?: string[]; uploaded?: string[]; warnings?: string[];
 }
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
@@ -82,6 +89,27 @@ export function sameIgnoringWhitespace(a: string, b: string): boolean {
   return normalize(a) === normalize(b);
 }
 export function imagePath(path: string): boolean {return /^assets\/.*\.(png|jpe?g|webp|svg)$/i.test(path)}
+// What the Yampi editor itself accepts (public editor module, read on 15/10/2026).
+// "Adicionar arquivo" creates `<folder>/<name>.<ext>` in an existing folder; the name takes
+// letters, digits, "_" and "-". The extension creates only what it can fill: Twig, Vue, SCSS.
+export const YAMPI_VUE_TEMPLATE = '<template>\n    <div>\n\n    </div>\n</template>\n\n<script>\n    export default {\n        \n    }\n</script>\n\n<style lang="scss" scoped>\n\n</style>';
+export function creatableName(path: string): boolean {return /^[A-Za-z0-9_-]+\.(?:twig|vue|scss)$/.test(path.split('/').at(-1)!)}
+// A file Yampi has just created holds nothing to lose: empty, or its default Vue component.
+export function freshFile(path: string, content: string): boolean {return !content.trim() || /\.vue$/.test(path) && sameIgnoringWhitespace(content, YAMPI_VUE_TEMPLATE)}
+// The uploader always saves to assets/images/<name>, lowercased, other characters as "-".
+export function yampiImageName(fileName: string): string {
+  const parts = fileName.split(/[/\\]/).at(-1)!.split('.'), last = parts.length > 1 ? parts.pop()! : '';
+  const extension = last ? '.' + last.toLowerCase() : '';
+  return parts.join('.').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') + extension;
+}
+export function uploadablePath(path: string): boolean {
+  const name = path.split('/').at(-1)!;
+  return imagePath(path) && path === 'assets/images/' + name && yampiImageName(name) === name && !name.startsWith('.');
+}
+export function imageType(path: string): string {
+  const extension = path.split('.').at(-1)!.toLowerCase();
+  return extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : extension === 'svg' ? 'image/svg+xml' : 'image/jpeg';
+}
 export function validateImage(path: string, bytes: Uint8Array): void {
   if (!imagePath(path) || !bytes.length || bytes.length > MAX_FILE_BYTES) throw new Error(`Imagem inválida ou grande demais: ${path}`);
   const hex = Array.from(bytes.slice(0, 12), b => b.toString(16).padStart(2, '0')).join('');

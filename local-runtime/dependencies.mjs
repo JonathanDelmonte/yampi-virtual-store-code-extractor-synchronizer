@@ -90,7 +90,7 @@ export function dependencyReport({targets, texts, local, remote}) {
   const listed = new Set(componentList(texts[COMPONENTS_FILE] ?? '').components);
   if (texts[COMPONENTS_FILE] !== undefined) for (const component of newComponents) {
     const name = component.path.split('/').at(-1).slice(0, -4);
-    if (!listed.has(name)) warnings.push({path: component.path, message: 'Componente novo fora de elements/scripts/components.twig: não será carregado na Yampi. A extensão não cria arquivos; crie-o no editor da Yampi, que gera essa lista.'});
+    if (!listed.has(name)) warnings.push({path: component.path, message: 'Componente novo fora de elements/scripts/components.twig: a prévia local só registra os componentes listados ali. Na loja, a Yampi o lista quando a extensão cria o arquivo pelo editor.'});
   }
   return {blocked, warnings};
 }

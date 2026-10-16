@@ -44,8 +44,8 @@ export async function nativePanelDriver(browser, downloadDirectory) {
       if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description || reply.exceptionDetails.text);
       return reply.result.value;
     };
-    const waitForFunction = async fn => {
-      const deadline = Date.now() + 45000;
+    const waitForFunction = async (fn, {timeout = 45000} = {}) => {
+      const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
         if (await evaluate(fn).catch(() => false) && await evaluate(() => !document.querySelector('#cancel') || document.querySelector('#cancel').hidden).catch(() => false)) return;
         await new Promise(r => setTimeout(r, 100));

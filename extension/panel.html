@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="app-header">
-    <div class="brand"><h1><img class="brand-icon" src="icons/icon32.png" alt="" width="24" height="24">Zirtuno Sync Yampi</h1><span class="version">0.4.0</span></div>
+    <div class="brand"><h1><img class="brand-icon" src="icons/icon32.png" alt="" width="24" height="24">Zirtuno Sync Yampi</h1><span class="version">0.5.0</span></div>
     <a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer" aria-label="Desenvolvido por Zirtuno — abrir Instagram"><span>Desenvolvido por</span><img src="brand/zirtuno-logo.png" alt="" width="18" height="18"><span class="maker-name">Zirtuno</span></a>
     <div class="connection"><span id="store">Conectando ao editor…</span><span id="connection-state">Aguardando conexão</span></div>
   </header>
@@ -22,8 +22,8 @@
       <button id="retry" hidden>Tentar conectar novamente</button>
     </section>
     <nav class="modes" aria-label="Operação">
-      <button id="mode-export" aria-pressed="true" aria-controls="export-section">Baixar arquivos</button>
-      <button id="mode-import" aria-pressed="false" aria-controls="import-section">Enviar alterações</button>
+      <button id="mode-export" aria-pressed="true" aria-controls="export-section">Baixar tema</button>
+      <button id="mode-import" aria-pressed="false" aria-controls="import-section">Enviar projeto</button>
     </nav>
     <section id="export-section" class="workspace" aria-labelledby="export-title">
       <h2 id="export-title">Baixar o código da loja.</h2>
@@ -45,42 +45,63 @@
       <details class="local-help">
         <summary>Como editar no computador</summary>
         <p>Extraia o ZIP e abra a pasta no VS Code, ou abra o arquivo .code-workspace. O README.md explica a estrutura; preserve .yampi-sync/ para comparar e devolver as alterações. Com Node 24 instalado, execute <code>npm ci</code> e <code>npm run dev</code>. Edite os arquivos de <code>tema/</code>.</p>
-        <p>Depois, volte a <strong>Enviar alterações</strong> e selecione a pasta extraída. Se preferir ZIP, execute <code>npm run pack</code> e selecione o ZIP indicado no terminal.</p>
+        <p>Depois, volte a <strong>Enviar projeto</strong> e escolha a pasta extraída.</p>
         <p>A prévia local informa se usa contexto capturado ou demonstrativo; recursos ausentes e limitações estão em preview/report.json. Confira o resultado também na Yampi.</p>
       </details>
-      <button id="go-import" class="text-button">Já editei o projeto. Enviar alterações</button>
+      <button id="go-import" class="text-button">Já editei o projeto. Enviar para a loja</button>
     </section>
     <section id="import-section" class="workspace" aria-labelledby="import-title" hidden>
-      <h2 id="import-title">Enviar suas alterações.</h2>
-      <p>Escolha o projeto editado. Você verá a comparação com a loja antes de selecionar os arquivos e confirmar o envio.</p>
-      <label class="file-label">Pasta do projeto<input id="folder" type="file" webkitdirectory multiple></label>
-      <span class="or">ou selecione um ZIP</span>
-      <label class="file-label">ZIP de retorno<input id="baseline" type="file" accept=".zip"></label>
-      <small id="local-info">Nenhum projeto editado selecionado.</small>
-      <button id="compare" disabled>Comparar novamente com a loja</button>
-      <details class="local-help"><summary>Qual pasta devo escolher?</summary><p>Selecione a pasta inteira exportada, com <code>tema/</code> e <code>.yampi-sync/</code>. Também é possível selecionar apenas <code>tema/</code> quando a cópia original desta loja já estiver guardada.</p></details>
+      <h2 id="import-title">Enviar o projeto para a loja.</h2>
+      <ol class="steps">
+        <li>Escolha a pasta do projeto.</li>
+        <li>Confira o resumo do que vai mudar.</li>
+        <li>Clique em enviar. A extensão cria os arquivos novos, envia as imagens e confere cada arquivo na Yampi.</li>
+      </ol>
+      <label class="file-label pick">Pasta do projeto<input id="folder" type="file" webkitdirectory multiple></label>
+      <details class="zip-option"><summary>Usar um ZIP de retorno</summary><label class="file-label">ZIP de retorno<input id="baseline" type="file" accept=".zip"></label></details>
+      <small id="local-info">Nenhum projeto escolhido.</small>
+      <button id="compare" class="text-button" disabled>Comparar de novo com a loja</button>
     </section>
-    <section id="review" aria-labelledby="review-title" hidden>
-      <div class="review-heading">
-        <h2 id="review-title">Alterações encontradas</h2><p id="summary"></p>
-        <label>Mostrar <select id="filter"><option value="changes">Alterações e conflitos</option><option value="all">Todos os arquivos</option><option value="update">Prontos para envio</option><option value="conflict">Conflitos</option><option value="blocked">Bloqueados por dependência</option><option value="whitespace">Só espaço em branco</option></select></label>
+    <section id="review" class="workspace" aria-labelledby="review-title" hidden>
+      <h2 id="review-title">Pronto para enviar.</h2>
+      <div class="tiles">
+        <div class="tile"><strong id="count-update">0</strong><span>alterados</span></div>
+        <div class="tile"><strong id="count-create">0</strong><span>novos</span></div>
+        <div class="tile"><strong id="count-upload">0</strong><span>imagens</span></div>
+        <div class="tile quiet"><strong id="count-same">0</strong><span>iguais</span></div>
       </div>
-      <ul id="plan-warnings" class="plan-warnings" hidden></ul>
-      <button id="discard-whitespace" class="text-button" hidden>Descartar alterações só de espaço em branco</button>
-      <div class="table-wrap" tabindex="0" role="region" aria-label="Comparação de arquivos; role horizontalmente para ver todas as colunas"><table><thead><tr><th scope="col">Enviar</th><th scope="col">Arquivo</th><th scope="col">Resultado</th><th scope="col">Versões</th></tr></thead><tbody id="rows"></tbody></table></div>
-      <p class="table-hint">Role para os lados para ver todas as colunas.</p>
-      <p class="note">Só textos existentes e compatíveis são enviados. Arquivo novo: crie-o vazio no editor da Yampi, na mesma pasta, e compare de novo; a extensão preenche o conteúdo. Imagens são enviadas à mão pela Yampi. Arquivos que dependem de caminhos ausentes ficam bloqueados; textos alterados que usam uns aos outros são enviados juntos. Nenhum arquivo ausente será excluído.</p>
+      <p id="summary" class="summary"></p>
+      <div id="moves" class="moves" hidden><p id="moves-title"></p><ul id="moves-list"></ul></div>
+      <div id="attention" class="attention" hidden><h3>Precisa da sua atenção</h3><ul id="attention-list"></ul></div>
+      <button id="apply" class="primary" disabled>Enviar para a loja</button>
+      <div id="confirm-panel" class="confirm-panel" role="group" aria-labelledby="confirm-title" hidden>
+        <p id="confirm-title">Enviar para <strong id="target-store"></strong>?</p>
+        <p>Antes, a extensão baixa um backup. Depois de salvar, confere cada arquivo na Yampi. Nada é publicado: você revisa em Ver prévia e publica na Yampi.</p>
+        <button id="confirm-send" class="primary">Confirmar envio</button>
+        <button id="cancel-send" class="text-button">Voltar</button>
+      </div>
+      <details id="all-files" class="all-files">
+        <summary>Ver todos os arquivos</summary>
+        <label>Mostrar <select id="filter"><option value="changes">Alterações e conflitos</option><option value="all">Todos os arquivos</option><option value="update">Prontos para envio</option><option value="conflict">Conflitos</option><option value="blocked">Bloqueados</option><option value="whitespace">Só espaço em branco</option></select></label>
+        <button id="discard-whitespace" class="text-button" hidden>Descartar alterações só de espaço em branco</button>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="Comparação de arquivos; role horizontalmente para ver todas as colunas"><table><thead><tr><th scope="col">Enviar</th><th scope="col">Arquivo</th><th scope="col">Resultado</th><th scope="col">Versões</th></tr></thead><tbody id="rows"></tbody></table></div>
+        <p class="table-hint">Role para os lados para ver todas as colunas.</p>
+      </details>
     </section>
     <section id="diff" class="workspace" aria-labelledby="diff-title" hidden>
       <div class="review-heading"><h3 id="diff-title"></h3><button id="close-diff">Fechar comparação</button></div>
-      <div class="diff-grid"><div><h4>Original exportado</h4><pre id="diff-base"></pre></div><div><h4>Arquivo local</h4><pre id="diff-local"></pre></div><div><h4>Estado atual da loja</h4><pre id="diff-remote"></pre></div></div>
+      <div class="diff-grid"><div><h4>Original exportado</h4><pre id="diff-base"></pre></div><div><h4>Projeto (como irá para a loja)</h4><pre id="diff-local"></pre></div><div><h4>Estado atual da loja</h4><pre id="diff-remote"></pre></div></div>
     </section>
-    <section id="send-section" class="workspace" aria-labelledby="send-title" hidden>
-      <h2 id="send-title">Confirme o envio.</h2>
-      <p>Destino: <strong id="target-store"></strong>. Antes de salvar, a extensão guarda e baixa um backup. Depois, recarrega o editor e confere o conteúdo.</p>
-      <label class="confirm-label">Para evitar enviar para outra loja, digite <strong id="confirm-name"></strong><input id="confirm-store" type="text" autocomplete="off" placeholder="Nome da loja"></label>
-      <button id="apply" class="primary" disabled>Enviar alterações para o editor</button>
-      <small>Confira em Ver prévia na Yampi. Publicar loja continua sendo uma ação sua no painel.</small>
+    <section id="done" class="workspace" aria-labelledby="done-title" hidden>
+      <h2 id="done-title">Envio concluído.</h2>
+      <p id="done-summary"></p>
+      <ol class="steps">
+        <li>No editor da Yampi, clique em <strong>Ver prévia</strong> e confira a loja no computador e no celular.</li>
+        <li>Se estiver tudo certo, clique em <strong>Publicar</strong> na Yampi. A extensão nunca publica.</li>
+        <li>Se algo estiver errado, desfaça o envio abaixo antes de publicar.</li>
+      </ol>
+      <ul id="done-warnings" class="plan-warnings" hidden></ul>
+      <button id="undo">Desfazer este envio</button>
     </section>
     <details class="recovery">
       <summary>Backups e recuperação</summary>
@@ -91,7 +112,7 @@
     <details id="fixture" hidden><summary>Editor fictício usado nos testes</summary><iframe id="fixture-frame" title="Editor fictício"></iframe></details>
     <footer>
       <p>Ferramenta independente. Sem telemetria.</p>
-      <details><summary>Compatibilidade e limites</summary><p>Código e contexto visual ficam separados; recursos visuais não são enviados à loja. Envia textos existentes. Amostra visual datada; catálogo completo, sincronização de configurações e upload de imagens não são suportados. Gravações reais e fidelidade visual ainda não validadas.</p></details>
+      <details><summary>Compatibilidade e limites</summary><p>Envia textos (Twig, Vue, SCSS) e imagens novas pelos próprios controles do editor da Yampi, sempre no rascunho. A Yampi não permite criar pastas nem substituir imagens: imagens novas vão direto para assets/images, e as referências literais nos arquivos enviados são ajustadas. Nunca exclui, renomeia ou publica. Catálogo e configurações da loja não são enviados. Gravações reais ainda dependem da primeira validação controlada.</p></details>
     </footer>
   </main>
   <script type="module" src="panel.js"></script>

@@ -207,14 +207,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const previewRequest = message.preview as {url?: string; origins?: string[]; context?: unknown} | undefined;
     const previewAction = ['preview-allow', 'preview-fetch'].includes(message.action);
     const cmd = previewAction ? {op: 'context' as const, context: validateContext(previewRequest?.context)} : message.command as Command;
-    if (!cmd || !['context', 'inventory', 'read', 'readAsset', 'visual', 'write'].includes(cmd.op)) throw new Error('Comando não permitido.');
+    if (!cmd || !['context', 'inventory', 'read', 'readAsset', 'visual', 'write', 'create', 'upload'].includes(cmd.op)) throw new Error('Comando não permitido.');
     if (previewAction && session.access !== 'read') throw new Error('Captura visual exige uma operação de leitura.');
-    if (cmd.op === 'write' && session.access !== 'write') throw new Error('Esta operação permite apenas copiar. Gravação bloqueada.');
+    if (['write', 'create', 'upload'].includes(cmd.op) && session.access !== 'write') throw new Error('Esta operação permite apenas copiar. Gravação bloqueada.');
     // Check the bridge version and execute in one round trip. Never cache this
     // readiness across reloads; reinject only when the current page needs it.
     const invoke=()=>chrome.scripting.executeScript({target: {tabId: session.tabId}, world: 'MAIN', func: async command => {
       const api = (window as unknown as {YampiThemeSyncBridge?: {version?:string;command: (c: Command) => Promise<unknown>}}).YampiThemeSyncBridge;
-      if (api?.version !== '0.4.0') return {needsBridge:true};
+      if (api?.version !== '0.5.0') return {needsBridge:true};
       return api.command(command);
     }, args: [cmd]});
     let results=await invoke();

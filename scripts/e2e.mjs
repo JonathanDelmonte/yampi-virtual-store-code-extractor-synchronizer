@@ -102,7 +102,7 @@ try {
   assert.equal(await panel.locator('#status').textContent(), 'ZIP da loja baixado', await panel.locator('#detail').textContent());
   const download = await exported, exportPath = path.join(temporary, 'export.zip'); await download.saveAs(exportPath);
   assert.equal(browser.pages().length, pagesBefore, 'O clique não pode abrir outra aba.');
-  assert.equal(await panel.evaluate(() => document.querySelector('#send-section').hidden), true);
+  assert.equal(await panel.evaluate(() => document.querySelector('#review').hidden && document.querySelector('#confirm-panel').hidden), true);
   const nativeContexts = await worker.evaluate(() => chrome.runtime.getContexts({contextTypes:['SIDE_PANEL']}));
   assert.ok(nativeContexts.some(c => c.documentUrl.includes('panel.html?tab=')));
   await mkdir(path.join(repository, '.cache'), {recursive: true});
@@ -113,7 +113,7 @@ try {
   assert.ok(new TextDecoder().decode(entries['tema/templates/long.twig']).includes('Linha 2000'));
   assert.ok(entries['tema/assets/images/example.png'].length > 0);
   assert.equal(await editor.evaluate(() => window.fictitiousUnchanged()), true);
-  assert.deepEqual(await editor.evaluate(() => window.fictitiousOperations), {dispatch: 0, save: 0, forbidden: 0});
+  assert.deepEqual(await editor.evaluate(() => window.fictitiousOperations), {dispatch: 0, save: 0, forbidden: 0, add: 0});
   assert.ok((await worker.evaluate(() => globalThis.testRequests)).every(op => ['context', 'inventory', 'read', 'readAsset', 'lock:read'].includes(op)));
   assert.ok(await editor.evaluate(() => !!document.querySelector('yampi-code-editor').shadowRoot.querySelector('.cm-content').cmView), 'O fluxo principal deve usar a associação antiga do CodeMirror.');
   console.log('E2E: confirmação exigida; cópia sem edições, saves ou controles destrutivos no CodeMirror 6.36.2.');
@@ -162,7 +162,12 @@ try {
   assert.deepEqual(await preview.evaluate(() => window.__yampiLocalMessages || []), []);
   console.log('E2E: Vue interativo e PNG local conferidos.');
   await writeFile(path.join(project, 'tema/elements/head.twig'), '<meta name="description" content="Editado localmente">\n');
-  await writeFile(path.join(project, 'tema/templates/new.twig'), '<p>Arquivo novo preenchido pela extensão</p>\n');
+  // A new text in an existing folder and a new image in a subfolder reach the store with no manual step.
+  const newText = '<p>Arquivo novo criado pela extensão</p>\n<img src="{{ \'images/novas/nova.png\' | assets_url }}" alt="">\n';
+  const novaPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  await writeFile(path.join(project, 'tema/templates/new.twig'), newText);
+  await mkdir(path.join(project, 'tema/assets/images/novas'), {recursive: true});
+  await writeFile(path.join(project, 'tema/assets/images/novas/nova.png'), novaPng);
   await command(process.execPath, [path.join(project, '.yampi-sync/tools/pack.mjs')], project);
   const folderImport = path.join(temporary, 'folder-import');
   await mkdir(folderImport);
@@ -174,40 +179,42 @@ try {
   await panel.locator('#folder').setInputFiles(folderImport, {timeout: 15000});
   console.log('E2E: pasta selecionada.');
   await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Comparação concluída');
-  assert.match(await panel.locator('#local-info').textContent(), /10 textos e 1 imagem/);
+  assert.match(await panel.locator('#local-info').textContent(), /10 textos e 2 imagens/);
   await panel.locator('#baseline').setInputFiles(path.join(project, 'retorno-yampi.zip'));
   await panel.waitForFunction(() => !document.querySelector('#baseline').disabled);
   await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Comparação concluída');
-  assert.match(await panel.locator('#summary').textContent(), /1 prontos · 0 conflitos · 1 para criar na Yampi/);
-  assert.match(await panel.locator('#rows').textContent(), /Novo · crie vazio na Yampi/);
-  assert.equal(await panel.evaluate(() => document.querySelector('#send-section').hidden), false);
-  assert.equal(await panel.evaluate(() => document.querySelector('#apply').disabled), true);
+  // One summary: what changes, what is created and where the image goes. Nothing needs the user's attention.
+  assert.match(await panel.locator('#summary').textContent(), /3 para enviar · 1 alterados · 1 novos · 1 imagens · 0 conflitos · 0 bloqueados/);
+  assert.equal(await panel.locator('#review-title').textContent(), 'Pronto para enviar.');
+  assert.match(await panel.locator('#moves-list').textContent(), /images\/novas\/nova\.png → images\/nova\.png/);
+  assert.equal(await panel.evaluate(() => document.querySelector('#attention').hidden), true);
+  assert.equal(await panel.locator('#apply').textContent(), 'Enviar 3 itens para Loja de testes');
   await panel.screenshot({path: path.join(repository, '.cache/panel-import-e2e.png')});
-  // A new text missing from the store blocks every send, even with the store confirmed.
-  await panel.locator('#confirm-store').fill('Loja de testes');
-  assert.equal(await panel.evaluate(() => document.querySelector('#apply').disabled), true);
-  assert.match(await panel.evaluate(() => document.querySelector('#apply').title), /Crie vazios no editor da Yampi/);
-  // The owner creates it empty by hand in the editor; the extension only fills existing files.
-  await editor.evaluate(() => window.fictitiousCreateEmpty('templates/new.twig'));
-  await editor.reload(); await editor.waitForFunction(() => document.querySelector('yampi-code-editor')?.shadowRoot?.querySelector('aside .file-name'));
-  await panel.locator('#compare').click();
-  await panel.waitForFunction(() => /2 prontos · 0 conflitos · 0 bloqueados por dependência · \d+ caminhos/.test(document.querySelector('#summary').textContent) && !document.querySelector('#compare').disabled);
-  assert.equal(await panel.locator('#status').textContent(), 'Comparação concluída');
-  assert.match(await panel.locator('#rows').textContent(), /Novo · pronto para preencher/);
-  await panel.locator('#confirm-store').fill('Loja de testes');
-  const backup = driver.waitDownload(); await panel.locator('#apply').click(); await (await backup).saveAs(path.join(temporary, 'backup.zip'));
-  await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Arquivos salvos e conferidos após recarregar');
-  console.log('E2E: arquivo novo criado vazio à mão e preenchido; envio, backup e reload conferidos arquivo a arquivo.');
+  // Two clicks: send, then confirm. The backup download comes before any change.
+  await panel.locator('#apply').click();
+  assert.equal(await panel.evaluate(() => document.querySelector('#confirm-panel').hidden), false);
+  assert.equal(await panel.locator('#target-store').textContent(), 'Loja de testes');
+  const backup = driver.waitDownload(); await panel.locator('#confirm-send').click(); await (await backup).saveAs(path.join(temporary, 'backup.zip'));
+  await panel.waitForFunction(() => ['Arquivos salvos e conferidos após recarregar', 'Operação interrompida'].includes(document.querySelector('#status').textContent), {timeout: 120000});
+  assert.equal(await panel.locator('#status').textContent(), 'Arquivos salvos e conferidos após recarregar', await panel.locator('#detail').textContent());
+  console.log('E2E: arquivo novo e imagem criados pelos controles do editor; envio, backup e reload conferidos item a item.');
+  assert.equal(await panel.evaluate(() => document.querySelector('#done').hidden), false);
+  assert.match(await panel.locator('#done-summary').textContent(), /2 arquivos salvos, 1 deles criado pela extensão e 1 imagem enviada/);
+  await panel.screenshot({path: path.join(repository, '.cache/panel-done-e2e.png')});
   assert.match(await editor.locator('#test-info').textContent(), /Publicações: 0/);
   const sent = await editor.evaluate(() => JSON.parse(sessionStorage.getItem('fixture-files')));
   assert.equal(sent['elements/head.twig'], '<meta name="description" content="Editado localmente">\n');
-  assert.equal(sent['templates/new.twig'], '<p>Arquivo novo preenchido pela extensão</p>\n');
+  assert.equal(sent['templates/new.twig'], newText.replace('images/novas/nova.png', 'images/nova.png'));
+  const uploaded = await editor.evaluate(() => JSON.parse(sessionStorage.getItem('fixture-assets')));
+  assert.deepEqual(Object.keys(uploaded), ['assets/images/nova.png']);
+  assert.equal(uploaded['assets/images/nova.png'], 'data:image/png;base64,' + novaPng.toString('base64'));
   await panel.reload(); await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Editor conectado');
   assert.equal(await worker.evaluate(async () => Object.values(await chrome.storage.session.get(null))[0].access), undefined);
-  assert.match(await panel.locator('#journal-info').textContent(), /2\/2/);
+  assert.match(await panel.locator('#journal-info').textContent(), /3\/3/);
   await panel.evaluate(() => document.querySelector('.recovery').open = true);
   await panel.locator('#restore').click(); await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Restauração preparada para revisão');
-  assert.match(await panel.locator('#summary').textContent(), /2 prontos/);
+  // Undo: the changed file goes back and the created one returns to Yampi's empty content; nothing is deleted.
+  assert.match(await panel.locator('#summary').textContent(), /2 para enviar/);
   // A remote edit after the send must be protected during restore.
   await editor.locator('#remote-file').selectOption('elements/head.twig'); await editor.locator('#external-change').click();
   await panel.locator('#restore').click(); await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Restauração preparada para revisão');
@@ -251,7 +258,7 @@ try {
   });
   assert.equal(currentRead.value.ok, true); assert.equal(currentRead.current, true); assert.equal(currentRead.unchanged, true);
   assert.equal(currentRead.value.value, new TextDecoder().decode(entries['tema/templates/long.twig']));
-  assert.deepEqual(currentRead.operations, {dispatch: 0, save: 0, forbidden: 0});
+  assert.deepEqual(currentRead.operations, {dispatch: 0, save: 0, forbidden: 0, add: 0});
   console.log('E2E aprovado: confirmação antes da cópia, CodeMirror antigo e atual, zero mutações na exportação, Shadow DOM, isolamento de loja/componente, erro de conexão e retry, PNG, projeto portátil com npm ci, Twig/Sass/Vue 2, importação de pasta/ZIP, envio com backup/reload e restauração. Nenhuma requisição alcançou a Yampi.');
   // Exercise the actual panel -> authenticated worker -> public capture -> ZIP
   // pipeline. The worker's fetch receives only the synthetic public responses.
@@ -266,7 +273,7 @@ try {
   const visualDownload=driver.waitDownload();await panel.locator('#preview-allow').click();await panel.waitForFunction(()=>['ZIP da loja baixado','Operação interrompida'].includes(document.querySelector('#status').textContent));assert.equal(await panel.locator('#status').textContent(),'ZIP da loja baixado',await panel.locator('#detail').textContent());
   const visualPath=path.join(temporary,'visual.zip');await (await visualDownload).saveAs(visualPath);const visualEntries=unzipSync(new Uint8Array(await readFile(visualPath))),visualManifest=JSON.parse(new TextDecoder().decode(visualEntries['preview/manifest.json']));
   assert.equal(visualManifest.version,2);assert.equal(visualManifest.source.association,'published-unverified');assert.equal(visualManifest.resources.length,6);assert.equal(visualManifest.pages.length,6);assert.ok(visualManifest.pages.every(p=>visualEntries['preview/'+p.file]));assert.ok(JSON.parse(new TextDecoder().decode(visualEntries['preview/raw/page-0.json'])).themeConfig.sections.length>0);assert.ok((await worker.evaluate(()=>globalThis.testVisualReads)).length>=12);
-  assert.deepEqual(await currentEditor.evaluate(()=>window.fictitiousOperations),{dispatch:0,save:0,forbidden:0});assert.equal(await currentEditor.evaluate(()=>window.fictitiousUnchanged()),true);assert.match(await panel.locator('#preview-info').textContent(),/rascunho não vinculado/);
+  assert.deepEqual(await currentEditor.evaluate(()=>window.fictitiousOperations),{dispatch:0,save:0,forbidden:0,add:0});assert.equal(await currentEditor.evaluate(()=>window.fictitiousUnchanged()),true);assert.match(await panel.locator('#preview-info').textContent(),/rascunho não vinculado/);
   console.log('E2E visual: painel real, autorização por origem, coleta pública estática e ZIP com páginas/assets; zero mutações no editor fictício.');
 } catch (error) {
   if (browser) for (const worker of browser.serviceWorkers()) console.error('Diagnóstico fictício:', JSON.stringify(await worker.evaluate(async () => ({clicks:globalThis.testClicks,contexts: await chrome.runtime.getContexts({}), sessions: await chrome.storage.session.get(null), tabs: await Promise.all((await chrome.tabs.query({})).map(async t => ({url:t.url, title:await chrome.action.getTitle({tabId:t.id})})))})).catch(() => 'Worker indisponível'),null,2));

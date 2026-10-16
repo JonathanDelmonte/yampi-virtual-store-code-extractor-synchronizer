@@ -30,6 +30,21 @@ Uma ferramenta de trabalho compacta, com fundo quase branco, texto escuro e azul
 | Botões sem transição | Resposta de clique e hover curta | Confirmar a interação sem atraso |
 | Rolagem animada em toda comparação | Rolagem imediata por teclado ou com movimento reduzido | Respeitar a forma de navegação |
 
+## Envio em poucos passos na 0.5.0
+
+O envio cabe em três ações: escolher a pasta, conferir o resumo, confirmar.
+
+| Antes | Depois | Motivo |
+| --- | --- | --- |
+| Tabela de arquivos como tela principal | Quatro números (alterados, novos, imagens, iguais) e a tabela recolhida em **Ver todos os arquivos** | Mostrar o resultado, não o inventório |
+| Avisos técnicos misturados | **Precisa da sua atenção**: só o que exige decisão ou ajuste, com o motivo e a ação ao lado | Nada a fazer quando nada aparece |
+| Criar arquivos e enviar imagens à mão na Yampi | A extensão faz pelos controles do editor; o resumo informa quantos | Tirar etapas do usuário |
+| Imagem em subpasta bloqueada | Aviso de para onde cada imagem vai e de que as referências são ajustadas | Explicar a única mudança de caminho |
+| Digitar o nome da loja | Botão **Enviar N itens para Loja** e uma confirmação com o nome à vista | A identidade já é conferida pela extensão; a confirmação evita clique acidental |
+| Mensagem de sucesso | Tela final com o que foi feito, os próximos passos na Yampi e **Desfazer este envio** | Levar até Ver prévia e Publicar |
+
+O botão de envio sempre diz o que fará e, desabilitado, explica o motivo no título. Conflitos oferecem **Ver versões** e **Usar a versão do projeto**, com confirmação.
+
 ## Movimento e acesso
 
 - Sublinhado das abas: 200 ms; entrada de seção por clique: 180 ms, com opacidade e deslocamento de 4 px.

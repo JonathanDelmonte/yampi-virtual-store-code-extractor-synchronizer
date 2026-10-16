@@ -82,10 +82,9 @@ Execute \`npm run pack\` e importe o ZIP indicado no terminal em **Enviar altera
 
 ## Limitações do retorno
 
-- A extensão envia somente arquivos de texto que já existem na loja. Para um texto novo, crie o arquivo vazio à mão no editor da Yampi, na mesma pasta, e compare novamente: a extensão preenche o conteúdo. Enquanto faltar qualquer texto novo na loja, todo envio fica bloqueado. Imagens são enviadas à mão.
-- Um arquivo modificado que inclui, importa ou usa um caminho ausente (Sass, Twig, componente Vue ou imagem) também fica bloqueado, com o nome dos dois. Arquivos alterados que dependem uns dos outros precisam ser selecionados juntos, inclusive os novos criados vazios. Cada arquivo é conferido após recarregar o editor antes do próximo envio.
-- Arquivos modificados que dependem uns dos outros precisam ser enviados juntos.
-- \`elements/scripts/components.twig\` é gerado pela Yampi. Um \`.vue\` fora dessa lista não é carregado na loja; a prévia avisa e não o registra (use \`"components": {"registerUnlisted": true}\` em \`local.config.json\` apenas para testes locais).
+- A extensão cria os textos novos (.twig, .vue, .scss) em pastas que já existem na loja e envia as imagens novas, sempre pelo próprio editor da Yampi. A Yampi não permite criar pastas: um texto numa pasta nova bloqueia o envio até ser movido. Imagens ficam direto em \`assets/images\`; as de subpastas vão para lá e as referências literais nos arquivos enviados são ajustadas.
+- Um arquivo modificado que inclui, importa ou usa um caminho que não existirá na loja (Sass, Twig, componente Vue ou imagem) fica bloqueado, com o nome dos dois. Arquivos alterados que dependem uns dos outros são enviados juntos, inclusive os novos. Cada arquivo é conferido após recarregar o editor antes do próximo envio.
+- \`elements/scripts/components.twig\` é gerado pela Yampi, que lista cada componente criado pela extensão; ele nunca é enviado. Na prévia local, um \`.vue\` fora dessa lista não é carregado; a prévia avisa e não o registra (use \`"components": {"registerUnlisted": true}\` em \`local.config.json\` apenas para testes locais).
 - \`assets_url\` e \`asset()\` apontam para \`tema/assets/\` na prévia. O caminho de produção não foi verificado.
 - Alterações só de espaço em branco aparecem separadas na comparação e podem ser descartadas.
 

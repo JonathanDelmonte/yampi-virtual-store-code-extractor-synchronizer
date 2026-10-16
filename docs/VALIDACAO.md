@@ -1,4 +1,16 @@
-# Validação da versão 0.4.0
+# Validação
+
+## Envio automático na 0.5.0, em 15/10/2026
+
+Windows, Node.js 26.2.0; o alvo do projeto continua Node 24 e `engines` aceita a partir dele. `npm ci`, `npm run check` e `npm run package` passaram: TypeScript, 197 testes em 12 arquivos, build e pacote com 17 arquivos permitidos, sem código do editor fictício.
+
+O editor fictício passou a reproduzir a marcação lida no módulo público do editor real: botão **Adicionar arquivo** em cada pasta, janela com seletor de extensão e nome, envio de imagens com as mesmas regras de nome, tipo e tamanho, e componente Vue padrão. `npm run test:e2e` passou no painel lateral nativo de Chromium. Um projeto com um texto alterado, um texto novo numa pasta existente e uma imagem nova numa subpasta mostrou "3 para enviar" sem nada pendente. Com dois cliques e o backup baixado antes, a extensão criou o texto pelo editor, enviou a imagem para `assets/images/nova.png` com os mesmos bytes, ajustou a referência e conferiu cada item após recarregar. A restauração continuou protegendo uma alteração posterior. Na exportação, os contadores registraram zero edições, saves, aberturas de **Adicionar arquivo** e acionamentos de publicar, excluir ou renomear. `npm run test:preview` passou com as ferramentas de projeto atualizadas.
+
+Casos novos de unidade cobrem os estados `create` e `upload`, os motivos de bloqueio (pasta inexistente, nome ou tipo recusado), a mudança de caminho das imagens com colisões, referências montadas em tempo de execução, a escolha explícita em conflito, `components.twig` nunca enviado sem bloquear quem o inclui, e a ordem criar → enviar imagens → preencher. Também cobrem a parada no primeiro erro de cada etapa e a restauração de um arquivo criado ao conteúdo inicial da Yampi.
+
+Uma exportação real de redesign, privada e fora deste repositório, foi usada somente para leitura, com uma loja simulada em memória igual à exportação. O plano trouxe 18 textos para criar, 40 imagens de subpastas para `assets/images`, 69 alterações e nenhum bloqueio. O envio terminou com o conteúdo final igual ao plano, imagens idênticas byte a byte e nenhuma referência apontando para as subpastas. Nenhuma requisição alcançou a Yampi e não houve gravação real.
+
+Sem validação real: acionamento de **Adicionar arquivo** e do envio de imagens numa loja real, URL gerada por `assets_url` em `assets/images`, leitura das imagens enviadas, gravação e restauração reais.
 
 ## Distribuição simplificada em 15/10/2026
 

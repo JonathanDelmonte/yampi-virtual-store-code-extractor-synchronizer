@@ -22,6 +22,12 @@ export class BrowserAdapter implements Adapter {
     await this.refresh();
     await this.rpc({command: {op: 'write', context: this.expected, path, expected, content}});
   }
+  async create(path: string): Promise<void> {await this.rpc({command: {op: 'create', context: this.expected, path}});}
+  async upload(path: string, bytes: Uint8Array): Promise<void> {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    await this.rpc({command: {op: 'upload', context: this.expected, path, content: btoa(binary)}});
+  }
   async refresh(): Promise<void> {
     await this.context(); // Refuse a reload when the editor has unsaved changes or changed shops.
     await this.rpc({action: 'refresh'});
