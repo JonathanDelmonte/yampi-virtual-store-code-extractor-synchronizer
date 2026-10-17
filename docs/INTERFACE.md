@@ -45,11 +45,33 @@ O envio cabe em três ações: escolher a pasta, conferir o resumo, confirmar.
 
 O botão de envio sempre diz o que fará e, desabilitado, explica o motivo no título. Conflitos oferecem **Ver versões** e **Usar a versão do projeto**, com confirmação.
 
+## Um passo por vez na 0.6.0
+
+O painel deixou de ser uma página com todas as seções. Cada tela responde a uma pergunta e tem uma ação principal, sempre no mesmo lugar, na barra de baixo.
+
+| Antes | Depois | Motivo |
+| --- | --- | --- |
+| Todas as seções numa página longa | Uma tela por etapa: início, baixar, escolher a pasta, revisar, andamento e resultado | Mostrar só o que vale para o passo atual |
+| Status técnico ("Comparação concluída") | Título que diz o estado ("3 alterações prontas", "Envio concluído") e uma linha de detalhe | Ler o estado num relance |
+| Vários botões com o mesmo peso | Uma ação principal na barra de baixo; as secundárias como links | Achar o próximo passo sem procurar |
+| Histórico, backups e restauração na tela | No menu do topo | Tirar o que é raro do caminho comum |
+| Progresso em uma linha de texto | Porcentagem, barra, item atual, tempo restante, etapas e registro do que foi conferido | Saber quanto falta e o que já está na loja |
+| Conflito em três blocos de texto | Linhas alteradas, com projeto, original e loja em abas, e a escolha no mesmo lugar | Decidir vendo só a diferença |
+| Fontes do sistema | Atkinson Hyperlegible Next e Mono (SIL OFL 1.1), no pacote | Caminhos e números legíveis; algarismos de largura fixa nas contagens |
+
+### Material
+
+O vidro fica só na camada de controle que flutua sobre o conteúdo: a barra do topo e a barra de ação. O conteúdo usa superfícies opacas, e não há vidro sobre vidro. No Chrome, as barras refratam o que passa por baixo, com um filtro SVG de deslocamento gerado para o tamanho de cada barra; a sombra cresce quando há conteúdo passando por baixo. Quando o sistema pede transparência reduzida (no Windows, **Efeitos de transparência** desligado), as barras ficam foscas e sem refração.
+
+Uma cor de destaque, o ciano da Zirtuno, marca só a ação principal, o progresso e a etapa em andamento. Sem gradientes decorativos, brilhos, manchas de cor ou ícones em quadrados coloridos: a hierarquia vem do tamanho do título, do espaço e da posição da ação.
+
+Referências: as diretrizes de Liquid Glass da Apple (vidro na camada de navegação e controles, tinta só na ação principal), ferramentas de trabalho com cromo discreto e um só destaque, e mostradores de instrumento para os números do andamento.
+
 ## Movimento e acesso
 
-- Sublinhado das abas: 200 ms; entrada de seção por clique: 180 ms, com opacidade e deslocamento de 4 px.
-- Botões: resposta de pressão de 140 ms e hover discreto. Hover é restrito a dispositivos com ponteiro preciso.
-- A troca por teclado é imediata; o foco tem contorno visível. Movimento reduzido desativa deslocamentos e transições.
+- Troca de tela: 240 ms, com opacidade e deslocamento de 6 px, em curva de desaceleração. Folhas sobem em 280 ms; a barra de progresso anda em 450 ms; botões respondem à pressão em 120 ms.
+- Hover é restrito a dispositivos com ponteiro preciso.
+- A troca por teclado é imediata; o foco tem contorno visível. Movimento reduzido desativa deslocamentos e transições. Cada mudança de tela é anunciada para leitores de tela.
 - Textos, nomes de loja e caminhos podem quebrar linha. A tabela e o código têm rolagem própria quando necessário.
 - Confirmação de leitura, nome da loja no envio, comparação de versões, backups e diagnóstico de erros continuam presentes. Abrir o painel não inicia a cópia.
 - Tutoriais e textos explicativos são preservados. Botões desabilitados explicam o requisito pendente no hover.

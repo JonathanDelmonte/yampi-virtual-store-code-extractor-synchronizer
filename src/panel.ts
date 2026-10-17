@@ -1,28 +1,49 @@
-import {preparePreview, finishPreview, unauthorizedOrigins, type PreviewDraft, type PreviewFetch} from './browser/preview-capture';
-import {demonstration, publicUrl, type PreviewBundle} from './core/preview';
+import {preparePreview, finishPreview, unauthorizedOrigins} from './browser/preview-capture';
+import {publicUrl} from './core/preview';
 import {BrowserAdapter, type RPC} from './browser/adapter';
 import {PanelConnection} from './browser/panel-connection';
 import {zipInWorker} from './browser/zip-client';
-import {capture, applyPlan} from './core/workflow';
-import {encodeSnapshot, decodeProject, readProjectDirectory} from './core/archive';
+import {decodeProject, readProjectDirectory, readProjectEntries, type Project} from './core/archive';
 import {makePlan, missingNewTexts, selectionIssues, sendable} from './core/planner';
+import {changedPaths, remoteFromCapture} from './core/compare';
+import {explainBlock} from './core/explain';
+import {formatDuration} from './core/progress';
+import {chooseBaseline, type Review, type Workspace} from './core/workspace';
 import {COMPONENTS_FILE} from '../local-runtime/contract.mjs';
-import {assertContext, writable, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Context, type Assets, type Snapshot, type Files, type Plan, type PlanRow, type Journal, type Progress} from './core/model';
-import {put, get, clearLocal, saveJournal, journalHistory, contextKey} from './storage';
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+import {assertContext, writable, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Context, type Assets, type Files, type Plan, type PlanRow, type Journal, type Snapshot} from './core/model';
+import {get, put, clearLocal, journalHistory, loadWorkspace, updateWorkspace} from './storage';
+import {startingState} from './jobs/engine';
+import {active, type JobRequest, type JobState, type Scope, type SendInput} from './jobs/types';
+import {ExtensionJobs, LocalJobs, type JobClient} from './panel/client';
+import {canPickFolders, droppedItem, folderEntries, permitted, pickFolder, recallFolder, rememberFolder, replaceThemeFile, type Folder, type Remembered} from './panel/folder';
+import {renderDiff} from './panel/diff-view';
+import {lens, adaptiveShadows} from './panel/glass';
+import {$, el, glyph, list, plural, dateTime, since, enter, toast, copyText} from './panel/dom';
 const isDemo = ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).get('demo') === '1';
-let session: string | undefined;
-let currentContext: Context | undefined;
-let pendingPreview: {snapshot:Snapshot;draft:PreviewDraft;bundle:PreviewBundle;origins:string[]} | undefined;
 const editorTab = new URLSearchParams(location.search).get('tab');
-let baseline: Snapshot | undefined, local: Files | undefined, plan: Plan | undefined, journal: Journal | undefined;
-let working = false, connected = false, controller: AbortController | undefined;
-let localAssets: Assets = {}, history: Journal[] = [];
-// The store as last compared, and the conflicts the user chose to settle with the project version.
-let remote: Snapshot | undefined;
-const selected = new Set<string>(), overrides = new Set<string>();
+// --- State ------------------------------------------------------------------------------------
+// One screen at a time. The route is where the user chose to go; the view shown also depends on
+// what is happening (connecting, an operation running, its result).
+type Route = 'home' | 'export' | 'send';
+type View = 'connecting' | 'offline' | 'home' | 'export' | 'pick' | 'review' | 'job' | 'result';
+let route: Route = 'home';
 let rpc: RPC;
 let connection: PanelConnection | undefined;
+let client: JobClient;
+let connected = false, context: Context | undefined;
+let offline: {title: string; text: string} | undefined;
+let notice: {title: string; text: string} | undefined;
+let busy = false, busyTitle = '', controller: AbortController | undefined;
+let localProgress: {done: number; total: number} | undefined;
+let workspace: Workspace | undefined, plan: Plan | undefined, scope: Scope = 'project', restoreJournal: Journal | undefined;
+const selected = new Set<string>();
+// liveJob: the operation whose screen is shown (running, or finished and not yet dismissed).
+let job: JobState | undefined, liveJob = '', settling = false, handled = '', cancelled = '';
+let history: Journal[] = [], journal: Journal | undefined, resumable: Journal | undefined;
+let remembered: Remembered | undefined;
+let diffRow: PlanRow | undefined, diffTab: 'remote' | 'base' | 'store' = 'remote';
+let lastAnnounced = '', lastView = '';
+// --- Editor connection --------------------------------------------------------------------------
 if (isDemo) {
   $('demo-notice').hidden = false;
   $('fixture').hidden = false;
@@ -40,394 +61,825 @@ if (isDemo) {
     if (!reply.ok) throw new Error(reply.error);
     return reply.value;
   };
+  client = new LocalJobs(rpc, {download: (bytes, name, type) => save(bytes, name, type), compress: zipInWorker, preview: {prepare: preparePreview, finish: finishPreview, unauthorized: unauthorizedOrigins}});
 } else {
   connection = new PanelConnection(chrome.runtime, () => {
     const wasConnected = connected; connected = false;
     controller?.abort(); $('connection-state').textContent = 'Editor desconectado';
-    // Preserve the precise initial diagnostic instead of replacing it with a generic disconnect.
-    if (wasConnected && !working) status('Conexão encerrada', 'Clique em Tentar conectar novamente. Nenhum envio será retomado automaticamente.', true);
-    controls();
+    // Keep the precise first diagnostic instead of replacing it with a generic disconnect.
+    if (wasConnected && !busy) offline = {title: 'Conexão encerrada', text: active(job) ? 'A operação continua em segundo plano. Conecte de novo para acompanhar.' : 'Conecte de novo para continuar. Nenhum envio recomeça sozinho.'};
+    render();
   });
   rpc = connection.request;
   window.addEventListener('pagehide', () => connection?.close());
+  client = new ExtensionJobs(Number(editorTab), message => connection!.request(message as Parameters<RPC>[0]));
 }
 const adapter = new BrowserAdapter(rpc);
+client.subscribe(state => onJob(state));
+lens($('topbar'), 'lens-top', {radius: 18, bezel: 14, shift: 6});
+lens($('dock'), 'lens-dock', {radius: 18, bezel: 14, shift: 6});
+adaptiveShadows($('topbar'), $('dock'));
 document.addEventListener('keydown', () => {document.body.dataset.input = 'keyboard';});
 document.addEventListener('pointerdown', () => {delete document.body.dataset.input;});
-function mode(importing: boolean, pointerClick = false): void {
-  const incoming = $(importing ? 'import-section' : 'export-section');
-  const changed = incoming.hidden;
-  $('export-section').hidden = importing; $('import-section').hidden = !importing;
-  $('mode-export').setAttribute('aria-pressed', String(!importing)); $('mode-import').setAttribute('aria-pressed', String(importing));
-  $('review').hidden = !importing || !plan; $('confirm-panel').hidden = true;
-  if (!importing) {$('diff').hidden = true; $('done').hidden = true;}
-  if (changed) incoming.getAnimations().forEach(animation => animation.cancel());
-  if (changed && pointerClick && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    incoming.animate([{opacity: 0, transform: 'translateY(4px)'}, {opacity: 1, transform: 'translateY(0)'}], {duration: 180, easing: 'cubic-bezier(.23,1,.32,1)'});
+// --- Which screen -------------------------------------------------------------------------------
+function currentView(): View {
+  if (!connected) return busy || !offline ? 'connecting' : 'offline';
+  if (busy || active(job) || settling) return 'job';
+  if (job && job.id === liveJob && !(job.kind === 'compare' && job.status === 'completed')) return 'result';
+  if (route === 'export') return 'export';
+  if (route === 'send') return plan ? 'review' : 'pick';
+  return 'home';
+}
+function go(next: Route): void {
+  notice = undefined; route = next;
+  if (job && !active(job) && job.id === liveJob) dismissJob();
+  render();
+}
+// A finished operation's screen goes away when the user moves on; the icon badge is cleared too.
+function dismissJob(): void {
+  liveJob = '';
+  void client.dismiss().catch(() => {});
+}
+// --- Rendering ------------------------------------------------------------------------------------
+type Head = {title: string; detail: string; tone?: 'ok' | 'error' | 'run'};
+function head(view: View): Head {
+  const store = context?.storeName || 'a loja';
+  if (view === 'connecting') return {title: 'Conectando ao editor…', detail: ''};
+  if (view === 'offline') return {title: offline!.title, detail: offline!.text, tone: 'error'};
+  if (view === 'home') return {title: 'O que você quer fazer?', detail: ''};
+  if (view === 'export') return {title: 'Baixar o tema', detail: `Uma cópia do código de ${store} em ZIP, para editar no computador.`};
+  if (view === 'pick') return workspace?.project ? {title: 'Comparar com a loja', detail: 'Releia a pasta depois de editar, ou escolha outra.'} : {title: 'Escolha a pasta do projeto', detail: 'A pasta extraída do ZIP que a extensão baixou.'};
+  if (view === 'review') return reviewHead();
+  if (view === 'job') {
+    if (busy) return {title: busyTitle || 'Um momento…', detail: localProgress ? `${localProgress.done} de ${localProgress.total} arquivos` : '', tone: 'run'};
+    const phase = job!.phases.find(p => p.status === 'active');
+    return {title: job!.status === 'waiting' ? 'Falta autorizar imagens e fontes' : job!.title, detail: settling ? 'Concluindo…' : job!.status === 'waiting' ? 'O código já foi copiado. Autorize para incluir as imagens e fontes no ZIP.' : phase ? `${phase.label}${phase.total > 1 ? `: ${Math.floor(phase.done)} de ${phase.total}` : ''}` : job!.detail, tone: 'run'};
+  }
+  return resultHead(job!);
+}
+function reviewHead(): Head {
+  const store = plan!.context.storeName, reading = (scope === 'restore' ? workspace?.restore : workspace?.review)?.reading;
+  const compared = reading ? `Comparado com ${store} ${since(reading.capturedAt)}.` : '';
+  if (scope === 'restore' && restoreJournal) return {title: selected.size ? `Restaurar ${plural(selected.size, 'item', 'itens')}` : 'Nada para restaurar', detail: `Envio de ${dateTime(restoreJournal.startedAt)}. Só volta o que continua igual ao que foi enviado.`};
+  if (missingNewTexts(plan!).length) return {title: 'Ajuste o projeto antes de enviar', detail: compared};
+  if (!selected.size) return {title: plan!.rows.some(row => row.status === 'conflict' || row.status === 'blocked-dependency') ? 'Nada pronto para enviar' : 'Nada para enviar', detail: plan!.rows.some(row => row.status === 'conflict') ? compared : `A loja já tem tudo o que o projeto mudou. ${compared}`};
+  return {title: `${selected.size} ${selected.size === 1 ? 'alteração pronta' : 'alterações prontas'}`, detail: compared};
+}
+function resultHead(state: JobState): Head {
+  const result = state.result, restore = state.scope === 'restore';
+  if (state.status === 'completed') {
+    if (result?.kind === 'export') return {title: 'ZIP baixado', detail: 'Extraia numa pasta e abra no VS Code para editar.', tone: 'ok'};
+    if (result?.kind === 'send') {
+      const items = result.verified + result.uploaded;
+      return {title: restore ? 'Restauração concluída' : 'Envio concluído', detail: `${plural(items, 'item conferido', 'itens conferidos')} na Yampi. Confira a prévia e publique na Yampi quando estiver tudo certo.`, tone: 'ok'};
+    }
+  }
+  const noun = state.kind === 'export' ? 'Download' : state.kind === 'compare' ? 'Comparação' : restore ? 'Restauração' : 'Envio';
+  const feminine = state.kind === 'compare' || restore;
+  if (state.status === 'cancelled') {
+    if (/descartad/i.test(state.error || '')) return {title: 'Download cancelado', detail: 'Nada mudou na loja.'};
+    return {title: `${noun} ${state.kind === 'send' ? (feminine ? 'pausada' : 'pausado') : (feminine ? 'interrompida' : 'interrompido')}`, detail: state.kind === 'send' ? 'O item em andamento terminou e foi conferido. Continue quando quiser.' : 'Nada mudou na loja.'};
+  }
+  return {title: `${noun} ${feminine ? 'interrompida' : 'interrompido'}`, detail: state.error || '', tone: 'error'};
+}
+function render(): void {
+  const view = currentView(), info = head(view);
+  document.body.dataset.view = view;
+  document.body.dataset.tone = info.tone || '';
+  $('status').textContent = info.title;
+  $('detail').textContent = info.detail;
+  $('notice').hidden = !notice || view === 'job' || view === 'offline' || view === 'connecting';
+  if (notice) $('notice').replaceChildren(el('strong', {text: notice.title}), notice.text);
+  $('view-home').hidden = view !== 'home';
+  $('export-section').hidden = view !== 'export';
+  $('import-section').hidden = view !== 'pick';
+  $('review').hidden = view !== 'review';
+  $('view-job').hidden = view !== 'job';
+  $('done').hidden = view !== 'result';
+  $('back').hidden = !['export', 'pick', 'review'].includes(view);
+  $('store').textContent = connected && context ? context.storeName : view === 'offline' ? 'Editor indisponível' : 'Conectando…';
+  document.body.dataset.connection = !connected ? (view === 'offline' ? 'error' : 'idle') : view === 'job' ? 'busy' : 'connected';
+  // The project card is also read by the review and the tests; keep it current on every screen.
+  renderPick();
+  if (view === 'home') renderHome();
+  if (view === 'export') renderExport();
+  if (view === 'review') renderPlan();
+  if (view === 'job') renderJob();
+  if (view === 'result') renderResult();
+  renderDock(view);
+  controls();
+  // Screen readers hear the screen changing and phase changes, not every percent.
+  const spoken = view === 'job' && job && !busy ? `${job.id}:${job.status}:${job.phases.find(p => p.status === 'active')?.id || ''}` : `${view}:${info.title}`;
+  if (spoken !== lastAnnounced) {lastAnnounced = spoken; $('announcer').textContent = `${info.title}. ${info.detail}`;}
+  if (view !== lastView) {
+    // A new screen starts at the top, with focus on its title for keyboard and reader users.
+    if (lastView) {
+      window.scrollTo({top: 0});
+      if (document.body.dataset.input === 'keyboard') $('status').focus({preventScroll: true});
+      const section = {home: 'view-home', export: 'export-section', pick: 'import-section', review: 'review', job: 'view-job', result: 'done'}[view as string];
+      enter(document.querySelector<HTMLElement>('.view-head')!, ...(section ? [$(section)] : []));
+    }
+    lastView = view;
   }
 }
-$('mode-export').addEventListener('click', event => mode(false, event.detail > 0));
-for (const id of ['mode-import', 'go-import']) $(id).addEventListener('click', event => mode(true, event.detail > 0));
-if (isDemo) $('demo-local').addEventListener('click', () => {
-  if (working || !baseline) {status('Exporte a loja fictícia primeiro.'); return;}
-  const sample = {...baseline.files};
-  sample['elements/head.twig'] += '<!-- Redesign local -->\n';
-  sample['sections/home/main_banner.twig'] += '<!-- Banner revisado -->\n';
-  sample['assets/styles/global/main.scss'] += 'body { background: white; }\n';
-  sample['assets/images/readme.md'] += 'Mudança não suportada\n';
-  sample['templates/new.twig'] = '<p>Novo</p>\n<img src="{{ \'images/demo/nova.png\' | assets_url }}" alt="">\n';
-  const assets: Assets = {...baseline.assets, 'assets/images/demo/nova.png': baseline.assets?.['assets/images/example.png'] || new Uint8Array()};
-  setLocal(sample, assets); controls(); status('Alterações fictícias carregadas', 'Amostra com alterações de código, um arquivo novo, uma imagem em subpasta e um tipo sem suporte.');
-});
-function status(text: string, detail = '', error = false): void {
-  $('status').textContent = text; $('detail').textContent = detail;
-  document.querySelector('.activity')!.classList.toggle('error', error);
+function renderHome(): void {
+  const project = workspace?.project, pending = workspace?.review?.reading && plan ? selected.size : 0;
+  $('send-tile-text').textContent = pending ? `${plural(pending, 'alteração pronta', 'alterações prontas')} para enviar` : project ? `Projeto “${project.name}”, lido ${since(project.loadedAt)}` : 'Do seu projeto para a loja';
+  $('resume-card').hidden = !resumable;
+  if (resumable) $('resume-text').textContent = `Parou em ${resumable.verified.length + (resumable.uploaded?.length || 0)} de ${resumable.selected.length} itens${resumable.error ? `: ${resumable.error}` : '.'} O que já foi conferido continua na loja.`;
+  const last = history.find(item => item.status === 'completed');
+  $('last-send').hidden = !last || !!resumable;
+  if (last) $('last-send').textContent = `Último envio em ${dateTime(last.startedAt)}: ${plural(last.verified.length + (last.uploaded?.length || 0), 'item conferido', 'itens conferidos')}. Histórico e backups ficam no menu.`;
 }
-function progress(p: Progress): void {
-  const bar = $<HTMLProgressElement>('progress');
-  bar.hidden = false; bar.max = p.total; bar.value = p.done;
-  status(`${p.phase} · ${p.done}/${p.total}`, p.path);
+function renderExport(): void {
+  const base = workspace?.baseline;
+  $('baseline-info').hidden = !base;
+  if (base) $('baseline-info').textContent = `Último download em ${dateTime(workspace?.lineage?.exportedAt || base.capturedAt)}.`;
 }
+function renderPick(): void {
+  const project = workspace?.project, lineage = workspace?.lineage;
+  $('project-card').hidden = !project;
+  $('dropzone').hidden = !!project;
+  if (!project) return;
+  const images = Object.keys(project.localAssets).length;
+  $('project-name').textContent = project.name;
+  $('local-info').textContent = `${Object.keys(project.local).length} textos e ${plural(images, 'imagem', 'imagens')}, lidos ${since(project.loadedAt)}.`;
+  $('reference-info').textContent = workspace?.baseline ? `Exportado em ${dateTime(lineage?.exportedAt || workspace.baseline.capturedAt)}${lineage?.journals.length ? `, com ${plural(lineage.journals.length, 'envio', 'envios')} desde então` : ''}.` : 'Falta a exportação original: escolha a pasta com .yampi-sync/.';
+}
+function renderJob(): void {
+  const showJob = !busy && !!job;
+  const fraction = showJob ? job!.fraction : localProgress?.total ? localProgress.done / localProgress.total : 0;
+  $('progress').style.setProperty('--p', String(fraction));
+  $('progress').setAttribute('aria-valuenow', String(Math.round(fraction * 100)));
+  $('percent').textContent = showJob || localProgress ? `${Math.round(fraction * 100)}%` : '…';
+  $('current').hidden = !showJob || !job!.path;
+  if (showJob && job!.path) $('current').textContent = job!.path;
+  const meta = $('job-meta');
+  meta.hidden = !showJob || job!.status === 'waiting';
+  if (!meta.hidden) meta.textContent = job!.etaMs !== undefined ? `Restam cerca de ${formatDuration(job!.etaMs)}.` : `Em andamento há ${formatDuration(job!.elapsedMs)}.`;
+  const waiting = showJob && job!.status === 'waiting' && job!.waiting?.kind === 'origins';
+  $('preview-pending').hidden = !waiting;
+  if (waiting) $('preview-origins').textContent = list(job!.waiting!.origins);
+  $('background-note').hidden = !showJob || isDemo || waiting;
+  $('phases-box').hidden = !showJob;
+  if (showJob) $('phases').replaceChildren(...job!.phases.filter(p => p.status !== 'skipped' && (p.total || p.status === 'active')).map(phase => el('li', {class: 'phase', attrs: {'data-status': phase.status}},
+    el('span', {class: 'phase-mark'}, phase.status === 'done' ? glyph('check') : phase.status === 'failed' ? glyph('x') : false),
+    el('span', {text: phase.label}),
+    el('span', {class: 'phase-count', text: phase.total > 1 ? `${Math.floor(phase.done)}/${phase.total}` : ''}))));
+  renderEvents(showJob);
+}
+function renderEvents(show: boolean): void {
+  $('events').hidden = !show || !job?.events.length;
+  if (show && job) $('event-list').replaceChildren(...job.events.slice(0, 50).map(event => el('li', {class: 'event', attrs: {'data-tone': event.tone}},
+    el('span', {class: 'event-text'}, event.text, event.path ? ': ' : '', event.path ? el('code', {text: event.path}) : false),
+    el('time', {text: new Date(event.at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute: '2-digit', second: '2-digit'})}))));
+}
+// A count and its label, in the singular for one.
+function setCount(id: string, value: number, one: string, many: string): void {
+  $(id).textContent = String(value); $(id + '-label').textContent = value === 1 ? one : many;
+  $(id).parentElement!.classList.toggle('zero', !value);
+}
+function renderResult(): void {
+  const state = job!, result = state.result;
+  const send = result?.kind === 'send' ? result : undefined, exported = result?.kind === 'export' ? result : undefined;
+  $('done-counts').hidden = !((send || exported) && state.status === 'completed');
+  if (send) {setCount('done-saved', send.verified, 'salvo', 'salvos'); setCount('done-created', send.created, 'criado', 'criados'); setCount('done-images', send.uploaded, 'imagem', 'imagens');}
+  if (exported) {setCount('done-saved', exported.texts, 'arquivo', 'arquivos'); setCount('done-created', exported.images, 'imagem', 'imagens'); setCount('done-images', exported.pages ?? 0, 'página', 'páginas');}
+  $('done-summary').textContent = send && state.status === 'completed' ? `${send.verified} ${send.verified === 1 ? 'arquivo salvo' : 'arquivos salvos'}${send.created ? `, ${send.created} ${send.created === 1 ? 'deles criado' : 'deles criados'} pela extensão` : ''}${send.uploaded ? ` e ${send.uploaded} ${send.uploaded === 1 ? 'imagem enviada' : 'imagens enviadas'}` : ''}. A extensão não publicou nada.` : send ? `${plural(send.verified + send.uploaded, 'item conferido', 'itens conferidos')} de ${send.total} antes de parar.` : '';
+  $('preview-info').hidden = !exported; $('preview-more').hidden = !exported;
+  if (exported) {$('preview-info').textContent = exported.preview; $('preview-details').textContent = `${exported.previewDetails ?? ''} Arquivo: ${exported.fileName}.`.trim();}
+  $('done-warnings').hidden = !send?.warnings.length;
+  $('done-warnings').replaceChildren(...(send?.warnings || []).map(text => el('li', {}, el('span', {text}))));
+  $('undo').hidden = !(send && state.status === 'completed');
+  renderEvents(state.status !== 'completed');
+}
+// --- Bottom bar: the one next step -----------------------------------------------------------------
+function renderDock(view: View): void {
+  const show: string[] = [];
+  if (view === 'offline') show.push('retry');
+  if (view === 'home' && resumable) show.push('resume');
+  if (view === 'export') show.push('export');
+  if (view === 'pick') show.push(...(remembered && canPickFolders() ? ['reload-folder', 'pick-folder'] : ['pick-folder']));
+  if (view === 'review') show.push('apply');
+  // While waiting for the user's choice, the choices are on screen; "stop" would only repeat them.
+  if (view === 'job' && (busy ? !!controller : job?.status === 'running')) show.push('cancel');
+  if (view === 'result' && job) {
+    if (job.status === 'completed' && job.result?.kind === 'send' && previewUrl()) show.push('open-preview');
+    if (job.status === 'completed' && job.result?.kind === 'export' && !isDemo) show.push('show-file');
+    if (job.kind === 'send' && job.status !== 'completed' && resumable) show.push('resume');
+    show.push('finish');
+  }
+  for (const id of ['retry', 'export', 'reload-folder', 'pick-folder', 'apply', 'resume', 'open-preview', 'show-file', 'cancel', 'finish']) $(id).hidden = !show.includes(id);
+  // "Choose a folder" is the main action unless the last folder can simply be read again.
+  $('pick-folder').classList.toggle('primary', !show.includes('reload-folder'));
+  $('pick-folder').textContent = show.includes('reload-folder') ? 'Outra' : 'Escolher a pasta';
+  $('finish').textContent = job && job.status === 'completed' ? 'Concluir' : 'Voltar';
+  $('finish').classList.toggle('primary', show.length === 1);
+  $('dock').hidden = !show.length;
+  $('dock').dataset.count = String(show.length);
+}
+// --- Controls -------------------------------------------------------------------------------------
 function controls(): void {
-  $('export').toggleAttribute('disabled', working || !connected || !!pendingPreview);
-  $('export').title = working ? 'Aguarde a operação atual terminar.' : !connected ? 'Abra o Editor de código da Yampi e conecte a extensão.' : pendingPreview ? 'Finalize ou descarte a captura visual em preparação.' : 'Ler os arquivos da loja e baixar uma cópia em ZIP.';
-  const missing = plan ? missingNewTexts(plan).length : 0;
-  $('include-preview').toggleAttribute('disabled',working);
-  $('preview-pending').hidden=!pendingPreview;
-  for(const id of ['preview-allow','preview-partial','preview-discard'])$(id).toggleAttribute('disabled',working||!pendingPreview);
-  $('compare').toggleAttribute('disabled', working || !connected || !baseline || !local);
-  const partial = plan ? selectionIssues(plan, selected) : [], blocked = !!missing || partial.length > 0;
+  const working = busy || active(job) || settling;
+  $('export').toggleAttribute('disabled', working || !connected);
+  $('include-preview').toggleAttribute('disabled', working);
+  for (const id of ['preview-allow', 'preview-partial', 'preview-discard']) $(id).toggleAttribute('disabled', busy);
+  for (const id of ['pick-folder', 'pick-other', 'reload-folder', 'folder', 'baseline', 'clear', 'history', 'demo-local', 'mode-import', 'mode-export']) $(id).toggleAttribute('disabled', working);
+  $('compare').toggleAttribute('disabled', working || !connected || !workspace?.baseline || !workspace?.project);
+  const missing = plan ? missingNewTexts(plan).length : 0, partial = plan ? selectionIssues(plan, selected) : [];
+  const blocked = !!missing || partial.length > 0;
   $('apply').toggleAttribute('disabled', working || !connected || !plan || !selected.size || blocked);
-  $('apply').textContent = plan && selected.size ? `Enviar ${selected.size} ${selected.size === 1 ? 'item' : 'itens'} para ${plan.context.storeName}` : 'Enviar para a loja';
-  $('apply').title = working ? 'Aguarde a operação atual terminar.' : !connected ? 'Conecte ao Editor de código da Yampi.' : !plan || !selected.size ? 'Nada pronto para enviar. Confira o resumo.' : missing ? 'Ajuste no projeto os arquivos novos que a Yampi não permite criar.' : partial.length ? 'Arquivos que usam uns aos outros precisam ser enviados juntos.' : 'Revise e confirme o envio.';
-  if (working || !plan || !selected.size || blocked) $('confirm-panel').hidden = true;
+  $('apply-label').textContent = plan && selected.size ? `${scope === 'restore' ? 'Restaurar' : 'Enviar'} ${selected.size} ${selected.size === 1 ? 'item' : 'itens'} para ${plan.context.storeName}` : 'Nada para enviar';
+  $('apply').title = !plan || !selected.size ? 'Nada pronto para enviar.' : missing ? 'Ajuste no projeto os arquivos novos que a Yampi não permite criar.' : partial.length ? 'Arquivos que usam uns aos outros vão juntos.' : '';
+  if (working || !plan || !selected.size || blocked) closeSheet('confirm-panel');
   $('confirm-send').toggleAttribute('disabled', working || !connected);
   $('discard-whitespace').hidden = !plan?.rows.some(r => r.status === 'update' && r.whitespaceOnly);
-  $('discard-whitespace').toggleAttribute('disabled', working);
-  for (const id of ['baseline', 'folder', 'cancel-send', 'clear', 'filter', 'demo-local', 'history', 'download-journal', 'retry', 'mode-export', 'mode-import', 'go-import']) $(id).toggleAttribute('disabled', working);
-  $('retry').hidden = connected || !editorTab && !isDemo;
+  for (const id of ['discard-whitespace', 'select-all', 'select-none', 'filter', 'search']) $(id).toggleAttribute('disabled', working);
+  $('cancel').toggleAttribute('disabled', !!job && cancelled === job.id && !busy);
   $('restore').toggleAttribute('disabled', working || !connected || !journal);
-  $('undo').toggleAttribute('disabled', working || !connected || !journal);
-  $('download-backup').toggleAttribute('disabled', working || !journal);
-  $('download-journal').toggleAttribute('disabled', working || !journal);
-  $('cancel').hidden = !working;
-  document.querySelectorAll<HTMLInputElement>('#rows input').forEach(input => {
-    const path = input.getAttribute('aria-label')?.slice(7);
-    input.disabled = working || !sendable(plan?.rows.find(r => r.path === path));
+  $('download-backup').toggleAttribute('disabled', busy || !journal);
+  $('download-journal').toggleAttribute('disabled', busy || !journal);
+  if (remembered) $('reload-folder-label').textContent = `Reler “${remembered.name}”`;
+  document.querySelectorAll<HTMLInputElement>('#rows input[type="checkbox"]').forEach(input => {
+    input.disabled = working || !sendable(plan?.rows.find(r => r.path === input.dataset.path));
   });
 }
-async function run(job: () => Promise<void>, needsEditor = true, prepare?: () => Promise<void>, access: 'read' | 'write' = 'read'): Promise<void> {
-  if (working) return;
-  working = true; controller = new AbortController(); controls();
-  let locked = false;
-  try {await prepare?.(); if (needsEditor) {await rpc({action: 'lock', access}); locked = true;} await job();}
-  catch (error) {status('Operação interrompida', error instanceof Error ? error.message : String(error), true);}
-  finally {
-    if (locked) await rpc({action: 'unlock'}).catch(() => {});
-    working = false; controller = undefined; $('progress').hidden = true; controls();
-  }
+// Panel-local work (reading a folder or a ZIP) starts synchronously, so the screen never lags
+// behind the click. A failure stays on the screen where it happened.
+async function run(title: string, work: () => Promise<void>): Promise<void> {
+  if (busy) return;
+  busy = true; busyTitle = title; controller = new AbortController(); localProgress = undefined; notice = undefined; render();
+  try {await work();}
+  catch (error) {notice = {title: 'Não deu certo', text: error instanceof Error ? error.message : String(error)};}
+  finally {busy = false; controller = undefined; localProgress = undefined; render();}
 }
-function fileName(prefix: string, storeName = baseline?.context.storeName || 'tema'): string {
-  const store = storeName.normalize('NFKD').replace(/[^\w-]+/g, '-').toLowerCase();
-  return `${prefix}-${store}-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
+function progressLocal(done: number, total: number): void {localProgress = {done, total}; render();}
+// --- Navigation -------------------------------------------------------------------------------------
+$('mode-export').addEventListener('click', () => go('export'));
+$('mode-import').addEventListener('click', () => go('send'));
+$('back').addEventListener('click', () => go('home'));
+$('finish').addEventListener('click', () => go(job?.kind === 'send' && job.status !== 'completed' ? 'send' : 'home'));
+// The editor's own "Ver prévia" link, read at the end of the send.
+function previewUrl(): string | undefined {return job?.result?.kind === 'send' ? job.result.preview : undefined;}
+// --- Workspace and plan -------------------------------------------------------------------------
+async function loadStoreData(): Promise<void> {
+  if (!context) return;
+  workspace = await loadWorkspace(context);
+  history = await journalHistory(context);
+  if (!journal || !history.some(item => item.id === journal!.id)) journal = history[0];
+  resumable = undefined;
+  const latest = history[0];
+  if (latest && latest.status !== 'completed' && !active(job) && await get(`sendplan:${latest.id}`)) resumable = latest;
+  // The demo keeps the folder it was given in memory; the extension finds it again in IndexedDB.
+  remembered = isDemo ? remembered : await recallFolder(context);
+  restoreJournal = workspace?.restore ? history.find(item => item.id === workspace!.restore!.journalId) : undefined;
+  computePlan();
+  updateHistory(); journalInfo();
 }
-async function download(bytes: Uint8Array, name: string, type = 'application/zip'): Promise<void> {
-  const blob = new Blob([new Uint8Array(bytes)], {type});
-  const url = URL.createObjectURL(blob);
+function review(): Review | undefined {return scope === 'restore' ? workspace?.restore : workspace?.review;}
+function computePlan(): void {
+  plan = undefined; selected.clear();
+  scope = workspace?.restore?.reading && restoreJournal ? 'restore' : 'project';
+  const current = review(), reading = current?.reading;
+  if (!reading || !workspace) return;
+  let base: Snapshot | undefined, local: Files | undefined, assets: Assets = {};
+  if (scope === 'restore') {base = {context: restoreJournal!.context, capturedAt: restoreJournal!.startedAt, files: restoreJournal!.after}; local = restoreJournal!.before;}
+  else {base = workspace.baseline; local = workspace.project?.local; assets = workspace.project?.localAssets || {};}
+  if (!base || !local) return;
   try {
-    if (isDemo) {
-      const a = document.createElement('a'); a.href = url; a.download = name; a.click();
-      // The demo has no browser download API. IndexedDB backup is still persisted before saving.
-      await new Promise(r => setTimeout(r, 100));
-    } else {
-      const id = await chrome.downloads.download({url, filename: name, saveAs: false, conflictAction: 'uniquify'});
-      const start = Date.now();
-      for (;;) {
-        const [item] = await chrome.downloads.search({id});
-        if (item?.state === 'complete') break;
-        if (item?.state === 'interrupted') throw new Error('Download cancelado ou interrompido. Nenhum envio foi iniciado.');
-        if (Date.now() - start > 120000) throw new Error('O download do backup não foi confirmado. Nenhum envio foi iniciado.');
-        await new Promise(r => setTimeout(r, 250));
-      }
-    }
-  } finally {URL.revokeObjectURL(url);}
+    const {remote, assumed} = remoteFromCapture(base, reading);
+    plan = makePlan(base, local, remote, assets, {overrides: current!.overrides, assumed, inventory: reading.inventory});
+  } catch (error) {notice = {title: 'A comparação não vale mais', text: error instanceof Error ? error.message : String(error)}; return;}
+  const discarded = new Set(current!.discarded || []);
+  for (const row of plan.rows) if (row.status === 'update' && row.whitespaceOnly && discarded.has(row.path)) row.status = 'whitespace-only';
+  // Whitespace-only differences start unselected; coupled files start together.
+  const chosen = current!.selected ? new Set(current!.selected) : undefined;
+  for (const row of plan.rows) if (sendable(row) && (chosen ? chosen.has(row.path) : !row.whitespaceOnly)) selected.add(row.path);
 }
-function setBaseline(snapshot: Snapshot): void {
-  baseline = snapshot; plan = undefined; selected.clear(); $('review').hidden = true; $('diff').hidden = true; $('done').hidden = true;
-  const images = Object.keys(snapshot.assets || {}).length;
-  $('baseline-info').textContent = `${Object.keys(snapshot.files).length} textos e ${images} ${images === 1 ? 'imagem' : 'imagens'} · ${snapshot.context.storeName} · ${new Date(snapshot.capturedAt).toLocaleString('pt-BR')}`;
-}
-function setLocal(files: Files, assets: Assets = {}): void {
-  local = files; localAssets = assets; plan = undefined; selected.clear(); $('review').hidden = true; $('diff').hidden = true; $('done').hidden = true;
-  const images = Object.keys(assets).length;
-  $('local-info').textContent = `${Object.keys(files).length} textos e ${images} ${images === 1 ? 'imagem' : 'imagens'} carregados do computador.`;
+let saving: ReturnType<typeof setTimeout> | undefined;
+function persistReview(change: (value: Review) => void): void {
+  if (!context) return;
+  const target = scope;
+  clearTimeout(saving);
+  saving = setTimeout(() => void updateWorkspace(context!, value => {
+    const current = target === 'restore' ? value.restore : value.review;
+    if (current) change(current);
+  }).then(next => {workspace = next;}).catch(() => {}), 250);
 }
 const labels: Record<PlanRow['status'], string> = {
-  update: 'Pronto para envio', create: 'Novo · será criado', upload: 'Imagem nova · será enviada', unchanged: 'Sem alterações', 'remote-only': 'Mudou apenas na loja', 'already-applied': 'Já está na loja', conflict: 'Conflito', 'missing-local': 'Ausente no projeto · preservado', 'missing-remote': 'Removido na loja · bloqueado', 'new-local': 'Novo · a Yampi não permite criar', unsupported: 'Sem suporte · bloqueado', 'blocked-dependency': 'Bloqueado', 'whitespace-only': 'Só espaço em branco · descartado'
+  update: 'Pronto para envio', create: 'Novo, será criado', upload: 'Imagem nova, será enviada', unchanged: 'Sem alterações', 'remote-only': 'Mudou apenas na loja', 'already-applied': 'Já está na loja', conflict: 'Conflito', 'missing-local': 'Ausente no projeto, preservado', 'missing-remote': 'Removido na loja, bloqueado', 'new-local': 'Novo, a Yampi não permite criar', unsupported: 'Sem suporte, bloqueado', 'blocked-dependency': 'Bloqueado', 'whitespace-only': 'Só espaço em branco, ignorado'
 };
-const label = (row: PlanRow) => row.status === 'update' && row.override ? 'Usará a versão do projeto' : row.status === 'update' && row.base === undefined ? 'Novo · será preenchido' : labels[row.status];
+const label = (row: PlanRow) => row.status === 'update' && row.override ? 'Usará a versão do projeto' : row.status === 'update' && row.base === undefined ? 'Novo, será preenchido' : row.status === 'unchanged' && row.assumed ? 'Sem alterações no projeto' : labels[row.status];
 const short = (path: string) => path.replace(/^assets\//, '');
 function rowNote(row: PlanRow): string {
-  return [row.source ? `Do projeto: ${row.source}` : '', row.rewritten ? `${row.rewritten} ${row.rewritten === 1 ? 'referência de imagem ajustada' : 'referências de imagem ajustadas'}` : '', row.reason || '', row.blockedBy?.length ? 'Depende de: ' + row.blockedBy.join(', ') : '', row.dependsOn?.length ? 'Vai junto com: ' + row.dependsOn.join(', ') : ''].filter(Boolean).join(' · ');
+  return [row.source ? `Vem de ${row.source}.` : '', row.rewritten ? `${plural(row.rewritten, 'referência de imagem ajustada', 'referências de imagem ajustadas')}.` : '', row.reason || '', row.blockedBy?.length ? `Depende de ${list(row.blockedBy)}.` : '', row.dependsOn?.length ? `Vai junto com ${list(row.dependsOn)}.` : ''].filter(Boolean).join(' ');
 }
-function showDiff(row: PlanRow, pointerClick: boolean): void {
-  $('diff-title').textContent = row.source ? `${row.source} → ${row.path}` : row.path;
-  for (const [kind, id] of [['base', 'diff-base'], ['local', 'diff-local'], ['remote', 'diff-remote']] as const) {
-    if (row.image) {const bytes = row.image[kind]; $(id).textContent = bytes ? `Imagem · ${bytes.length} bytes` : '(ausente)';}
-    else $(id).textContent = row[kind] ?? '(ausente)';
-  }
-  $('diff').hidden = false;
-  $('diff').scrollIntoView({behavior: pointerClick && !matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'instant', block: 'nearest'});
+function linkButton(text: string, act: () => void): HTMLButtonElement {
+  const button = el('button', {class: 'link', text, attrs: {type: 'button'}}); button.addEventListener('click', act); return button;
 }
-function item(text: string, ...actions: HTMLElement[]): HTMLLIElement {
-  const li = document.createElement('li'), span = document.createElement('span'); span.textContent = text; li.append(span, ...actions); return li;
+function attentionItem(text: string, ...actions: HTMLButtonElement[]): HTMLLIElement {
+  return el('li', {}, el('span', {text}), actions.length ? el('span', {class: 'actions'}, ...actions) : false);
 }
-function action(text: string, run: (event: MouseEvent) => void): HTMLButtonElement {
-  const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button'; button.textContent = text; button.addEventListener('click', run); return button;
-}
-// Only what needs a decision or a fix in the project, in plain words, with the action that solves it.
+// Only what needs a decision or a fix, in one line each, with the action that solves it.
 function attention(): HTMLLIElement[] {
   if (!plan) return [];
   const items: HTMLLIElement[] = [];
+  const rows = new Map(plan.rows.map(row => [row.path, row]));
   for (const row of plan.rows) {
-    const view = action('Ver versões', event => showDiff(row, event.detail > 0));
-    if (row.override) items.push(item(`${row.path}: vai a versão do projeto. A versão da loja fica no backup do envio.`, view, action('Manter a versão da loja', () => {overrides.delete(row.path); replan();})));
-    else if (row.status === 'conflict' && !row.image && writable(row.path)) items.push(item(`${row.path} mudou na loja depois da sua cópia. Sem escolha, fica a versão da loja.`, view, action('Usar a versão do projeto', () => {
-      if (!confirm(`Usar a versão do projeto em ${row.path}? A versão atual da loja fica no backup do envio.`)) return;
-      overrides.add(row.path); replan();
-    })));
-    else if (row.status === 'conflict') items.push(item(`${row.path} mudou na loja depois da sua cópia, e a extensão não pode substituí-lo.`, view));
-    else if (row.status === 'new-local' || row.status === 'blocked-dependency' || row.status === 'unsupported' && row.reason && row.path !== COMPONENTS_FILE) items.push(item(`${row.source || row.path}: ${row.reason || (row.blockedBy?.length ? `usa ${row.blockedBy.join(', ')}, que não pode ser enviado.` : 'não pode ser enviado.')}`, view));
-    else if (row.status === 'missing-remote') items.push(item(`${row.path} foi removido da loja e não será recriado.`, view));
+    const block = row.reason ? undefined : explainBlock(plan, row);
+    if (block && (block.storeOnly.length || block.conflicts.length)) {
+      const look = (paths: string[], one: string, many: (path: string) => string, tab?: 'store') => paths.map(path => linkButton(paths.length === 1 ? one : many(path), () => openDiff(rows.get(path)!, tab)));
+      items.push(attentionItem(block.text, ...look(block.storeOnly, 'Ver a mudança', path => `Ver ${path}`, 'store'), ...look(block.conflicts, 'Comparar e escolher', path => `Escolher ${path}`)));
+    } else if (row.override) items.push(attentionItem(`${row.path}: vai a versão do projeto. A da loja fica no backup.`, linkButton('Ver', () => openDiff(row)), linkButton('Manter a da loja', () => setOverride(row, false))));
+    else if (row.status === 'conflict' && !row.image && writable(row.path)) items.push(attentionItem(`${row.path} mudou na loja depois da sua cópia.`, linkButton('Comparar e escolher', () => openDiff(row))));
+    else if (row.status === 'conflict') items.push(attentionItem(`${row.path} mudou na loja, e a extensão não pode substituí-lo.`, linkButton('Ver', () => openDiff(row))));
+    else if (row.status === 'new-local' || row.status === 'blocked-dependency' || row.status === 'unsupported' && row.reason && row.path !== COMPONENTS_FILE) items.push(attentionItem(`${row.source || row.path}: ${row.reason || (row.blockedBy?.length ? `usa ${list(row.blockedBy)}, que não pode ser enviado.` : 'não pode ser enviado.')}`, linkButton('Ver', () => openDiff(row))));
+    else if (row.status === 'missing-remote') items.push(attentionItem(`${row.path} foi removido da loja e não será recriado.`, linkButton('Ver', () => openDiff(row))));
   }
-  for (const issue of selectionIssues(plan, selected)) items.push(item(`${issue.path} precisa ir junto com ${issue.requires}.`));
-  for (const warning of plan.warnings || []) items.push(item(`${warning.path}: ${warning.message}`));
+  for (const issue of selectionIssues(plan, selected)) items.push(attentionItem(`${issue.path} precisa ir junto com ${issue.requires}.`));
+  for (const warning of plan.warnings || []) items.push(attentionItem(`${warning.path}: ${warning.message}`));
   return items;
 }
-function replan(): void {
-  if (!baseline || !local || !remote) return;
-  plan = makePlan(baseline, local, remote, localAssets, {overrides});
-  // Whitespace-only differences start unselected; coupled files start together.
-  selected.clear(); plan.rows.filter(r => sendable(r) && !r.whitespaceOnly).forEach(r => selected.add(r.path));
-  renderPlan(); controls();
+function setOverride(row: PlanRow, use: boolean): void {
+  const current = review(); if (!current) return;
+  const overrides = new Set(current.overrides);
+  if (use) overrides.add(row.path); else overrides.delete(row.path);
+  current.overrides = [...overrides]; delete current.selected;
+  persistReview(value => {value.overrides = [...overrides]; delete value.selected;});
+  computePlan(); render();
+  const next = plan?.rows.find(item => item.path === row.path);
+  if (next && diffRow) openDiff(next);
 }
 function renderPlan(): void {
   if (!plan) return;
   const count = (test: (row: PlanRow) => boolean) => plan!.rows.filter(test).length;
   const changed = count(r => r.status === 'update' && !r.whitespaceOnly && r.base !== undefined), created = count(r => r.status === 'create' || r.status === 'update' && r.base === undefined);
-  const images = count(r => r.status === 'upload'), same = count(r => ['unchanged', 'already-applied', 'missing-local', 'remote-only'].includes(r.status));
+  const images = count(r => r.status === 'upload');
   const conflicts = count(r => r.status === 'conflict'), blocked = count(r => ['blocked-dependency', 'new-local', 'missing-remote'].includes(r.status) || r.status === 'unsupported' && !!r.reason && r.path !== COMPONENTS_FILE), whitespace = count(r => r.status === 'update' && !!r.whitespaceOnly);
-  $('count-update').textContent = String(changed); $('count-create').textContent = String(created); $('count-upload').textContent = String(images); $('count-same').textContent = String(same);
-  $('summary').textContent = `${selected.size} para enviar · ${changed} alterados · ${created} novos · ${images} imagens · ${conflicts} conflitos · ${blocked} bloqueados${whitespace ? ` · ${whitespace} só espaço em branco` : ''} · ${plan.rows.length} caminhos comparados`;
+  setCount('count-update', changed, 'alterado', 'alterados'); setCount('count-create', created, 'novo', 'novos'); setCount('count-upload', images, 'imagem', 'imagens');
+  const kinds = list([changed ? plural(changed, 'arquivo alterado', 'arquivos alterados') : '', created ? plural(created, 'arquivo novo', 'arquivos novos') : '', images ? plural(images, 'imagem nova', 'imagens novas') : '']);
+  $('summary').textContent = [
+    `${plural(selected.size, 'item', 'itens')} para enviar${kinds ? `: ${kinds}` : ''}.`,
+    conflicts ? `${plural(conflicts, 'conflito precisa', 'conflitos precisam')} da sua decisão.` : 'Nenhum conflito.',
+    blocked ? `${plural(blocked, 'item bloqueado', 'itens bloqueados')}.` : '',
+    whitespace ? `${plural(whitespace, 'arquivo muda', 'arquivos mudam')} só em espaços em branco.` : '',
+    `${plural(plan.rows.length, 'caminho comparado', 'caminhos comparados')}.`
+  ].filter(Boolean).join(' ');
+  const assumed = count(r => !!r.assumed);
+  $('assumed-note').hidden = !assumed;
+  $('assumed-note').textContent = `${plural(assumed, 'arquivo', 'arquivos')} que o projeto não altera não ${assumed === 1 ? 'foi relido' : 'foram relidos'} na loja, porque não seriam enviados de qualquer forma.`;
   const moved = plan.rows.filter(r => r.status === 'upload' && r.source);
-  $('moves-title').textContent = moved.length ? `${moved.length} ${moved.length === 1 ? 'imagem vai' : 'imagens vão'} direto para assets/images, porque a Yampi não aceita subpastas. As referências nos arquivos enviados são ajustadas automaticamente.` : '';
-  $('moves-list').replaceChildren(...moved.map(r => item(`${short(r.source!)} → ${short(r.path)}`)));
+  $('moves-title').textContent = moved.length ? `${moved.length === 1 ? 'Uma imagem vai' : `${moved.length} imagens vão`} direto para assets/images, porque a Yampi não aceita subpastas. As referências são ajustadas.` : '';
+  $('moves-list').replaceChildren(...moved.map(r => el('li', {text: `${short(r.source!)} → ${short(r.path)}`})));
   $('moves').hidden = !moved.length;
+  const lineage = workspace?.lineage;
+  $('reference-detail').textContent = scope === 'project' && workspace?.baseline ? `Projeto “${workspace.project?.name || ''}”, comparado com a exportação de ${dateTime(lineage?.exportedAt || workspace.baseline.capturedAt)}${lineage?.journals.length ? ` e ${plural(lineage.journals.length, 'envio feito', 'envios feitos')} depois` : ''}.` : '';
   const items = attention();
   $('attention-list').replaceChildren(...items);
   $('attention').hidden = !items.length;
-  $('review-title').textContent = missingNewTexts(plan).length ? 'Ajuste o projeto antes de enviar.' : !selected.size ? 'Nada para enviar.' : items.length ? 'Revise antes de enviar.' : 'Pronto para enviar.';
-  const filter = $<HTMLSelectElement>('filter').value;
-  $('rows').replaceChildren();
-  for (const row of plan.rows) {
-    if (filter === 'changes' && ['unchanged', 'already-applied', 'missing-local'].includes(row.status)) continue;
-    if (filter === 'update' && !sendable(row) || filter === 'conflict' && row.status !== 'conflict' || filter === 'whitespace' && !row.whitespaceOnly && row.status !== 'whitespace-only' || filter === 'blocked' && !['blocked-dependency', 'new-local', 'missing-remote', 'unsupported'].includes(row.status)) continue;
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', `Enviar ${row.path}`);
-    checkbox.disabled = !sendable(row) || working; checkbox.checked = selected.has(row.path);
-    checkbox.addEventListener('change', () => {checkbox.checked ? selected.add(row.path) : selected.delete(row.path); renderPlan(); controls();});
-    td.append(checkbox);
-    const pathCell = document.createElement('td'); pathCell.className = 'path'; pathCell.textContent = row.path;
-    const result = document.createElement('td'), badge = document.createElement('span'); badge.className = `row-status ${row.status}`; badge.textContent = label(row) + (row.status === 'update' && row.whitespaceOnly ? ' · só espaço em branco' : ''); result.append(badge);
-    const detail = rowNote(row);
-    if (detail) {const note = document.createElement('small'); note.className = 'row-detail'; note.textContent = detail; result.append(note);}
-    const cell = document.createElement('td'), button = document.createElement('button'); button.textContent = 'Ver versões'; button.addEventListener('click', event => showDiff(row, event.detail > 0)); cell.append(button);
-    tr.append(td, pathCell, result, cell); $('rows').append(tr);
-  }
-  $('review').hidden = false;
+  $('attention-title').textContent = conflicts && items.length === conflicts ? `${plural(conflicts, 'conflito', 'conflitos')} para decidir` : 'Precisa da sua atenção';
+  $('files-summary').textContent = `Ver os arquivos (${plan.rows.filter(row => !['unchanged', 'already-applied', 'missing-local'].includes(row.status)).length})`;
   $('target-store').textContent = plan.context.storeName;
+  renderRows();
 }
-async function compare(): Promise<void> {
-  if (!baseline || !local) throw new Error('Carregue a exportação original e a pasta editada.');
-  status('Relendo o estado atual da loja…');
-  $('done').hidden = true; $('confirm-panel').hidden = true;
-  await adapter.refresh();
-  remote = await capture(adapter, {signal: controller?.signal, progress});
-  overrides.clear(); replan();
-  const created = plan!.rows.filter(r => r.status === 'create').length, images = plan!.rows.filter(r => r.status === 'upload').length;
-  status('Comparação concluída', missingNewTexts(plan!).length ? 'Há arquivos novos que a Yampi não permite criar. Veja abaixo o que ajustar no projeto.' : selected.size ? `Confira o resumo e clique em enviar.${created || images ? ` A extensão cria ${created} ${created === 1 ? 'arquivo' : 'arquivos'} e envia ${images} ${images === 1 ? 'imagem' : 'imagens'} pelo próprio editor da Yampi.` : ''}` : 'Nada para enviar: a loja já está igual ao projeto, ou os itens abaixo precisam de ajuste.');
-}
-function journalInfo(): void {
-  $('journal-info').textContent = journal ? `${journal.verified.length + (journal.uploaded?.length || 0)}/${journal.selected.length} conferidos · ${journal.status === 'completed' ? 'concluído' : 'envio interrompido ou pendente'} · ${new Date(journal.startedAt).toLocaleString('pt-BR')}` : 'Nenhum envio nesta instalação.';
-}
-async function updateHistory(): Promise<void> {
-  if (!journal) return;
-  history = await journalHistory(journal.context);
-  const picker = $<HTMLSelectElement>('history'); picker.replaceChildren();
-  for (const item of history) {
-    const option = document.createElement('option'); option.value = item.id;
-    option.textContent = `${new Date(item.startedAt).toLocaleString('pt-BR')} · ${item.status} · ${item.verified.length}/${item.selected.length}`;
-    picker.append(option);
-  }
-  picker.value = journal.id;
-}
-function requestScopes(origins:string[]):Promise<boolean> {
-  if(isDemo)return Promise.resolve(false);
-  return chrome.permissions.request({origins:origins.map(origin=>publicUrl(origin,origin).replace(/\/$/,'')+'/*')}).catch(()=>false);
-}
-function remoteFetch(snapshot:Snapshot):PreviewFetch {
-  // The authenticated worker checks the same context before AND after every GET.
-  return async url=>{if(controller?.signal.aborted)throw new Error('Cancelado.');
-    const reply=await rpc({action:'preview-fetch',preview:{url,context:snapshot.context}}) as {encoded:string;type:string;url:string};
-    return {bytes:Uint8Array.from(atob(reply.encoded),c=>c.charCodeAt(0)),type:reply.type,url:reply.url};};
-}
-async function deliverProject(snapshot:Snapshot,visual:PreviewBundle):Promise<void> {
-  assertContext(snapshot.context,await adapter.context());
-  status('Preparando ZIP…','Compactação local em segundo plano. O código e as imagens originais são preservados.');
-  const bytes=await encodeSnapshot(snapshot,true,visual,{signal:controller?.signal,compress:zipInWorker});
-  await put(`baseline:${await contextKey(snapshot.context)}`,snapshot);
-  await download(bytes,fileName('exportacao',snapshot.context.storeName));
-  setBaseline(snapshot);pendingPreview=undefined;
-  const source=visual.source.kind==='demonstration'?'demonstrativa':'parcial — '+(visual.source.kind==='editor'?'dados do editor':'vitrine publicada, rascunho não vinculado');
-  const kinds=[...new Set(visual.pages.map(p=>p.kind+(p.context==='search'?' (busca)':'')))].join(', ')||'nenhuma';
-  const megabytes=(Object.values(visual.assets).reduce((sum,bytes)=>sum+bytes.length,0)/1048576).toFixed(1).replace('.',',');
-  $('preview-info').textContent=`Prévia ${source}. ${visual.pages.length} páginas (${kinds}); ${Object.keys(visual.assets).length} recursos locais (${megabytes} MB); ${visual.api.length} leituras públicas gravadas; ${visual.issues.length} observações. Relatório: preview/report.json. Execute npm run check para conferir seções e CSS. Fidelidade visual não validada automaticamente.`;
-  status('ZIP da loja baixado','Código preservado. '+$('preview-info').textContent);
-}
-async function completeVisual(snapshot:Snapshot,draft:PreviewDraft,origins:string[]):Promise<void> {
-  await rpc({action:'preview-allow',preview:{origins,context:snapshot.context}});
-  const bundle=await finishPreview(draft,remoteFetch(snapshot),origins,controller?.signal,(done,total)=>progress({done,total,path:'Imagens, fontes e estilos',phase:'Baixando recursos visuais'}));
-  const missing=unauthorizedOrigins(bundle);
-  if(missing.length) {
-    pendingPreview={snapshot,draft,bundle,origins};
-    $('preview-origins').textContent=missing.join(', ');
-    status('Código copiado; recursos visuais aguardam autorização','Autorize somente as origens listadas para incluir imagens/fontes no ZIP, ou baixe uma prévia parcial. Nenhum arquivo da Yampi foi alterado.');
-  } else await deliverProject(snapshot,bundle);
-}
-async function exportProject(permission:Promise<boolean>):Promise<void> {
-  if(!connected)throw new Error('Abra o editor de código Yampi e clique no ícone da extensão.');
-  const snapshot=await capture(adapter,{signal:controller?.signal,progress});
-  const enabled=await permission;
-  if(!enabled){await deliverProject(snapshot,demonstration(snapshot.context,'Captura visual não autorizada ou desativada. Código exportado; configurações, catálogo de amostra, imagens e fontes visuais não foram capturados.',Object.keys(snapshot.files)));return;}
-  status('Capturando contexto visual público…','Somente leituras, sem scripts da vitrine. A publicação pode diferir do rascunho.');
-  const editorData=await adapter.visual();
-  const draft=await preparePreview(snapshot,remoteFetch(snapshot),{editorData,enabled:true,signal:controller?.signal});
-  await completeVisual(snapshot,draft,[snapshot.context.previewOrigin]);
-}
-$('export').addEventListener('click',()=>{const permission=$<HTMLInputElement>('include-preview').checked&&currentContext?requestScopes([currentContext.previewOrigin]):Promise.resolve(false);void run(()=>exportProject(permission));});
-$('preview-allow').addEventListener('click',()=>{const pending=pendingPreview;if(!pending)return;
-  const missing=unauthorizedOrigins(pending.bundle);
-  const permission=requestScopes(missing);
-  void run(async()=>{if(!await permission){status('Permissão não concedida','Você pode baixar com a prévia parcial.');return;}
-    const origins=[...new Set([...pending.origins,...missing])];
-    await completeVisual(pending.snapshot,pending.draft,origins);});
-});
-$('preview-partial').addEventListener('click',()=>{const pending=pendingPreview;if(pending)void run(()=>deliverProject(pending.snapshot,pending.bundle));});
-$('preview-discard').addEventListener('click',()=>{pendingPreview=undefined;controls();status('Preparação visual descartada','Nenhum arquivo da Yampi foi alterado.');});
-$('baseline').addEventListener('change', () => void run(async () => {
-  const file = $<HTMLInputElement>('baseline').files?.[0]; if (!file) return;
-  if (file.size > MAX_TOTAL_BYTES * 2 + MAX_FILE_BYTES) throw new Error('ZIP muito grande.');
-  status('Conferindo a exportação original…');
-  const project = await decodeProject(new Uint8Array(await file.arrayBuffer()));
-  if (connected) assertContext(project.baseline.context, await adapter.context());
-  setBaseline(project.baseline); setLocal(project.local, project.localAssets); await put(`baseline:${await contextKey(project.baseline.context)}`, project.baseline);
-  mode(true);
-  if (connected) await compare();
-  else status('Projeto ZIP carregado', 'Conecte ao editor para comparar e enviar as alterações.');
-}, connected));
-$('folder').addEventListener('change', () => void run(async () => {
-  const files = $<HTMLInputElement>('folder').files; if (!files?.length) return;
-  status('Lendo os arquivos locais…');
-  const project = await readProjectDirectory(files);
-  if ('baseline' in project) {
-    if (connected) assertContext(project.baseline.context, await adapter.context());
-    setBaseline(project.baseline); await put(`baseline:${await contextKey(project.baseline.context)}`, project.baseline);
-  }
-  setLocal(project.local, project.localAssets); mode(true);
-  if (connected) await compare();
-  else status('Pasta local carregada', 'Conecte ao editor para comparar e enviar as alterações.');
-}, connected));
-$('compare').addEventListener('click', () => void run(compare));
-$('discard-whitespace').addEventListener('click', () => {
-  if (!plan || working) return;
-  for (const row of plan.rows) if (row.status === 'update' && row.whitespaceOnly) {row.status = 'whitespace-only'; selected.delete(row.path);}
-  renderPlan(); controls(); status('Alterações só de espaço em branco descartadas', 'Esses arquivos não serão enviados. Compare novamente para reavaliar.');
-});
-$('filter').addEventListener('change', renderPlan);
-$('close-diff').addEventListener('click', () => {$('diff').hidden = true;});
-$('cancel').addEventListener('click', () => {controller?.abort(); status('Interrupção solicitada', 'A operação para após conferir o arquivo em andamento.');});
-$('apply').addEventListener('click', () => {
-  if (!plan || !selected.size || working) return;
-  $('target-store').textContent = plan.context.storeName; $('confirm-panel').hidden = false; $('confirm-send').focus();
-});
-$('cancel-send').addEventListener('click', () => {$('confirm-panel').hidden = true; $('apply').focus();});
-$('confirm-send').addEventListener('click', () => void run(async () => {
-  if (!plan) throw new Error('Compare novamente antes de enviar.');
-  const current = plan;
-  // Freeze selection and invalidate the plan; retries always require another comparison.
-  const chosen = [...selected]; plan = undefined; selected.clear(); $('confirm-panel').hidden = true; $('review').hidden = true; $('diff').hidden = true;
-  const result = await applyPlan(adapter, current, chosen, {
-    signal: controller?.signal, progress,
-    persist: async value => {await saveJournal(value); journal = structuredClone(value); journalInfo(); await updateHistory();},
-    backup: async value => {const zip = await encodeSnapshot(value); await put(`backup:${journal!.id}`, {journalId: journal!.id, bytes: zip}); await download(zip, fileName('backup-antes-do-envio'));}
+function renderRows(): void {
+  // The list is built only while open: hundreds of rows are not worth keeping in the page.
+  if (!plan || !($('all-files') as HTMLDetailsElement).open) {$('rows').replaceChildren(); $('rows-more').hidden = true; return;}
+  const filter = $<HTMLSelectElement>('filter').value, query = $<HTMLInputElement>('search').value.trim().toLowerCase();
+  const rows = plan.rows.filter(row => {
+    if (query && !row.path.toLowerCase().includes(query) && !(row.source || '').toLowerCase().includes(query)) return false;
+    if (filter === 'changes') return !['unchanged', 'already-applied', 'missing-local'].includes(row.status);
+    if (filter === 'update') return sendable(row);
+    if (filter === 'conflict') return row.status === 'conflict';
+    if (filter === 'whitespace') return !!row.whitespaceOnly || row.status === 'whitespace-only';
+    if (filter === 'blocked') return ['blocked-dependency', 'new-local', 'missing-remote', 'unsupported'].includes(row.status);
+    return true;
   });
-  const texts = result.verified.length, created = result.created?.length || 0, images = result.uploaded?.length || 0;
-  $('done-summary').textContent = `${texts} ${texts === 1 ? 'arquivo salvo' : 'arquivos salvos'}${created ? `, ${created} ${created === 1 ? 'deles criado' : 'deles criados'} pela extensão` : ''}${images ? ` e ${images} ${images === 1 ? 'imagem enviada' : 'imagens enviadas'}` : ''}. Cada item foi conferido na Yampi depois de recarregar o editor.`;
-  $('done-warnings').replaceChildren(...(result.warnings || []).map(text => item(text)));
-  $('done-warnings').hidden = !result.warnings?.length;
-  $('done').hidden = false;
-  status('Arquivos salvos e conferidos após recarregar', 'Abra Ver prévia na Yampi e valide a loja. A extensão não publicou as alterações.');
-}, true, undefined, 'write'));
-$('download-backup').addEventListener('click', () => void run(async () => {
-  const stored = await get<{journalId: string; bytes: Uint8Array}>(`backup:${journal?.id}`);
-  if (!stored || stored.journalId !== journal?.id) throw new Error('O backup deste envio não foi concluído. Consulte o registro ou a exportação original.');
-  await download(stored.bytes, fileName('backup')); status('Backup baixado');
-}, false));
-$('history').addEventListener('change', () => {journal = history.find(j => j.id === $<HTMLSelectElement>('history').value); journalInfo(); controls();});
-$('download-journal').addEventListener('click', () => void run(async () => {
-  if (!journal) throw new Error('Selecione um envio no histórico.');
-  await download(new TextEncoder().encode(JSON.stringify(journal, null, 2)), `registro-${journal.id}.json`, 'application/json');
-  status('Registro do envio baixado', 'Contém versões anteriores, propostas e caminhos pendentes para recuperação. Guarde fora do repositório.');
-}, false));
-// Undo is a new comparison from the send record: the sent version becomes the original, the previous one the project.
-async function prepareRestore(): Promise<void> {
-  if (!journal) return;
-  setBaseline({context: journal.context, capturedAt: journal.startedAt, files: journal.after});
-  setLocal(journal.before); mode(true); await compare();
-  status('Restauração preparada para revisão', 'Apenas arquivos ainda iguais ao último envio voltam ao estado anterior; alterações posteriores ficam como conflitos. Arquivos criados voltam a ficar vazios, e imagens enviadas continuam na loja.');
+  const shown = rows.slice(0, 400), working = busy || active(job);
+  $('rows').replaceChildren(...shown.map(row => {
+    const checkbox = el('input', {attrs: {type: 'checkbox', 'aria-label': `Enviar ${row.path}`, 'data-path': row.path}});
+    checkbox.checked = selected.has(row.path); checkbox.disabled = !sendable(row) || working;
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) selected.add(row.path); else selected.delete(row.path);
+      persistReview(value => {value.selected = [...selected];});
+      render();
+    });
+    const name = row.path.split('/').pop()!, folder = row.path.slice(0, -name.length), note = rowNote(row);
+    const view = linkButton('Diferenças', () => openDiff(row)); view.classList.add('row-action');
+    return el('li', {class: 'file-row'},
+      el('label', {class: 'check'}, checkbox, el('span')),
+      el('div', {class: 'file-main'}, el('span', {class: 'file-name', text: name}), el('span', {class: 'file-folder', text: folder}), el('span', {class: `row-status ${row.status}`, text: label(row) + (row.status === 'update' && row.whitespaceOnly ? ', só espaço em branco' : '')}), note ? el('small', {class: 'row-detail', text: note}) : false),
+      view);
+  }));
+  $('rows-more').hidden = rows.length <= shown.length;
+  $('rows-more').textContent = `Mostrando ${shown.length} de ${rows.length}. Use a busca para encontrar os demais.`;
 }
-for (const id of ['restore', 'undo']) $(id).addEventListener('click', () => void run(prepareRestore));
-$('clear').addEventListener('click', async () => {
-  if (!confirm('Apagar as cópias originais e o último backup guardados nesta extensão? Os ZIPs já baixados continuam no computador. Nenhum arquivo da loja será alterado.')) return;
-  await clearLocal(); baseline = undefined; local = undefined; localAssets = {}; plan = undefined; journal = undefined; history = []; $('history').replaceChildren(); selected.clear();
-  remote = undefined; overrides.clear();
-  $('review').hidden = true; $('diff').hidden = true; $('done').hidden = true; $('baseline-info').textContent = 'Nenhuma exportação concluída.'; $('local-info').textContent = 'Nenhum projeto escolhido.';
-  journalInfo(); status('Dados locais da extensão apagados'); controls();
+$('all-files').addEventListener('toggle', renderRows);
+$('filter').addEventListener('change', renderRows);
+$('search').addEventListener('input', renderRows);
+$('select-all').addEventListener('click', () => {
+  if (!plan) return;
+  for (const row of plan.rows) if (sendable(row) && !row.whitespaceOnly) selected.add(row.path);
+  persistReview(value => {value.selected = [...selected];}); render();
 });
+$('select-none').addEventListener('click', () => {selected.clear(); persistReview(value => {value.selected = [];}); render();});
+$('discard-whitespace').addEventListener('click', () => {
+  if (!plan || busy) return;
+  const paths = plan.rows.filter(row => row.status === 'update' && row.whitespaceOnly).map(row => row.path);
+  for (const path of paths) selected.delete(path);
+  persistReview(value => {value.discarded = [...new Set([...value.discarded || [], ...paths])]; value.selected = [...selected];});
+  const current = review(); if (current) current.discarded = [...new Set([...current.discarded || [], ...paths])];
+  for (const row of plan.rows) if (paths.includes(row.path)) row.status = 'whitespace-only';
+  render(); toast('Mudanças só de espaço em branco não serão enviadas.');
+});
+// --- Sheets ---------------------------------------------------------------------------------------
+const sheets = ['confirm-panel', 'diff', 'menu-sheet'];
+function openSheet(id: string): void {
+  $(id).hidden = false; $('sheet-scrim').hidden = false;
+  requestAnimationFrame(() => ($(id).querySelector<HTMLElement>('button:not([hidden]):not(:disabled)') || $(id)).focus());
+}
+function closeSheet(id: string): void {
+  if ($(id).hidden) return;
+  $(id).hidden = true;
+  if (sheets.every(sheet => $(sheet).hidden)) $('sheet-scrim').hidden = true;
+}
+const closeAll = () => {for (const id of sheets) closeSheet(id); diffRow = undefined;};
+function openDiff(row: PlanRow, tab?: typeof diffTab): void {
+  diffRow = row;
+  $('diff-title').textContent = row.source ? `${row.source} → ${row.path}` : row.path;
+  showDiffTab(row.status === 'create' || row.base === undefined ? 'remote' : tab ?? diffTab);
+  // A change made only in the store goes to the project when the user asks: written into the
+  // remembered project folder, or copied to paste by hand.
+  const storeOnly = row.status === 'remote-only' && !row.image && typeof row.remote === 'string';
+  $('diff-write-store').hidden = !(storeOnly && projectFolder());
+  $('diff-copy-store').hidden = !storeOnly;
+  $('diff-copy-store').classList.toggle('primary', $('diff-write-store').hidden);
+  $('diff-copy-store').textContent = $('diff-write-store').hidden ? 'Copiar a versão da loja' : 'Copiar';
+  $('diff-use-project').hidden = !(row.status === 'conflict' && !row.image && writable(row.path));
+  $('diff-keep-store').hidden = !row.override;
+  openSheet('diff');
+}
+function showDiffTab(tab: typeof diffTab): void {
+  diffTab = tab;
+  const tabs = {remote: 'diff-tab-remote', base: 'diff-tab-base', store: 'diff-tab-store'} as const;
+  for (const [key, id] of Object.entries(tabs)) $(id).setAttribute('aria-selected', String(key === tab));
+  ($('diff').querySelector('.switch') as HTMLElement).style.setProperty('--index', String(Object.keys(tabs).indexOf(tab)));
+  const row = diffRow; if (!row) return;
+  if (row.image) {
+    const size = (bytes?: Uint8Array) => bytes ? `${(bytes.length / 1024).toFixed(1).replace('.', ',')} KB` : 'ausente';
+    $('diff-stats').textContent = `Imagem. Original: ${size(row.image.base)}. Projeto: ${size(row.image.local)}. Loja: ${size(row.image.remote)}.`;
+    $('diff-body').replaceChildren(el('p', {class: 'diff-empty', text: 'Imagens são comparadas pelos bytes. A Yampi não substitui uma imagem existente: uma versão nova precisa de outro nome.'}));
+    return;
+  }
+  if (row.assumed && tab !== 'base') {
+    $('diff-stats').textContent = 'A versão da loja não foi relida: o projeto não altera este arquivo.';
+    $('diff-body').replaceChildren(el('p', {class: 'diff-empty', text: 'Segure Alt ao clicar em “Comparar de novo” para reler todos os arquivos da loja.'}));
+    return;
+  }
+  const pairs = {remote: [row.remote, row.local, 'Loja', 'Projeto'], base: [row.base, row.local, 'Original', 'Projeto'], store: [row.base, row.remote, 'Original', 'Loja']} as const;
+  const [before, after, a, b] = pairs[tab];
+  renderDiff($('diff-body'), $('diff-stats'), before, after, {before: a, after: b});
+}
+$('diff-tab-remote').addEventListener('click', () => showDiffTab('remote'));
+$('diff-tab-base').addEventListener('click', () => showDiffTab('base'));
+$('diff-tab-store').addEventListener('click', () => showDiffTab('store'));
+$('close-diff').addEventListener('click', () => {closeSheet('diff'); diffRow = undefined;});
+// Explicit, per file, with both versions on screen; the store's version stays in the backup.
+$('diff-use-project').addEventListener('click', () => {if (diffRow) {setOverride(diffRow, true); toast('A versão do projeto será enviada. A da loja fica no backup.');}});
+$('diff-keep-store').addEventListener('click', () => {if (diffRow) {setOverride(diffRow, false); toast('A versão da loja será mantida.');}});
+$('diff-write-store').addEventListener('click', () => {
+  const row = diffRow, folder = projectFolder(), expected = workspace?.project?.local[row?.path ?? ''];
+  if (!row || !folder || typeof row.remote !== 'string') return;
+  // Chrome asks for write access during this click; the store text is written only after it.
+  const allowed = permitted(folder, true, 'readwrite'), text = row.remote;
+  closeSheet('diff'); diffRow = undefined;
+  void run(`Trazendo ${row.path} da loja`, async () => {
+    if (!await allowed) throw new Error('O Chrome não liberou a escrita na pasta. Abra a comparação e use “Copiar a versão da loja”.');
+    if (expected === undefined) throw new Error(`tema/${row.path} não está no projeto lido. Compare de novo.`);
+    await replaceThemeFile(folder, row.path, expected, text);
+    toast(`tema/${row.path} agora tem a versão da loja.`, 5000);
+    await readFolder(folder);
+  });
+});
+$('diff-copy-store').addEventListener('click', () => {
+  const row = diffRow; if (!row || typeof row.remote !== 'string') return;
+  void copyText(row.remote).then(copied => toast(copied ? `Versão da loja copiada. Cole em tema/${row.path} e compare de novo.` : 'O Chrome não deixou copiar. Abra o arquivo no editor da Yampi e copie de lá.', 7000));
+});
+$('sheet-scrim').addEventListener('click', closeAll);
+document.addEventListener('keydown', event => {if (event.key === 'Escape') closeAll();});
+$('menu').addEventListener('click', () => {updateHistory(); journalInfo(); controls(); openSheet('menu-sheet');});
+$('close-menu').addEventListener('click', () => closeSheet('menu-sheet'));
+// --- Jobs -------------------------------------------------------------------------------------------
+const newId = () => crypto.randomUUID();
+// The job's first state shows at once; the runner's reports replace it.
+async function startJob(request: JobRequest): Promise<void> {
+  if (!context) throw new Error('Conecte ao editor de código da Yampi.');
+  job = startingState(request, context); liveJob = request.id; notice = undefined;
+  render();
+  try {await client.start(request, context);}
+  catch (error) {job = undefined; liveJob = ''; throw error;}
+}
+function onJob(state: JobState | undefined): void {
+  if (!state) {if (!active(job)) {job = undefined; render();} return;}
+  if (job && state.id !== job.id && active(job) && state.updatedAt < job.updatedAt) return;
+  const finishing = !active(state) && handled !== state.id;
+  if (state.id === liveJob || active(state)) liveJob = state.id;
+  job = state;
+  if (finishing && state.id === liveJob) {
+    handled = state.id; settling = true;
+    render();
+    void loadStoreData().finally(() => {
+      settling = false;
+      // A finished comparison opens the review; everything else shows its result.
+      if (state.kind === 'compare' && state.status === 'completed') {route = 'send'; dismissJob();}
+      render();
+      if (state.status === 'completed' && state.kind === 'send') toast(state.scope === 'restore' ? 'Restauração concluída e conferida.' : 'Envio concluído e conferido na Yampi.');
+    });
+    return;
+  }
+  render();
+}
+$('cancel').addEventListener('click', () => {
+  if (busy && controller) {controller.abort(); return;}
+  if (!active(job)) return;
+  cancelled = job!.id; controls();
+  void client.cancel().catch(error => toast(error instanceof Error ? error.message : String(error)));
+  toast('Interrompendo depois do item atual.');
+});
+// --- Export -----------------------------------------------------------------------------------------
+function requestScopes(origins: string[]): Promise<boolean> {
+  if (isDemo) return Promise.resolve(false);
+  return chrome.permissions.request({origins: origins.map(origin => publicUrl(origin, origin).replace(/\/$/, '') + '/*')}).catch(() => false);
+}
+$('export').addEventListener('click', () => {
+  // The permission prompt needs this click: ask before anything else.
+  const permission = $<HTMLInputElement>('include-preview').checked && context ? requestScopes([context.previewOrigin]) : Promise.resolve(false);
+  void run('Preparando o download', async () => {await startJob({id: newId(), kind: 'export', includePreview: await permission});});
+});
+$('preview-allow').addEventListener('click', () => {
+  const origins = job?.waiting?.origins || [];
+  const permission = requestScopes(origins);
+  void (async () => {
+    if (!await permission) {toast('Permissão não concedida. Você pode baixar sem esses recursos.'); return;}
+    await client.decide({action: 'allow', origins});
+  })().catch(error => toast(error instanceof Error ? error.message : String(error)));
+});
+$('preview-partial').addEventListener('click', () => void client.decide({action: 'partial'}).catch(() => {}));
+$('preview-discard').addEventListener('click', () => void client.decide({action: 'discard'}).catch(() => {}));
+$('show-file').addEventListener('click', () => {
+  // The ZIP the export just saved, in the system's file manager.
+  const name = job?.result?.kind === 'export' ? job.result.fileName : '';
+  void chrome.downloads.search({orderBy: ['-startTime'], limit: 20}).then(items => {
+    const item = items.find(entry => entry.filename.replace(/\\/g, '/').split('/').pop()?.startsWith(name.replace(/\.zip$/, '')));
+    if (item) chrome.downloads.show(item.id); else chrome.downloads.showDefaultFolder();
+  });
+});
+// --- Project folder ---------------------------------------------------------------------------------
+async function adoptProject(project: Project | {local: Files; localAssets: Assets}, source: {name: string; kind: 'folder' | 'zip' | 'demo'}, full = false): Promise<void> {
+  let target = context;
+  if ('baseline' in project) {
+    if (connected && context) assertContext(project.baseline.context, context);
+    target = project.baseline.context;
+  } else if (!workspace?.baseline) throw new Error('Esta pasta não tem a exportação original (.yampi-sync/). Escolha a pasta extraída do ZIP baixado pela extensão, ou baixe o tema antes.');
+  if (!target) throw new Error('Conecte ao editor para carregar este projeto.');
+  const chosen = 'baseline' in project ? chooseBaseline(workspace, project.baseline) : undefined;
+  workspace = await updateWorkspace(target, value => {
+    if (chosen) {value.baseline = chosen.baseline; value.lineage = chosen.lineage;}
+    value.project = {local: project.local, localAssets: project.localAssets, name: source.name, kind: source.kind, loadedAt: new Date().toISOString()};
+    value.review = {overrides: []}; delete value.restore;
+  });
+  if (chosen?.advanced) toast('Os arquivos já enviados não voltam como conflito.');
+  restoreJournal = undefined; computePlan(); route = 'send';
+  if (connected) await compare(full);
+}
+async function compare(full = false): Promise<void> {
+  const base = workspace?.baseline, project = workspace?.project;
+  if (!base || !project) throw new Error('Carregue a exportação original e a pasta editada.');
+  closeSheet('confirm-panel');
+  await startJob({id: newId(), kind: 'compare', scope: 'project', paths: changedPaths(base, project.local, project.localAssets), ...(full ? {full: true} : {})});
+}
+async function readFolder(folder: Folder, full = false): Promise<void> {
+  busyTitle = `Lendo “${folder.name}”`; render();
+  const {name, entries} = await folderEntries(folder, controller?.signal);
+  const project = await readProjectEntries(entries, (done, total) => {if (controller?.signal.aborted) throw new Error('Leitura da pasta cancelada.'); progressLocal(done, total);});
+  if (context) await rememberFolder('baseline' in project ? project.baseline.context : context, folder, name).catch(() => {});
+  remembered = {folder, name, savedAt: new Date().toISOString()};
+  await adoptProject(project, {name, kind: 'folder'}, full);
+}
+function chooseFolder(): void {
+  if (!canPickFolders()) {$('folder').click(); return;}
+  void run('Escolhendo a pasta', async () => {
+    const folder = await pickFolder().catch(error => {
+      // Without folder access for extension pages, the regular file input takes over.
+      if (error instanceof DOMException && ['SecurityError', 'NotAllowedError'].includes(error.name)) {$('folder').click(); return undefined;}
+      throw error;
+    });
+    if (folder) await readFolder(folder);
+  });
+}
+$('pick-folder').addEventListener('click', chooseFolder);
+$('pick-other').addEventListener('click', chooseFolder);
+$('reload-folder').addEventListener('click', () => {
+  const folder = remembered?.folder;
+  if (!folder) return;
+  // The permission prompt needs this click.
+  const allowed = permitted(folder, true);
+  void run(`Lendo “${folder.name}”`, async () => {
+    if (!await allowed) throw new Error('O Chrome não liberou a leitura da pasta. Escolha a pasta de novo.');
+    await readFolder(folder);
+  });
+});
+$('folder').addEventListener('change', () => void run('Lendo a pasta do projeto', async () => {
+  const files = $<HTMLInputElement>('folder').files; if (!files?.length) return;
+  const name = files[0].webkitRelativePath.split('/')[0] || 'Pasta do projeto';
+  const project = await readProjectDirectory(files, progressLocal);
+  $<HTMLInputElement>('folder').value = '';
+  await adoptProject(project, {name, kind: 'folder'});
+}));
+async function readZip(file: File): Promise<void> {
+  if (file.size > MAX_TOTAL_BYTES * 2 + MAX_FILE_BYTES) throw new Error('ZIP muito grande.');
+  await adoptProject(await decodeProject(new Uint8Array(await file.arrayBuffer())), {name: file.name, kind: 'zip'});
+}
+$('baseline').addEventListener('change', () => void run('Conferindo o ZIP', async () => {
+  const file = $<HTMLInputElement>('baseline').files?.[0]; if (!file) return;
+  $<HTMLInputElement>('baseline').value = '';
+  await readZip(file);
+}));
+// The whole screen takes a dropped folder or ZIP while choosing or reviewing the project.
+const dropzone = $('dropzone');
+const dropTarget = () => dropzone.hidden ? $('project-card') : dropzone;
+const accepts = () => ['pick', 'review', 'home'].includes(currentView());
+for (const type of ['dragenter', 'dragover']) document.addEventListener(type, event => {if (!accepts()) return; event.preventDefault(); if (!busy) dropTarget().classList.add('dragging');});
+document.addEventListener('dragleave', event => {if (!(event as DragEvent).relatedTarget) dropTarget().classList.remove('dragging');});
+document.addEventListener('drop', event => {
+  if (!accepts()) return;
+  event.preventDefault(); dropTarget().classList.remove('dragging');
+  if (busy || active(job)) return;
+  const item = droppedItem(event);
+  void run('Lendo o projeto', async () => {
+    const dropped = await item;
+    if (!dropped) throw new Error('Solte a pasta do projeto ou o ZIP de retorno.');
+    if (dropped instanceof File) {
+      if (!/\.zip$/i.test(dropped.name)) throw new Error('Solte a pasta do projeto ou um ZIP exportado pela extensão.');
+      await readZip(dropped);
+    } else await readFolder(dropped);
+  });
+});
+// Alt + click reads every file of the store, not only the ones the project changes. A project read
+// from the remembered folder is read again first, so a file fixed there since then counts.
+// The remembered folder, when the project on screen was read from it.
+function projectFolder(): Folder | undefined {
+  const project = workspace?.project;
+  return remembered && project?.kind === 'folder' && project.name === remembered.name ? remembered.folder : undefined;
+}
+$('compare').addEventListener('click', event => {
+  const full = (event as MouseEvent).altKey, folder = projectFolder();
+  const again = folder ? permitted(folder, true) : null;
+  void run('Preparando a comparação', async () => {
+    if (folder && again && await again) return readFolder(folder, full);
+    if (again) toast('Sem acesso à pasta: comparado com a leitura anterior.');
+    await compare(full);
+  });
+});
+// --- Send -------------------------------------------------------------------------------------------
+$('apply').addEventListener('click', () => {
+  if (!plan || !selected.size || busy) return;
+  const rows = plan.rows.filter(row => selected.has(row.path));
+  const created = rows.filter(r => r.status === 'create').length, images = rows.filter(r => r.status === 'upload').length, texts = rows.length - images;
+  $('target-store').textContent = plan.context.storeName;
+  $('confirm-counts').textContent = `${list([texts ? `${plural(texts, 'arquivo', 'arquivos')}${created ? ` (${created} ${created === 1 ? 'novo' : 'novos'})` : ''}` : '', images ? plural(images, 'imagem nova', 'imagens novas') : ''])}.`;
+  openSheet('confirm-panel');
+});
+$('cancel-send').addEventListener('click', () => {closeSheet('confirm-panel'); $('apply').focus();});
+$('confirm-send').addEventListener('click', () => {
+  if (!plan) return;
+  const current = plan, chosen = [...selected], sendScope = scope, journalId = restoreJournal?.id;
+  closeSheet('confirm-panel');
+  void run('Preparando o envio', async () => {
+    const id = newId();
+    await put(`jobinput:${id}`, {plan: current, selected: chosen, scope: sendScope, ...(sendScope === 'restore' && journalId ? {journalId} : {})} satisfies SendInput);
+    // The comparison is used up: another send always starts from a new one.
+    plan = undefined;
+    await startJob({id, kind: 'send', scope: sendScope, ...(sendScope === 'restore' && journalId ? {journalId} : {})});
+  });
+});
+$('resume').addEventListener('click', () => {
+  const previous = resumable; if (!previous) return;
+  void run('Retomando o envio', async () => {resumable = undefined; await startJob({id: newId(), kind: 'send', resume: previous.id, ...(previous.scope ? {scope: previous.scope} : {})});});
+});
+$('open-preview').addEventListener('click', () => {
+  const url = previewUrl(); if (!url) return;
+  if (isDemo) window.open(url, '_blank', 'noopener'); else void chrome.tabs.create({url});
+});
+// --- History and recovery ---------------------------------------------------------------------------
+function journalInfo(): void {
+  $('journal-info').textContent = journal ? `${journal.verified.length + (journal.uploaded?.length || 0)} de ${journal.selected.length} itens conferidos. ${journal.status === 'completed' ? 'Concluído' : 'Interrompido'} em ${dateTime(journal.startedAt)}.${journal.scope === 'restore' ? ' Foi uma restauração.' : ''}` : 'Nenhum envio nesta instalação.';
+}
+function updateHistory(): void {
+  const picker = $<HTMLSelectElement>('history'); picker.replaceChildren();
+  for (const item of history) picker.append(el('option', {text: `${dateTime(item.startedAt)} — ${item.status === 'completed' ? 'concluído' : 'interrompido'}`, attrs: {value: item.id}}));
+  if (journal) picker.value = journal.id;
+}
+$('history').addEventListener('change', () => {journal = history.find(j => j.id === $<HTMLSelectElement>('history').value); journalInfo(); controls();});
+async function save(bytes: Uint8Array, name: string, type = 'application/zip'): Promise<void> {
+  const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], {type}));
+  try {
+    if (isDemo) {
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return;
+    }
+    const id = await chrome.downloads.download({url, filename: name, saveAs: false, conflictAction: 'uniquify'});
+    const start = Date.now();
+    for (;;) {
+      const [item] = await chrome.downloads.search({id});
+      if (item?.state === 'complete') break;
+      if (item?.state === 'interrupted') throw new Error('Download cancelado ou interrompido.');
+      if (Date.now() - start > 120000) throw new Error('O download não foi confirmado.');
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  } finally {URL.revokeObjectURL(url);}
+}
+const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
+$('download-backup').addEventListener('click', () => {
+  closeSheet('menu-sheet');
+  void run('Baixando o backup', async () => {
+    const stored = await get<{journalId: string; bytes: Uint8Array}>(`backup:${journal?.id}`);
+    if (!stored || stored.journalId !== journal?.id) throw new Error('O backup deste envio não foi concluído. Use o registro ou a exportação original.');
+    await save(stored.bytes, `backup-${stamp()}.zip`); toast('Backup baixado.');
+  });
+});
+$('download-journal').addEventListener('click', () => {
+  closeSheet('menu-sheet');
+  void run('Baixando o registro', async () => {
+    if (!journal) throw new Error('Escolha um envio no histórico.');
+    await save(new TextEncoder().encode(JSON.stringify(journal, null, 2)), `registro-${journal.id}.json`, 'application/json');
+    toast('Registro baixado. Guarde fora do repositório.');
+  });
+});
+// Undo is a new comparison from the send record: the sent version becomes the original, the previous one the project.
+async function prepareRestore(entry: Journal): Promise<void> {
+  if (!context) throw new Error('Conecte ao editor.');
+  workspace = await updateWorkspace(context, value => {value.restore = {journalId: entry.id, overrides: []};});
+  restoreJournal = entry; route = 'send';
+  await startJob({id: newId(), kind: 'compare', scope: 'restore', journalId: entry.id, paths: [...new Set([...Object.keys(entry.before), ...Object.keys(entry.after)])].sort()});
+}
+$('restore').addEventListener('click', () => {const entry = journal; closeSheet('menu-sheet'); if (entry) void run('Preparando a restauração', () => prepareRestore(entry));});
+$('undo').addEventListener('click', () => {
+  const id = job?.result?.kind === 'send' ? job.result.journalId : undefined;
+  const entry = history.find(item => item.id === id) || journal;
+  if (entry) {dismissJob(); void run('Preparando a restauração', () => prepareRestore(entry));}
+});
+$('clear').addEventListener('click', async () => {
+  if (!confirm('Apagar as cópias originais, o projeto carregado e os backups guardados nesta extensão? Os ZIPs já baixados continuam no computador. Nada muda na loja.')) return;
+  closeSheet('menu-sheet');
+  await clearLocal(); workspace = undefined; plan = undefined; journal = undefined; history = []; resumable = undefined; remembered = undefined; restoreJournal = undefined; selected.clear();
+  route = 'home'; toast('Dados locais apagados.'); render();
+});
+// --- Demo -------------------------------------------------------------------------------------------
+if (isDemo) $('demo-local').addEventListener('click', () => void run('Carregando as alterações fictícias', async () => {
+  const base = workspace?.baseline;
+  if (!base) throw new Error('Baixe o tema da loja fictícia primeiro.');
+  const sample = {...base.files};
+  sample['elements/head.twig'] += '<!-- Redesign local -->\n';
+  sample['sections/home/main_banner.twig'] += '<!-- Banner revisado -->\n';
+  sample['templates/home.twig'] += '<!-- Página inicial revisada -->\n';
+  sample['assets/styles/global/main.scss'] += 'body { background: white; }\n';
+  sample['assets/images/readme.md'] += 'Mudança não suportada\n';
+  sample['templates/new.twig'] = '<p>Novo</p>\n<img src="{{ \'images/demo/nova.png\' | assets_url }}" alt="">\n';
+  const assets: Assets = {...base.assets, 'assets/images/demo/nova.png': base.assets?.['assets/images/example.png'] || new Uint8Array()};
+  await adoptProject({baseline: base, local: sample, localAssets: assets}, {name: 'Alterações fictícias', kind: 'demo'});
+}));
+// --- Connection -------------------------------------------------------------------------------------
 async function connect(): Promise<void> {
-  if (working) return;
-  connected = false; $('connection-state').textContent = 'Editor desconectado';
-  await run(async () => {
-  status('Conectando ao editor…');
-  const context = await adapter.context(); currentContext=context; connected = true;
-  $('store').textContent = context.storeName; $('connection-state').textContent = 'Editor conectado';
-  const previous = await get<Snapshot>(`baseline:${await contextKey(context)}`) || await get<Snapshot>('baseline');
-  if (previous) try {assertContext(previous.context, context); setBaseline(previous);} catch { /* A backup from another shop is never selected implicitly. */ }
-  history = await journalHistory(context); journal = history[0] || await get<Journal>('journal');
-  if (journal) try {assertContext(journal.context, context);} catch {journal = undefined;}
-  if (journal && !history.length) {await saveJournal(journal); const backup = await get('lastBackup'); if (backup) await put(`backup:${journal.id}`, backup);}
-  await updateHistory(); journalInfo(); status('Editor conectado', 'A cópia aguarda sua confirmação. Confira a loja e clique em Confirmar e baixar ZIP para começar.');
-  }, true, async () => {if (connection) {await connection.connect(); session = connection.token;}});
-  if (!connected) $('store').textContent = 'Editor indisponível';
+  if (busy) return;
+  connected = false; offline = undefined; $('connection-state').textContent = 'Conectando';
+  busy = true; busyTitle = 'Conectando ao editor…'; render();
+  try {
+    if (connection) await connection.connect();
+    const current = await client.state();
+    if (active(current)) {
+      // An operation is running in the background: watch it without touching the editor.
+      context = current!.context; job = current; liveJob = current!.id;
+    } else {
+      await rpc({action: 'lock', access: 'read'});
+      try {context = await adapter.context();} finally {await rpc({action: 'unlock'}).catch(() => {});}
+      // A result not dismissed yet (it may have finished while the panel was closed) is shown.
+      job = current; if (current) {handled = current.id; liveJob = current.kind === 'compare' ? '' : current.id;}
+    }
+    connected = true; $('connection-state').textContent = 'Editor conectado';
+    await loadStoreData();
+    if (plan) route = 'send';
+  } catch (error) {
+    offline = {title: 'Não foi possível conectar', text: error instanceof Error ? error.message : String(error)};
+  } finally {busy = false; render();}
 }
 $('retry').addEventListener('click', () => void connect());
-if (!isDemo && editorTab) chrome.runtime.onMessage.addListener(message => {
-  if (message?.editorClicked === session && !working) {
-    mode(false);
-    if (!connected) void connect();
-    else status('Aguardando sua confirmação', 'Clique em Confirmar e baixar ZIP para copiar os arquivos para o computador.');
-  }
+if (!isDemo && editorTab) chrome.runtime.onMessage.addListener(incoming => {
+  // A click on the toolbar icon inside the editor means: download the theme.
+  if (incoming?.editorClicked !== connection?.token || busy || active(job)) return;
+  if (!connected) void connect(); else go('export');
 });
+render();
 if (isDemo || editorTab) await connect();
-else {status('Abra pelo ícone da extensão', 'No editor de código da Yampi, clique no ícone para conectar e baixar o tema.'); controls();}
+else {offline = {title: 'Abra pelo ícone da extensão', text: 'No editor de código da Yampi, clique no ícone da extensão.'}; render();}

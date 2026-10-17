@@ -1,6 +1,6 @@
 {
   "name": "zirtuno-sync-yampi",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "author": {"name": "Zirtuno", "url": "https://www.instagram.com/zirtuno/"},
   "private": true,
   "type": "module",
@@ -24,6 +24,8 @@
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.38.0",
     "@codemirror/view-legacy": "npm:@codemirror/view@6.36.2",
+    "@fontsource-variable/atkinson-hyperlegible-mono": "5.3.0",
+    "@fontsource-variable/atkinson-hyperlegible-next": "5.3.0",
     "@splidejs/splide": "4.1.4",
     "@types/chrome": "^0.1.0",
     "@types/node": "^24.0.0",

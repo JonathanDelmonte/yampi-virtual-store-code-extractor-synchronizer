@@ -1,7 +1,9 @@
 import {assertContext, safeSnapshot, validatePaths, writable, sameIgnoringWhitespace, creatableName, freshFile, uploadablePath, yampiImageName, type Assets, type Snapshot, type Files, type Plan, type PlanRow} from './model';
 import {dependencyReport, resolvedReferences} from '../../local-runtime/dependencies.mjs';
 import {COMPONENTS_FILE} from '../../local-runtime/contract.mjs';
-export interface PlanOptions {overrides?: Iterable<string>}
+// assumed: store paths whose content was not read (taken as exported). inventory: every path the
+// store lists, which decides existing folders and dependencies when the remote snapshot is partial.
+export interface PlanOptions {overrides?: Iterable<string>; assumed?: Iterable<string>; inventory?: Iterable<string>}
 const equalBytes = (a?: Uint8Array, b?: Uint8Array) => !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]);
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const parent = (path: string) => path.slice(0, path.lastIndexOf('/'));
@@ -58,10 +60,11 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
   const storeAssets: Assets = Object.create(null), source = new Map<string, string>();
   for (const [path, bytes] of Object.entries(localAssets)) {const target = moves.get(path) || path; storeAssets[target] = bytes; if (target !== path) source.set(target, path);}
   // Yampi cannot create folders: a new file needs a folder that already holds something.
-  const folders = new Set<string>();
-  for (const path of [...Object.keys(remote.files), ...Object.keys(remoteAssets)]) for (let folder = parent(path); folder; folder = parent(folder)) folders.add(folder);
-  const overrides = new Set(options.overrides || []);
-  const paths = [...new Set([...Object.keys(base.files), ...Object.keys(texts), ...Object.keys(remote.files), ...Object.keys(baseAssets), ...Object.keys(storeAssets), ...Object.keys(remoteAssets)])].sort();
+  const folders = new Set<string>(), inventory = options.inventory ? [...options.inventory] : undefined;
+  const listed = inventory || [...Object.keys(remote.files), ...Object.keys(remoteAssets)];
+  for (const path of listed) for (let folder = parent(path); folder; folder = parent(folder)) folders.add(folder);
+  const overrides = new Set(options.overrides || []), assumed = new Set(options.assumed || []);
+  const paths = [...new Set([...Object.keys(base.files), ...Object.keys(texts), ...Object.keys(remote.files), ...Object.keys(baseAssets), ...Object.keys(storeAssets), ...Object.keys(remoteAssets), ...inventory || []])].sort();
   validatePaths(paths);
   const rows: PlanRow[] = paths.map(path => {
     if (path in baseAssets || path in storeAssets || path in remoteAssets) {
@@ -78,7 +81,7 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
       else if (equalBytes(l, b)) status = 'remote-only';
       else if (!equalBytes(r, b)) status = 'conflict';
       else {status = 'unsupported'; reason = 'A Yampi não substitui uma imagem existente. Salve a nova versão com outro nome no projeto.';}
-      return {path, status, image: {base: b, local: l, remote: r}, ...(source.has(path) ? {source: source.get(path)} : {}), ...(reason ? {reason} : {})};
+      return {path, status, image: {base: b, local: l, remote: r}, ...(source.has(path) ? {source: source.get(path)} : {}), ...(reason ? {reason} : {}), ...(assumed.has(path) ? {assumed: true} : {})};
     }
     const b = base.files[path], l = texts[path], r = remote.files[path];
     let status: PlanRow['status'], reason: string | undefined, override = false;
@@ -98,12 +101,12 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
     // Yampi rewrites this list itself whenever a component is created; sending it would race that.
     if (path === COMPONENTS_FILE && (status === 'update' || status === 'conflict')) {status = 'unsupported'; reason = 'A Yampi gera este arquivo sozinha, com os componentes que existem na loja. A extensão não o envia.';}
     if (leftovers[path] && (status === 'update' || status === 'create')) {status = 'blocked-dependency'; reason = `Usa imagens que vão direto para assets/images por um caminho que a extensão não consegue ajustar (${leftovers[path].join(', ')}). Escreva no código o caminho completo, como 'images/pasta/arquivo.jpg'.`;}
-    return {path, status, base: b, local: l, remote: r, ...(rewritten[path] ? {rewritten: rewritten[path]} : {}), ...(override ? {override} : {}), ...(reason ? {reason} : {})};
+    return {path, status, base: b, local: l, remote: r, ...(rewritten[path] ? {rewritten: rewritten[path]} : {}), ...(override ? {override} : {}), ...(reason ? {reason} : {}), ...(assumed.has(path) ? {assumed: true} : {})};
   });
   for (const row of rows) if (row.status === 'update' && sameIgnoringWhitespace(row.local!, row.remote!)) row.whitespaceOnly = true;
   // A sent file must not depend on a file that will not exist in the store.
   const localPaths = [...Object.keys(texts), ...Object.keys(storeAssets)];
-  const remotePaths = [...Object.keys(remote.files), ...Object.keys(remoteAssets), ...rows.filter(r => r.status === 'create' || r.status === 'upload').map(r => r.path)];
+  const remotePaths = [...listed, ...rows.filter(r => r.status === 'create' || r.status === 'upload').map(r => r.path)];
   const report = dependencyReport({targets: rows.filter(r => r.status === 'update' || r.status === 'create').map(r => r.path), texts, local: localPaths, remote: remotePaths});
   for (const item of report.blocked) Object.assign(rows.find(r => r.path === item.path)!, {status: 'blocked-dependency', blockedBy: item.dependencies.map(d => d.path)});
   // Files that use each other travel together. A dependency that cannot be sent

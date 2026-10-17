@@ -1,5 +1,29 @@
 # Validação
 
+## Bloqueio explicado, em 17/10/2026
+
+`npm run check` passou com 258 testes em 17 arquivos; `tests/explain.test.ts` cobre a frase para um arquivo usado que mudou só na loja, em conflito, os dois juntos e a ausência de bloqueio; `tests/folder.test.ts` cobre a gravação na pasta do projeto (quebras de linha e marca de ordem de bytes mantidas, recusa quando o arquivo mudou depois da comparação, arquivo ausente não criado, caminho com `..` recusado, projeto dentro de uma pasta acima) e a leitura da pasta. `npm run test:e2e` passou.
+
+Na demonstração, com uma pasta em memória montada a partir do ZIP exportado pela própria demonstração: **Usar no projeto** pediu a permissão `readwrite`, gravou uma vez o arquivo com a versão da loja, releu a pasta e comparou de novo; o arquivo que estava bloqueado passou a ser enviável e o aviso sumiu. A pasta real do Chrome não foi usada: o seletor de pastas exige um gesto do usuário. Na demonstração, em Chromium, a linha "templates/home.twig usa components/Example.vue, que mudou na loja depois da sua cópia." apareceu com **Ver a mudança**, que abriu a comparação Original → Loja com **Copiar a versão da loja**; o texto copiado era a versão da loja, e nenhum erro de página ocorreu. A releitura da pasta lembrada em **Comparar de novo** não tem teste automático: o seletor de pastas exige um gesto do usuário.
+
+## Operações em segundo plano na 0.6.0, em 16/10/2026
+
+Windows, Node.js 26.2.0; o alvo do projeto continua Node 24. `npm run package` passou: TypeScript, **246 testes em 15 arquivos**, build e pacote com 23 arquivos permitidos (21 da extensão, `INSTRUCOES.md` e `TERCEIROS.md`). A pasta `releases/zirtuno-sync-yampi/` e os dois ZIPs têm o mesmo conteúdo, conferido byte a byte, e os dois ZIPs o mesmo SHA-256. O ZIP tem 414.545 bytes; as quatro fontes incluídas (SIL OFL 1.1) são a maior parte do aumento.
+
+`npm run test:e2e` passou no painel lateral nativo de Chromium. No envio, o painel foi fechado logo depois do backup: a execução em segundo plano terminou sozinha, todas as etapas ficaram concluídas ou puladas, o ícone mostrou o fim e o editor foi liberado. Reaberto, o painel mostrou **Envio concluído**, com o resultado. O registro tinha os 3 itens conferidos (texto alterado, texto novo criado pelo **Adicionar arquivo** e imagem enviada para `assets/images`), e a restauração pelo menu continuou protegendo uma alteração posterior. Exportação, captura da vitrine com autorização por origem, ZIP de retorno corrompido, desconexão e nova tentativa também passaram, com zero edições, saves ou acionamentos de publicar, excluir ou renomear na exportação. `npm run test:compression` passou: o ZIP do worker é igual ao síncrono, a interface continuou respondendo e o cancelamento funcionou.
+
+Casos novos de unidade:
+
+- **Envio** (`tests/resume.test.ts`): uma recarga por grupo de criações e de imagens e uma por texto salvo, nenhuma antes de salvar; criações conferidas antes das imagens; continuação sem repetir o que foi conferido e sem novo backup; salvamento que chegou à loja antes da interrupção conferido, não repetido; alteração feita na loja durante a interrupção para o envio sem gravar; arquivo criado antes da interrupção conferido e preenchido; backup que falhou refeito antes da primeira alteração; seleção diferente recusada.
+- **Comparação parcial** (`tests/resume.test.ts`): o mesmo envio da comparação completa lendo só o que mudou; texto incluído que só a loja mudou lido e ainda bloqueando quem o usa; arquivo removido da loja; nomes possíveis de imagem em subpasta.
+- **Operações** (`tests/jobs.test.ts`): progresso por etapa, backup baixado, registro e referência atualizada; interrupção e continuação; backup que não chegou ao computador refeito ao continuar; interromper a pedido; loja diferente antes de qualquer leitura; migração da referência anterior à 0.6.0; restauração.
+- **Worker** (`tests/background.test.ts`): o painel fechado não libera o editor, e outro painel só acompanha; a execução age só na aba e na operação que recebeu; comparação não grava; download só de endereços da extensão; ícone e aviso de fim; operação sem execução viva marcada como interrompida; aba fechada cancela.
+- **Progresso, diferenças e novas tentativas** (`tests/progress.test.ts`): barra pelo trabalho de cada etapa, tempo restante só com histórico suficiente, diferença por linhas que reconstrói os dois lados, novas tentativas só em leituras que falham por tempo, nunca em salvar, criar ou enviar imagem.
+
+Dois problemas foram encontrados nesta revisão, antes de qualquer uso real, e os testes acima falham sem as correções: **Continuar de onde parou** pularia o backup de um envio cujo backup falhou, e a comparação parcial deixava de bloquear um arquivo que inclui um texto alterado só na loja.
+
+Sem validação real: a execução em segundo plano, o painel fechado no meio do envio, a continuação, a conferência em grupo de criações e imagens e a comparação parcial numa loja real.
+
 ## Correção 0.5.1, em 16/10/2026
 
 Windows, Node.js 26.2.0. `npm run package` passou: TypeScript, 200 testes em 12 arquivos (3 novos para a decodificação de endereços `data:`), build e pacote. O editor fictício passou a declarar `connect-src 'self'`, como a página real. Sem a correção, `npm run test:e2e` falhou na leitura da imagem com **Failed to fetch**, a mesma mensagem do envio real. Com a correção, o teste de ponta a ponta passou inteiro: exportação com PNG, criação de arquivo e de imagem pelos controles do editor, envio com backup e conferência após recarregar, e restauração protegida.

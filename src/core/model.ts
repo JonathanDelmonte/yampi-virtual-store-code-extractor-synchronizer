@@ -29,7 +29,8 @@ export interface Manifest {
 export type Status = 'update' | 'create' | 'upload' | 'unchanged' | 'remote-only' | 'already-applied' | 'conflict' | 'missing-local' | 'missing-remote' | 'new-local' | 'unsupported' | 'blocked-dependency' | 'whitespace-only';
 // source: local path of an image the store keeps elsewhere. rewritten: image references adjusted in a text.
 // override: a conflict the user chose to resolve with the project version. reason: why a row cannot be sent.
-export interface PlanRow {path: string; status: Status; base?: string; local?: string; remote?: string; image?: {base?: Uint8Array; local?: Uint8Array; remote?: Uint8Array}; whitespaceOnly?: boolean; blockedBy?: string[]; dependsOn?: string[]; source?: string; rewritten?: number; override?: boolean; reason?: string}
+// assumed: the store's version was not read, because the project leaves the file as exported.
+export interface PlanRow {path: string; status: Status; base?: string; local?: string; remote?: string; image?: {base?: Uint8Array; local?: Uint8Array; remote?: Uint8Array}; whitespaceOnly?: boolean; blockedBy?: string[]; dependsOn?: string[]; source?: string; rewritten?: number; override?: boolean; reason?: string; assumed?: boolean}
 export interface Plan {context: Context; rows: PlanRow[]; createdAt: string; warnings?: {path: string; message: string}[]}
 export interface Adapter {
   context(): Promise<Context>;
@@ -43,14 +44,18 @@ export interface Adapter {
   upload?(path: string, bytes: Uint8Array): Promise<void>;
 }
 export type ReadAdapter = Pick<Adapter, 'context' | 'inventory' | 'read' | 'readAsset'>;
-export interface Progress {done: number; total: number; path: string; phase: string}
+// step: a stable id for the phase (the label in phase can change with the wording).
+export interface Progress {done: number; total: number; path: string; phase: string; step?: string}
 export interface Journal {
   version: 1; id: string; context: Context; startedAt: string;
   status: 'prepared' | 'running' | 'completed' | 'stopped';
   selected: string[]; verified: string[]; pending?: string; error?: string;
   before: Files; after: Files;
-  // Files the extension created (their "before" is the content Yampi gave them) and images it uploaded.
-  created?: string[]; uploaded?: string[]; warnings?: string[];
+  // Files the extension created (their "before" is the content Yampi gave them) and images it uploaded,
+  // both confirmed after a reload. issued: created or uploaded but not yet confirmed.
+  created?: string[]; uploaded?: string[]; warnings?: string[]; issued?: string[];
+  // When the user continued an interrupted send, and whether it restored an earlier one.
+  resumedAt?: string[]; scope?: 'project' | 'restore';
 }
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_TOTAL_BYTES = 32 * 1024 * 1024;

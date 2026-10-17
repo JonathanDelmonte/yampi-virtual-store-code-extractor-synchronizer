@@ -2,8 +2,8 @@ import {sanitizeRaw} from '../core/preview';
 import type {EditorView} from '@codemirror/view';
 import {editorView, readDocument} from './editor-document';
 import {assertContext, validatePath, validatePaths, validateImage, imagePath, writable, creatableName, uploadablePath, imageType, dataUrlBytes, MAX_FILE_BYTES, type Context} from '../core/model';
-export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write' | 'create' | 'upload'; context?: Context; path?: string; expected?: string; content?: string}
-export const version = '0.5.1';
+export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write' | 'create' | 'upload' | 'links'; context?: Context; path?: string; expected?: string; content?: string}
+export const version = '0.6.0';
 type Reply = {ok: true; value: unknown} | {ok: false; error: string};
 const clean = (e: Element | null) => e?.textContent?.trim() || '';
 type EditorRoot = ShadowRoot | HTMLElement;
@@ -26,6 +26,13 @@ function findButton(label: string): HTMLButtonElement {
   if (matches.length !== 1) throw new Error(`Controle do editor não reconhecido: ${label}`);
   return matches[0];
 }
+let previewAnchor: HTMLAnchorElement | undefined;
+function previewLink(): URL {
+  getContext();
+  const url = new URL(previewAnchor!.href);
+  if (!['https:', 'http:'].includes(url.protocol)) throw new Error('URL de prévia inválida.');
+  return url;
+}
 function getContext(): Context {
   const headers = root().querySelectorAll('header');
   if (headers.length !== 1) throw new Error('Cabeçalho do componente do editor não reconhecido.');
@@ -33,6 +40,7 @@ function getContext(): Context {
   const dividers = header.querySelectorAll('.divider');
   const previews = header.querySelectorAll<HTMLAnchorElement>('a[href][target="_blank"]');
   if (dividers.length !== 1 || previews.length !== 1) throw new Error('Identificação da loja e link de prévia não reconhecidos no cabeçalho. Nenhum arquivo foi enviado.');
+  previewAnchor = previews[0];
   const divider = dividers[0];
   const walker = document.createTreeWalker(header, NodeFilter.SHOW_TEXT);
   const names: string[] = []; let found = false;
@@ -88,13 +96,10 @@ async function completeInventory(context: Context): Promise<string[]> {
     if (!title) throw new Error('Pasta não reconhecida.');
     title.click(); await until(() => folder.classList.contains('active'));
   }
-  let previous = '', stable = 0;
+  const settled = stability();
   await until(() => {
     guard(context);
-    if (root().querySelector('aside [aria-busy="true"], aside .loading, aside .spinner, aside .loader-bg')) {stable = 0; return false;}
-    const current = JSON.stringify([...inventory().keys()].sort());
-    stable = current === previous ? stable + 1 : 0; previous = current;
-    return stable >= 4;
+    return settled(root().querySelector('aside [aria-busy="true"], aside .loading, aside .spinner, aside .loader-bg') ? undefined : JSON.stringify([...inventory().keys()].sort()));
   });
   // A lazy tree can add folders after the initial expansion.
   if ([...root().querySelectorAll('aside .collapse-list:not(.active)')].some(n => clean([...n.children].find(c => c.classList.contains('folder-title')) || null) !== 'logs')) throw new Error('A árvore adicionou pastas durante a leitura. Exporte novamente.');
@@ -113,12 +118,45 @@ function assertClean(): void {
   if (dirty()) throw new Error('Existe um arquivo com alterações não salvas. Salve ou descarte manualmente antes de continuar.');
 }
 function guard(context: Context): void {assertContext(context, getContext());}
+// Waits react to the editor's own DOM changes. In a hidden tab the browser runs timers about
+// once a second, and chained timers can wait up to a minute; DOM changes still arrive at once.
+// The fallback check hops through a message first, so its timer never counts as chained.
 async function until(check: () => boolean, timeout = 10000): Promise<void> {
-  const start = performance.now();
-  while (!check()) {
-    if (performance.now() - start > timeout) throw new Error('O editor não confirmou a operação dentro do prazo.');
-    await new Promise(r => setTimeout(r, 80));
-  }
+  if (check()) return;
+  const target: Node = activeRoot ?? document;
+  await new Promise<void>((resolve, reject) => {
+    const start = performance.now();
+    let done = false, timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new MutationObserver(() => test());
+    const finish = (error?: unknown) => {
+      if (done) return;
+      done = true; observer.disconnect(); target.removeEventListener('load', test, true); clearTimeout(timer);
+      if (error) reject(error); else resolve();
+    };
+    function test() {
+      if (done) return;
+      try {if (check()) {finish(); return;}} catch (error) {finish(error); return;}
+      // A hidden tab answers slower: allow it more time before calling it a failure.
+      if (performance.now() - start > (document.hidden ? timeout * 3 : timeout)) finish(new Error('O editor não confirmou a operação dentro do prazo.'));
+    }
+    function schedule() {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {channel.port1.close(); if (!done) timer = setTimeout(() => {test(); if (!done) schedule();}, 80);};
+      channel.port2.postMessage(null);
+    }
+    observer.observe(target, {subtree: true, childList: true, attributes: true, characterData: true});
+    target.addEventListener('load', test, true);
+    schedule();
+  });
+}
+// The same value for at least 320 ms, seen at least twice: a file opens before its content
+// arrives, and the editor can swap documents while loading.
+function stability(): (value: unknown) => boolean {
+  let last: unknown, since = 0, checks = 0;
+  return value => {
+    if (value === undefined || value !== last) {last = value; since = performance.now(); checks = 0; return false;}
+    return ++checks >= 2 && performance.now() - since >= 320;
+  };
 }
 function selectedPath(): string | undefined {
   const selected = root().querySelectorAll('aside .collapse-item.selected .file-name');
@@ -149,16 +187,13 @@ async function open(path: string, context: Context, reading=false): Promise<void
     return selectedPath() === path && clean(root().querySelector('main .tab-item.active p')) === path.split('/').pop() && (imagePath(path) ? !!image?.complete && !!image.naturalWidth : !!root().querySelector('main .cm-content'));
   });
   // CodeMirror and the active tab can switch before async file loading finishes. Require stable UI/document.
-  let last: unknown, stable = 0;
+  const settled = stability();
   await until(() => {
     guard(context);
-    if (selectedPath() !== path || root().querySelector('main [aria-busy="true"], main .loading, main .spinner, main .loader-bg')) {stable = 0; return false;}
+    if (selectedPath() !== path || root().querySelector('main [aria-busy="true"], main .loading, main .spinner, main .loader-bg')) return settled(undefined);
     // CodeMirror Text is immutable: a new document resets the same stability window.
     // Copy/validate the full text once after stabilization, rather than on each poll.
-    const value = imagePath(path) ? visibleImage().src : view().state.doc;
-    stable = value === last ? stable + 1 : 0;
-    last = value;
-    return stable >= 4;
+    return settled(imagePath(path) ? visibleImage().src : view().state.doc);
   });
   assertClean();
 }
@@ -308,6 +343,8 @@ export async function command(input: Command): Promise<Reply> {
     if (input.context) guard(input.context);
     assertClean();
     if (input.op === 'context') return {ok: true, value: context};
+    // The editor's own "Ver prévia" link, for the panel's shortcut after a send.
+    if (input.op === 'links') return {ok: true, value: {preview: previewLink().href}};
     if (input.op === 'visual') {
       // Only a draft theme configuration in the platform format is read here; the
       // admin page's account, session and store data are never collected.

@@ -1,6 +1,6 @@
 # Próximas etapas
 
-**Estado em 15/10/2026:** versão 0.5.0, com envio automático (criação de textos, envio de imagens, preenchimento e conferência), validada somente com o editor fictício, que reproduz a marcação do editor real; nenhuma gravação real foi feita. Próxima etapa: primeiro envio real controlado, acompanhado pelo proprietário, conferindo a criação pelo editor, o caminho de `assets_url` e a leitura das imagens enviadas. Histórico em [JOURNAL.md](JOURNAL.md).
+**Estado em 16/10/2026:** versão 0.6.0, com as operações em segundo plano, progresso, retomada de envios interrompidos, comparação parcial e o painel por etapas, validada somente com o editor fictício. Numa loja real, a 0.5.0 criou 18 textos e enviou uma imagem, conferidos após recarregar. Próxima etapa: envio real controlado com a 0.6.0, acompanhado pelo proprietário, conferindo textos alterados, as demais imagens, o painel fechado no meio do envio, a retomada, o caminho de `assets_url` e a restauração. Histórico em [JOURNAL.md](JOURNAL.md).
 
 ## Validação controlada do adaptador real
 
@@ -26,4 +26,4 @@ São dados distintos dos arquivos do tema. A 0.4.0 captura os objetos públicos 
 
 ## Manutenção
 
-Histórico de envios isolado por loja, originais independentes, projeto local portátil, check de compilação e importação da pasta inteira/ZIP estão implementados. Ampliar a compatibilidade Twig/Sass/Vue 2 e simular plugins próprios exige exemplos fictícios das estruturas suportadas. Recuperação de uma exportação interrompida, comparação por linhas e identificação oficial de tema ainda podem ser adicionadas. O proprietário autorizou o código público; projetos e dados das lojas continuam excluídos deste repositório público.
+Histórico de envios isolado por loja, originais independentes, projeto local portátil, check de compilação e importação da pasta inteira/ZIP estão implementados. Ampliar a compatibilidade Twig/Sass/Vue 2 e simular plugins próprios exige exemplos fictícios das estruturas suportadas. A comparação por linhas existe desde a 0.6.0. Retomar uma exportação interrompida (hoje ela recomeça) e a identificação oficial de tema ainda podem ser adicionadas. O proprietário autorizou o código público; projetos e dados das lojas continuam excluídos deste repositório público.

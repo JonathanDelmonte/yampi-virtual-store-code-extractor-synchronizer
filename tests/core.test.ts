@@ -200,7 +200,8 @@ describe('envio com preflight, backup e conferência', () => {
   });
   test('cancelamento para antes do próximo arquivo', async () => {
     const other = 'templates/product.twig', adapter = new FakeAdapter({[file]: 'a', [other]: 'a'}), controller = new AbortController();
-    await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b', [other]: 'b'}), [file, other], {...hooks(), signal: controller.signal, progress: () => controller.abort()})).rejects.toThrow('Cancelado'); expect(adapter.writes).toEqual([file]);
+    // Stop requested right after the first file is saved and confirmed.
+    await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b', [other]: 'b'}), [file, other], {...hooks(), signal: controller.signal, progress: p => {if (p.step === 'save' && p.done === 1) controller.abort();}})).rejects.toThrow('Cancelado'); expect(adapter.writes).toEqual([file]);
   });
   test('verificação após reload detecta save que não persistiu', async () => {
     const adapter = new FakeAdapter({[file]: 'a'}); adapter.refreshHook = () => {adapter.files[file] = 'a';};
