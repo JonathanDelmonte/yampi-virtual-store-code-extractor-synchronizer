@@ -22,8 +22,8 @@
   </header>
   <main class="page">
     <nav class="operation-tabs" role="tablist" aria-label="Operação">
-      <button id="mode-export" role="tab" aria-selected="true" aria-controls="operation-panel">Baixar tema</button>
-      <button id="mode-import" role="tab" aria-selected="false" aria-controls="operation-panel">Enviar alterações</button>
+      <button id="mode-export" role="tab" aria-selected="true" aria-controls="operation-panel">Baixar arquivos</button>
+      <button id="mode-import" role="tab" aria-selected="false" aria-controls="operation-panel">Importar projeto</button>
     </nav>
     <p id="demo-notice" class="demo" hidden>Editor fictício. <button id="demo-local" class="link">Carregar alterações fictícias</button></p>
     <div id="resume-area" class="resume-area" hidden>
@@ -39,13 +39,13 @@
 
     <div id="connection-actions" class="action-slot"></div>
 
-    <section id="export-section" class="view" aria-label="Baixar tema" hidden>
+    <section id="export-section" class="view" aria-label="Baixar arquivos" hidden>
       <label class="option"><span class="option-text"><strong>Incluir a vitrine publicada</strong><span>Leva páginas, imagens e fontes públicas para a prévia local.</span></span><span class="toggle"><input type="checkbox" id="include-preview" checked><span aria-hidden="true"></span></span></label>
       <p id="copy-safety" class="safe">Só leitura. A extensão não edita, salva nem publica nada na loja durante o download.</p>
       <div id="export-actions" class="action-slot"></div>
       <p id="baseline-info" class="aside" hidden></p>
       <details class="help"><summary>O que vem no download?</summary><dl class="folder-guide"><div><dt><code>tema/</code></dt><dd>O código da loja para editar no computador.</dd></div><div><dt><code>.yampi-sync/</code></dt><dd>Os originais e os hashes usados para comparar e devolver as alterações.</dd></div><div><dt><code>preview/</code></dt><dd>A captura da vitrine, quando autorizada, e o relatório do que ficou faltando.</dd></div></dl><p>A captura usa páginas e recursos públicos, sem cookies. O conteúdo publicado pode ser diferente do rascunho. Sem essa opção, a prévia usa exemplos.</p></details>
-      <details class="help"><summary>Como editar no computador</summary><ol class="help-steps"><li>Extraia o ZIP em uma pasta fora do repositório da extensão e abra essa pasta no VS Code.</li><li>Com Node 24 instalado, execute <code>npm ci</code>, <code>npm run check</code> e <code>npm run dev</code>.</li><li>Edite os arquivos de <code>tema/</code>. Preserve <code>.yampi-sync/</code> para conferir os originais.</li><li>Volte à aba <strong>Enviar alterações</strong> e escolha a pasta inteira do projeto.</li></ol><button id="go-import" class="link help-link">Já editei o projeto. Enviar alterações</button></details>
+      <details class="help"><summary>Como editar no computador</summary><ol class="help-steps"><li>Extraia o ZIP em uma pasta fora do repositório da extensão e abra essa pasta no VS Code.</li><li>Com Node 24 instalado, execute <code>npm ci</code>, <code>npm run check</code> e <code>npm run dev</code>.</li><li>Edite os arquivos de <code>tema/</code>. Preserve <code>.yampi-sync/</code> para conferir os originais.</li><li>Volte à aba <strong>Importar projeto</strong> e escolha a pasta inteira do projeto.</li></ol><button id="go-import" class="link help-link">Importar meu projeto editado</button></details>
     </section>
 
     <section id="import-section" class="view" aria-label="Escolher o projeto" hidden>

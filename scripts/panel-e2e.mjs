@@ -38,7 +38,7 @@ try {
   await page.goto(origin + '/demo.html?demo=1');
   await page.waitForFunction(() => document.body.dataset.view === 'export' && !document.querySelector('#export').disabled);
   assert.equal(await page.locator('#connection-state').textContent(), 'Editor conectado');
-  assert.equal(await page.getByRole('tab', {name: 'Baixar tema'}).getAttribute('aria-selected'), 'true');
+  assert.equal(await page.getByRole('tab', {name: 'Baixar arquivos'}).getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator('#export-section #export').count(), 1, 'A ação de baixar deve estar na própria seção.');
   assert.equal(await page.locator('#dock').evaluate(node => getComputedStyle(node).position), 'static');
   await page.locator('#include-preview').uncheck();
@@ -51,23 +51,24 @@ try {
     await page.setViewportSize({width: 360, height: 900}); await shot('baixar-' + colorScheme);
   }
   await page.emulateMedia({colorScheme: 'dark'});
-  await page.getByRole('tab', {name: 'Baixar tema'}).focus(); await page.keyboard.press('ArrowRight');
-  assert.equal(await page.getByRole('tab', {name: 'Enviar alterações'}).getAttribute('aria-selected'), 'true');
+  await page.getByRole('tab', {name: 'Baixar arquivos'}).focus(); await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab', {name: 'Importar projeto'}).getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator('#mode-import').evaluate(node => document.activeElement === node), true, 'As setas devem manter o foco nas abas.');
   assert.equal(await page.locator('#import-section').isVisible(), true);
   assert.equal(await page.locator('#import-section #pick-folder').isVisible(), true);
+  await shot('importar-dark');
   await page.locator('#zip-choice > summary').click();
   await page.locator('#baseline').focus();
   assert.equal(await page.locator('.file-picker').evaluate(node => node.matches(':focus-within')), true);
   assert.equal(await page.locator('#zip-name').textContent(), 'Nenhum ZIP selecionado');
   for (const width of [320, 360, 560, 800]) {await page.setViewportSize({width, height: 900}); await fits('ZIP ' + width);}
-  await page.setViewportSize({width: 360, height: 900}); await shot('enviar-zip-dark');
+  await page.setViewportSize({width: 360, height: 900}); await shot('importar-zip-dark');
   await page.locator('#menu').click();
   assert.equal(await page.locator('#recovery').evaluate(node => node.open), true);
   assert.equal(await page.locator('#download-backup').isDisabled(), true);
   assert.equal(await page.locator('#restore').isDisabled(), true);
   await shot('backups-dark');
-  await page.getByRole('tab', {name: 'Enviar alterações'}).focus(); await page.keyboard.press('Home');
+  await page.getByRole('tab', {name: 'Importar projeto'}).focus(); await page.keyboard.press('Home');
   assert.equal(await page.locator('#export-section').isVisible(), true);
   const exported = page.waitForEvent('download'); await page.locator('#export').click();
   await page.waitForFunction(() => document.body.dataset.view === 'job' && !!document.querySelector('#phases li'));
@@ -81,7 +82,7 @@ try {
   const entries = unzipSync(new Uint8Array(await readFile(source)));
   entries['tema/elements/head.twig'] = strToU8(new TextDecoder().decode(entries['tema/elements/head.twig']) + '\n<!-- Alteração fictícia para revisar -->\n');
   const returning = path.join(temporary, 'retorno-yampi-ficticio.zip'); await writeFile(returning, zipSync(entries));
-  await page.getByRole('tab', {name: 'Enviar alterações'}).click();
+  await page.getByRole('tab', {name: 'Importar projeto'}).click();
   await page.locator('#baseline').setInputFiles(returning);
   await page.waitForFunction(() => document.body.dataset.view === 'review' && !document.querySelector('#apply').disabled);
   assert.match(await page.locator('#summary').textContent(), /1 item para enviar/);
@@ -91,8 +92,8 @@ try {
   await page.locator('#rows .file-row').first().waitFor();
   assert.match(await page.locator('#rows').textContent(), /head.twig/);
   await shot('revisao-dark');
-  await page.getByRole('tab', {name: 'Baixar tema'}).click();
-  await page.getByRole('tab', {name: 'Enviar alterações'}).click();
+  await page.getByRole('tab', {name: 'Baixar arquivos'}).click();
+  await page.getByRole('tab', {name: 'Importar projeto'}).click();
   assert.equal(await page.locator('#review').isVisible(), true, 'Mudar de aba deve preservar a comparação.');
   const operations = await page.locator('#fixture-frame').evaluate(frame => frame.contentWindow.fictitiousOperations);
   assert.deepEqual(operations, {dispatch: 0, save: 0, forbidden: 0, add: 0}, 'Navegação, exportação e comparação não podem gravar.');

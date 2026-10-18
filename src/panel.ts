@@ -102,8 +102,8 @@ function head(view: View): Head {
   const store = context?.storeName || 'a loja';
   if (view === 'connecting') return {title: 'Conectando ao editor…', detail: ''};
   if (view === 'offline') return {title: offline!.title, detail: offline!.text, tone: 'error'};
-  if (view === 'export') return {title: 'Baixar o tema', detail: `Copie o código de ${store} em ZIP, edite no computador e depois envie as alterações que escolher.`};
-  if (view === 'pick') return workspace?.project ? {title: 'Comparar com a loja', detail: 'Releia a pasta depois de editar, ou escolha outra. Você revisa a comparação antes de confirmar o envio.'} : {title: 'Enviar alterações', detail: 'Escolha a pasta do projeto editado. A extensão compara com a loja antes de você selecionar os arquivos e confirmar o envio.'};
+  if (view === 'export') return {title: 'Baixar arquivos', detail: `Copie o código de ${store} em ZIP, edite no computador e depois envie as alterações que escolher.`};
+  if (view === 'pick') return workspace?.project ? {title: 'Comparar com a loja', detail: 'Releia a pasta depois de editar, ou escolha outra. Você revisa a comparação antes de confirmar o envio.'} : {title: 'Importar projeto', detail: 'Escolha a pasta do projeto editado. A extensão compara com a loja antes de você selecionar os arquivos e confirmar o envio.'};
   if (view === 'review') return reviewHead();
   if (view === 'job') {
     if (busy) return {title: busyTitle || 'Um momento…', detail: localProgress ? `${localProgress.done} de ${localProgress.total} arquivos` : '', tone: 'run'};

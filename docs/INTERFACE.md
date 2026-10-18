@@ -73,12 +73,14 @@ Mantém a paleta clara/escura, as fontes Atkinson e o desenho dos botões da 0.6
 
 | Antes | Depois | Motivo |
 | --- | --- | --- |
-| Tela inicial com duas escolhas | Abas **Baixar tema** e **Enviar alterações**, com abertura direta no download | Reduzir um clique e manter o contexto visível |
+| Tela inicial com duas escolhas | Abas **Baixar arquivos** e **Importar projeto**, com abertura direta no download | Reduzir um clique e manter o contexto visível |
 | Ponto de conexão sem texto visível | Nome da loja, estado conectado/desconectado e aviso de operação em andamento | Explicar a situação sem depender de cor |
 | Ação na barra fixa inferior | Ação na seção de download, escolha, revisão, andamento ou resultado | Aproximar o botão do conteúdo a que ele se refere |
 | Campo nativo de ZIP sem orientação | Seletor integrado com foco visível, nome do arquivo e instrução de `npm run pack` | Tornar a alternativa ao uso da pasta compreensível |
 | Histórico no menu | **Backups e recuperação** na página, com atalho no topo | Expor histórico, downloads, erros e restauração |
 | Ajuda resumida e progresso recolhido | Tutoriais próximos das ações; etapas e registro inicialmente abertos | Recuperar a informação sem voltar à aparência antiga |
+
+Os rótulos distinguem as etapas: **Baixar arquivos** copia da loja para o computador; **Importar projeto** lê a pasta ou o ZIP editado e prepara a comparação; **Enviar N itens para Loja** fica reservado à confirmação da gravação.
 
 As abas aceitam mouse, Tab, setas, Home e End. As ações continuam bloqueadas durante uma operação, e trocar de aba preserva o projeto e a comparação. A orientação fora do editor mantém seu próprio fluxo. Não foi acrescentada exportação direta para uma pasta: a cópia do tema continua em ZIP, e escolher uma pasta serve para ler o projeto editado.
 

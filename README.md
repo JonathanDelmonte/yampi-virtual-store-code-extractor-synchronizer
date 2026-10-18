@@ -15,7 +15,7 @@ A 0.6.0 resolve o que o primeiro envio real mostrou: o envio parava quando o pai
 - **Mais rápido, com a mesma conferência.** O editor deixa de ser recarregado duas vezes por arquivo. Os arquivos criados e as imagens enviadas são conferidos em grupo, depois de uma única recarga; cada texto continua salvo e conferido após recarregar, antes do próximo. A comparação relê na loja só o que o projeto mudou, não o tema inteiro.
 - **Continuar de onde parou.** Um envio interrompido (aba fechada, extensão reiniciada, erro) continua do item em que parou. O que já foi conferido não é refeito, e o item em andamento é conferido na loja antes: se alguém o alterou, o envio para.
 - **Sem recomeçar do zero.** A pasta do projeto fica lembrada (**Reler “pasta”**, com um clique), pode ser solta no painel e só `tema/` e `.yampi-sync/` são lidos, sem `node_modules`. Projeto, comparação e escolhas ficam guardados por loja. Depois de cada envio, a referência avança: o que já foi enviado não volta como conflito.
-- **Abas e orientações visíveis.** **Baixar tema** e **Enviar alterações** ficam no topo, junto do nome da loja e do estado de conexão. O painel abre no download; as ações ficam na própria etapa. A escolha de ZIP mostra o nome do arquivo, e as orientações explicam a pasta, o conteúdo da cópia e o envio. **Backups e recuperação** ficam na página; etapas e registro do progresso começam abertos. A comparação é preservada ao trocar de aba.
+- **Abas e orientações visíveis.** **Baixar arquivos** e **Importar projeto** ficam no topo, junto do nome da loja e do estado de conexão. O painel abre no download; as ações ficam na própria etapa. A escolha de ZIP mostra o nome do arquivo, e as orientações explicam a pasta, o conteúdo da cópia e o envio. **Backups e recuperação** ficam na página; etapas e registro do progresso começam abertos. A comparação é preservada ao trocar de aba.
 
 A 0.5.1 corrigiu a conferência das imagens enviadas: o editor da Yampi mostra cada imagem guardada como endereço `data:`, e a política de segurança da página bloqueia `fetch()` nesse endereço. A extensão decodifica a imagem diretamente.
 
@@ -53,7 +53,7 @@ A leitura confere identidade, inventário antes/depois e documento completo do C
 
 Use o [download direto da extensão](https://github.com/JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer/releases/latest/download/zirtuno-sync-yampi.zip), extraia o ZIP e carregue a pasta em `chrome://extensions`, com modo de desenvolvedor e **Carregar sem compactação**. Para atualizar, substitua os arquivos na mesma pasta instalada e recarregue o cartão. [Instruções completas](docs/INSTALACAO.md).
 
-1. Abra `https://app.yampi.com.br/store/code-editor/` e clique no ícone. O painel abre em **Baixar tema**, na própria aba, sem copiar nada sozinho.
+1. Abra `https://app.yampi.com.br/store/code-editor/` e clique no ícone. O painel abre em **Baixar arquivos**, na própria aba, sem copiar nada sozinho.
 2. Confira a loja no alto do painel. Deixe **Incluir a vitrine publicada** ligado e clique em **Baixar ZIP**. O Chrome pede leitura da origem da vitrine. Negar permite copiar o código com prévia demonstrativa.
 3. Imagens, fontes e a API pública de catálogo ficam em outras origens. O painel lista os destinos e aguarda **Autorizar e terminar o ZIP**. **Baixar sem esses recursos** mantém as falhas no relatório. Nenhum arquivo da Yampi é editado, salvo, excluído, criado, renomeado ou publicado durante a cópia. O download continua mesmo com o painel fechado.
 4. Extraia a exportação fora deste repositório e abra a pasta ou seu `.code-workspace` no VS Code.
@@ -83,7 +83,7 @@ Preços refletem a data da captura. Carrinho, checkout, pagamentos, formulários
 
 ## Devolver e recuperar
 
-1. No editor de código da Yampi, clique no ícone e escolha **Enviar alterações**.
+1. No editor de código da Yampi, clique no ícone e escolha **Importar projeto**.
 2. Escolha a pasta do projeto, ou solte-a no painel. Da segunda vez em diante, **Reler “pasta”** faz isso com um clique. Em **Usar um ZIP de retorno** vale o ZIP de `npm run pack`. A comparação começa sozinha.
 3. Confira o resumo: alterados, novos e imagens. O que precisa de você aparece em **Precisa da sua atenção**, com a ação ao lado; **Comparar e escolher** mostra as linhas que mudaram. Se um arquivo usa outro que mudou só na loja, **Ver a mudança** mostra o que mudou; **Usar no projeto** grava a versão da loja nesse arquivo da sua pasta e compara de novo (ou **Copiar**, para colar à mão). **Comparar de novo** relê a pasta.
 4. Clique em **Enviar N itens** e confirme. O backup é baixado antes da primeira mudança. Pode fechar o painel ou trocar de aba: o envio continua, e o ícone mostra o progresso.
