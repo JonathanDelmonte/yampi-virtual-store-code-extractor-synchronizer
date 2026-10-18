@@ -17,16 +17,15 @@ import {active, type JobRequest, type JobState, type Scope, type SendInput} from
 import {ExtensionJobs, LocalJobs, type JobClient} from './panel/client';
 import {canPickFolders, droppedItem, folderEntries, permitted, pickFolder, recallFolder, rememberFolder, replaceThemeFile, type Folder, type Remembered} from './panel/folder';
 import {renderDiff} from './panel/diff-view';
-import {lens, adaptiveShadows} from './panel/glass';
 import {$, el, glyph, list, plural, dateTime, since, enter, toast, copyText} from './panel/dom';
 const isDemo = ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).get('demo') === '1';
 const editorTab = new URLSearchParams(location.search).get('tab');
 // --- State ------------------------------------------------------------------------------------
 // One screen at a time. The route is where the user chose to go; the view shown also depends on
 // what is happening (connecting, an operation running, its result).
-type Route = 'home' | 'export' | 'send';
-type View = 'connecting' | 'offline' | 'home' | 'export' | 'pick' | 'review' | 'job' | 'result';
-let route: Route = 'home';
+type Route = 'export' | 'send';
+type View = 'connecting' | 'offline' | 'export' | 'pick' | 'review' | 'job' | 'result';
+let route: Route = 'export';
 let rpc: RPC;
 let connection: PanelConnection | undefined;
 let client: JobClient;
@@ -76,9 +75,6 @@ if (isDemo) {
 }
 const adapter = new BrowserAdapter(rpc);
 client.subscribe(state => onJob(state));
-lens($('topbar'), 'lens-top', {radius: 18, bezel: 14, shift: 6});
-lens($('dock'), 'lens-dock', {radius: 18, bezel: 14, shift: 6});
-adaptiveShadows($('topbar'), $('dock'));
 document.addEventListener('keydown', () => {document.body.dataset.input = 'keyboard';});
 document.addEventListener('pointerdown', () => {delete document.body.dataset.input;});
 // --- Which screen -------------------------------------------------------------------------------
@@ -88,7 +84,7 @@ function currentView(): View {
   if (job && job.id === liveJob && !(job.kind === 'compare' && job.status === 'completed')) return 'result';
   if (route === 'export') return 'export';
   if (route === 'send') return plan ? 'review' : 'pick';
-  return 'home';
+  return 'export';
 }
 function go(next: Route): void {
   notice = undefined; route = next;
@@ -106,9 +102,8 @@ function head(view: View): Head {
   const store = context?.storeName || 'a loja';
   if (view === 'connecting') return {title: 'Conectando ao editor…', detail: ''};
   if (view === 'offline') return {title: offline!.title, detail: offline!.text, tone: 'error'};
-  if (view === 'home') return {title: 'O que você quer fazer?', detail: ''};
-  if (view === 'export') return {title: 'Baixar o tema', detail: `Uma cópia do código de ${store} em ZIP, para editar no computador.`};
-  if (view === 'pick') return workspace?.project ? {title: 'Comparar com a loja', detail: 'Releia a pasta depois de editar, ou escolha outra.'} : {title: 'Escolha a pasta do projeto', detail: 'A pasta extraída do ZIP que a extensão baixou.'};
+  if (view === 'export') return {title: 'Baixar o tema', detail: `Copie o código de ${store} em ZIP, edite no computador e depois envie as alterações que escolher.`};
+  if (view === 'pick') return workspace?.project ? {title: 'Comparar com a loja', detail: 'Releia a pasta depois de editar, ou escolha outra. Você revisa a comparação antes de confirmar o envio.'} : {title: 'Enviar alterações', detail: 'Escolha a pasta do projeto editado. A extensão compara com a loja antes de você selecionar os arquivos e confirmar o envio.'};
   if (view === 'review') return reviewHead();
   if (view === 'job') {
     if (busy) return {title: busyTitle || 'Um momento…', detail: localProgress ? `${localProgress.done} de ${localProgress.total} arquivos` : '', tone: 'run'};
@@ -150,18 +145,25 @@ function render(): void {
   $('detail').textContent = info.detail;
   $('notice').hidden = !notice || view === 'job' || view === 'offline' || view === 'connecting';
   if (notice) $('notice').replaceChildren(el('strong', {text: notice.title}), notice.text);
-  $('view-home').hidden = view !== 'home';
   $('export-section').hidden = view !== 'export';
   $('import-section').hidden = view !== 'pick';
   $('review').hidden = view !== 'review';
   $('view-job').hidden = view !== 'job';
   $('done').hidden = view !== 'result';
-  $('back').hidden = !['export', 'pick', 'review'].includes(view);
   $('store').textContent = connected && context ? context.storeName : view === 'offline' ? 'Editor indisponível' : 'Conectando…';
+  const connectionText = connected ? view === 'job' ? 'Editor conectado · operação em andamento' : 'Editor conectado' : view === 'offline' ? 'Editor desconectado' : 'Conectando ao editor…';
+  if ($('connection-state').textContent !== connectionText) $('connection-state').textContent = connectionText;
+  const activeRoute = job && job.id === liveJob && ['job', 'result'].includes(view) ? job.kind === 'export' ? 'export' : 'send' : route;
+  for (const [name, id] of [['export', 'mode-export'], ['send', 'mode-import']]) {
+    $(id).setAttribute('aria-selected', String(activeRoute === name));
+    $(id).tabIndex = activeRoute === name ? 0 : -1;
+  }
+  $('operation-panel').setAttribute('aria-labelledby', activeRoute === 'export' ? 'mode-export' : 'mode-import');
+  $('recovery-store').textContent = context ? `Loja: ${context.storeName}.` : 'Conecte ao editor para carregar o histórico da loja.';
   document.body.dataset.connection = !connected ? (view === 'offline' ? 'error' : 'idle') : view === 'job' ? 'busy' : 'connected';
   // The project card is also read by the review and the tests; keep it current on every screen.
   renderPick();
-  if (view === 'home') renderHome();
+  renderHistorySummary(view);
   if (view === 'export') renderExport();
   if (view === 'review') renderPlan();
   if (view === 'job') renderJob();
@@ -175,21 +177,20 @@ function render(): void {
     // A new screen starts at the top, with focus on its title for keyboard and reader users.
     if (lastView) {
       window.scrollTo({top: 0});
-      if (document.body.dataset.input === 'keyboard') $('status').focus({preventScroll: true});
-      const section = {home: 'view-home', export: 'export-section', pick: 'import-section', review: 'review', job: 'view-job', result: 'done'}[view as string];
+      if (document.body.dataset.input === 'keyboard' && !document.activeElement?.closest('.operation-tabs')) $('status').focus({preventScroll: true});
+      const section = {export: 'export-section', pick: 'import-section', review: 'review', job: 'view-job', result: 'done'}[view as string];
       enter(document.querySelector<HTMLElement>('.view-head')!, ...(section ? [$(section)] : []));
     }
     lastView = view;
   }
 }
-function renderHome(): void {
-  const project = workspace?.project, pending = workspace?.review?.reading && plan ? selected.size : 0;
-  $('send-tile-text').textContent = pending ? `${plural(pending, 'alteração pronta', 'alterações prontas')} para enviar` : project ? `Projeto “${project.name}”, lido ${since(project.loadedAt)}` : 'Do seu projeto para a loja';
+function renderHistorySummary(view: View): void {
   $('resume-card').hidden = !resumable;
   if (resumable) $('resume-text').textContent = `Parou em ${resumable.verified.length + (resumable.uploaded?.length || 0)} de ${resumable.selected.length} itens${resumable.error ? `: ${resumable.error}` : '.'} O que já foi conferido continua na loja.`;
   const last = history.find(item => item.status === 'completed');
+  $('resume-area').hidden = !connected || view === 'job' || (!resumable && !last);
   $('last-send').hidden = !last || !!resumable;
-  if (last) $('last-send').textContent = `Último envio em ${dateTime(last.startedAt)}: ${plural(last.verified.length + (last.uploaded?.length || 0), 'item conferido', 'itens conferidos')}. Histórico e backups ficam no menu.`;
+  if (last) $('last-send').textContent = `Último envio em ${dateTime(last.startedAt)}: ${plural(last.verified.length + (last.uploaded?.length || 0), 'item conferido', 'itens conferidos')}. Consulte Backups e recuperação abaixo.`;
 }
 function renderExport(): void {
   const base = workspace?.baseline;
@@ -205,6 +206,7 @@ function renderPick(): void {
   $('project-name').textContent = project.name;
   $('local-info').textContent = `${Object.keys(project.local).length} textos e ${plural(images, 'imagem', 'imagens')}, lidos ${since(project.loadedAt)}.`;
   $('reference-info').textContent = workspace?.baseline ? `Exportado em ${dateTime(lineage?.exportedAt || workspace.baseline.capturedAt)}${lineage?.journals.length ? `, com ${plural(lineage.journals.length, 'envio', 'envios')} desde então` : ''}.` : 'Falta a exportação original: escolha a pasta com .yampi-sync/.';
+  if (project.kind === 'zip') $('zip-name').textContent = project.name;
 }
 function renderJob(): void {
   const showJob = !busy && !!job;
@@ -253,11 +255,11 @@ function renderResult(): void {
   $('undo').hidden = !(send && state.status === 'completed');
   renderEvents(state.status !== 'completed');
 }
-// --- Bottom bar: the one next step -----------------------------------------------------------------
+// --- Actions stay beside the content of their current step -----------------------------------------
 function renderDock(view: View): void {
   const show: string[] = [];
   if (view === 'offline') show.push('retry');
-  if (view === 'home' && resumable) show.push('resume');
+  if (['export', 'pick', 'review'].includes(view) && resumable) show.push('resume');
   if (view === 'export') show.push('export');
   if (view === 'pick') show.push(...(remembered && canPickFolders() ? ['reload-folder', 'pick-folder'] : ['pick-folder']));
   if (view === 'review') show.push('apply');
@@ -275,8 +277,11 @@ function renderDock(view: View): void {
   $('pick-folder').textContent = show.includes('reload-folder') ? 'Outra' : 'Escolher a pasta';
   $('finish').textContent = job && job.status === 'completed' ? 'Concluir' : 'Voltar';
   $('finish').classList.toggle('primary', show.length === 1);
+  $('resume').classList.toggle('primary', view === 'result');
   $('dock').hidden = !show.length;
   $('dock').dataset.count = String(show.length);
+  const slot = {export: 'export-actions', pick: 'pick-actions', review: 'review-actions', job: 'job-actions', result: 'result-actions'}[view as string] || 'connection-actions';
+  if ($('dock').parentElement !== $(slot)) $(slot).append($('dock'));
 }
 // --- Controls -------------------------------------------------------------------------------------
 function controls(): void {
@@ -284,7 +289,7 @@ function controls(): void {
   $('export').toggleAttribute('disabled', working || !connected);
   $('include-preview').toggleAttribute('disabled', working);
   for (const id of ['preview-allow', 'preview-partial', 'preview-discard']) $(id).toggleAttribute('disabled', busy);
-  for (const id of ['pick-folder', 'pick-other', 'reload-folder', 'folder', 'baseline', 'clear', 'history', 'demo-local', 'mode-import', 'mode-export']) $(id).toggleAttribute('disabled', working);
+  for (const id of ['pick-folder', 'pick-other', 'reload-folder', 'folder', 'baseline', 'clear', 'history', 'demo-local', 'mode-import', 'mode-export', 'go-import']) $(id).toggleAttribute('disabled', working);
   $('compare').toggleAttribute('disabled', working || !connected || !workspace?.baseline || !workspace?.project);
   const missing = plan ? missingNewTexts(plan).length : 0, partial = plan ? selectionIssues(plan, selected) : [];
   const blocked = !!missing || partial.length > 0;
@@ -317,8 +322,17 @@ function progressLocal(done: number, total: number): void {localProgress = {done
 // --- Navigation -------------------------------------------------------------------------------------
 $('mode-export').addEventListener('click', () => go('export'));
 $('mode-import').addEventListener('click', () => go('send'));
-$('back').addEventListener('click', () => go('home'));
-$('finish').addEventListener('click', () => go(job?.kind === 'send' && job.status !== 'completed' ? 'send' : 'home'));
+$('go-import').addEventListener('click', () => go('send'));
+document.querySelector('.operation-tabs')!.addEventListener('keydown', event => {
+  const key = (event as KeyboardEvent).key;
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) return;
+  const current = event.target as HTMLButtonElement;
+  if (current.disabled) return;
+  event.preventDefault();
+  const id = key === 'Home' ? 'mode-export' : key === 'End' ? 'mode-import' : current.id === 'mode-export' ? 'mode-import' : 'mode-export';
+  $<HTMLButtonElement>(id).focus(); $<HTMLButtonElement>(id).click();
+});
+$('finish').addEventListener('click', () => go(job?.kind === 'send' && job.status !== 'completed' ? 'send' : 'export'));
 // The editor's own "Ver prévia" link, read at the end of the send.
 function previewUrl(): string | undefined {return job?.result?.kind === 'send' ? job.result.preview : undefined;}
 // --- Workspace and plan -------------------------------------------------------------------------
@@ -493,7 +507,7 @@ $('discard-whitespace').addEventListener('click', () => {
   render(); toast('Mudanças só de espaço em branco não serão enviadas.');
 });
 // --- Sheets ---------------------------------------------------------------------------------------
-const sheets = ['confirm-panel', 'diff', 'menu-sheet'];
+const sheets = ['confirm-panel', 'diff'];
 function openSheet(id: string): void {
   $(id).hidden = false; $('sheet-scrim').hidden = false;
   requestAnimationFrame(() => ($(id).querySelector<HTMLElement>('button:not([hidden]):not(:disabled)') || $(id)).focus());
@@ -567,8 +581,12 @@ $('diff-copy-store').addEventListener('click', () => {
 });
 $('sheet-scrim').addEventListener('click', closeAll);
 document.addEventListener('keydown', event => {if (event.key === 'Escape') closeAll();});
-$('menu').addEventListener('click', () => {updateHistory(); journalInfo(); controls(); openSheet('menu-sheet');});
-$('close-menu').addEventListener('click', () => closeSheet('menu-sheet'));
+$('menu').addEventListener('click', () => {
+  updateHistory(); journalInfo(); controls();
+  $<HTMLDetailsElement>('recovery').open = true;
+  const summary = $('recovery').querySelector('summary')!;
+  summary.scrollIntoView({block: 'start'}); summary.focus({preventScroll: true});
+});
 // --- Jobs -------------------------------------------------------------------------------------------
 const newId = () => crypto.randomUUID();
 // The job's first state shows at once; the runner's reports replace it.
@@ -697,6 +715,7 @@ $('folder').addEventListener('change', () => void run('Lendo a pasta do projeto'
   await adoptProject(project, {name, kind: 'folder'});
 }));
 async function readZip(file: File): Promise<void> {
+  $('zip-name').textContent = file.name;
   if (file.size > MAX_TOTAL_BYTES * 2 + MAX_FILE_BYTES) throw new Error('ZIP muito grande.');
   await adoptProject(await decodeProject(new Uint8Array(await file.arrayBuffer())), {name: file.name, kind: 'zip'});
 }
@@ -708,7 +727,7 @@ $('baseline').addEventListener('change', () => void run('Conferindo o ZIP', asyn
 // The whole screen takes a dropped folder or ZIP while choosing or reviewing the project.
 const dropzone = $('dropzone');
 const dropTarget = () => dropzone.hidden ? $('project-card') : dropzone;
-const accepts = () => ['pick', 'review', 'home'].includes(currentView());
+const accepts = () => ['export', 'pick', 'review'].includes(currentView());
 for (const type of ['dragenter', 'dragover']) document.addEventListener(type, event => {if (!accepts()) return; event.preventDefault(); if (!busy) dropTarget().classList.add('dragging');});
 document.addEventListener('dragleave', event => {if (!(event as DragEvent).relatedTarget) dropTarget().classList.remove('dragging');});
 document.addEventListener('drop', event => {
@@ -774,8 +793,11 @@ $('open-preview').addEventListener('click', () => {
 // --- History and recovery ---------------------------------------------------------------------------
 function journalInfo(): void {
   $('journal-info').textContent = journal ? `${journal.verified.length + (journal.uploaded?.length || 0)} de ${journal.selected.length} itens conferidos. ${journal.status === 'completed' ? 'Concluído' : 'Interrompido'} em ${dateTime(journal.startedAt)}.${journal.scope === 'restore' ? ' Foi uma restauração.' : ''}` : 'Nenhum envio nesta instalação.';
+  $('journal-error').hidden = !journal?.error;
+  $('journal-error').textContent = journal?.error || '';
 }
 function updateHistory(): void {
+  $('history-count').textContent = String(history.length);
   const picker = $<HTMLSelectElement>('history'); picker.replaceChildren();
   for (const item of history) picker.append(el('option', {text: `${dateTime(item.startedAt)} — ${item.status === 'completed' ? 'concluído' : 'interrompido'}`, attrs: {value: item.id}}));
   if (journal) picker.value = journal.id;
@@ -802,7 +824,6 @@ async function save(bytes: Uint8Array, name: string, type = 'application/zip'): 
 }
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 $('download-backup').addEventListener('click', () => {
-  closeSheet('menu-sheet');
   void run('Baixando o backup', async () => {
     const stored = await get<{journalId: string; bytes: Uint8Array}>(`backup:${journal?.id}`);
     if (!stored || stored.journalId !== journal?.id) throw new Error('O backup deste envio não foi concluído. Use o registro ou a exportação original.');
@@ -810,7 +831,6 @@ $('download-backup').addEventListener('click', () => {
   });
 });
 $('download-journal').addEventListener('click', () => {
-  closeSheet('menu-sheet');
   void run('Baixando o registro', async () => {
     if (!journal) throw new Error('Escolha um envio no histórico.');
     await save(new TextEncoder().encode(JSON.stringify(journal, null, 2)), `registro-${journal.id}.json`, 'application/json');
@@ -824,7 +844,7 @@ async function prepareRestore(entry: Journal): Promise<void> {
   restoreJournal = entry; route = 'send';
   await startJob({id: newId(), kind: 'compare', scope: 'restore', journalId: entry.id, paths: [...new Set([...Object.keys(entry.before), ...Object.keys(entry.after)])].sort()});
 }
-$('restore').addEventListener('click', () => {const entry = journal; closeSheet('menu-sheet'); if (entry) void run('Preparando a restauração', () => prepareRestore(entry));});
+$('restore').addEventListener('click', () => {const entry = journal; if (entry) void run('Preparando a restauração', () => prepareRestore(entry));});
 $('undo').addEventListener('click', () => {
   const id = job?.result?.kind === 'send' ? job.result.journalId : undefined;
   const entry = history.find(item => item.id === id) || journal;
@@ -832,9 +852,8 @@ $('undo').addEventListener('click', () => {
 });
 $('clear').addEventListener('click', async () => {
   if (!confirm('Apagar as cópias originais, o projeto carregado e os backups guardados nesta extensão? Os ZIPs já baixados continuam no computador. Nada muda na loja.')) return;
-  closeSheet('menu-sheet');
   await clearLocal(); workspace = undefined; plan = undefined; journal = undefined; history = []; resumable = undefined; remembered = undefined; restoreJournal = undefined; selected.clear();
-  route = 'home'; toast('Dados locais apagados.'); render();
+  route = 'export'; updateHistory(); journalInfo(); toast('Dados locais apagados.'); render();
 });
 // --- Demo -------------------------------------------------------------------------------------------
 if (isDemo) $('demo-local').addEventListener('click', () => void run('Carregando as alterações fictícias', async () => {

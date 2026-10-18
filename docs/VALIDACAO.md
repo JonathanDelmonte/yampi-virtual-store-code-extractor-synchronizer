@@ -1,5 +1,13 @@
 # Validação
 
+## Revisão da interface, em 18/10/2026
+
+Node 24.15.0. `npm run check` passou com 258 testes em 17 arquivos. A revisão recupera as abas no topo, o estado de conexão por escrito, as ações junto do conteúdo, as orientações de download e envio e a recuperação na página, mantendo o motor da 0.6.0.
+
+`npm run test:panel` usa somente a demonstração e arquivos fictícios: navegação por mouse e teclado (setas e Home), abertura direta no download, escolha de ZIP com nome visível, importação e comparação reais do ZIP fictício, comparação preservada ao trocar de aba, recuperação vazia sem ações habilitadas e etapas abertas durante a leitura. Tema claro e escuro conferidos em 320, 360, 560 e 800 px, sem rolagem lateral. A exportação, a navegação e a comparação registraram zero gravações no editor; requisições fora da demonstração são bloqueadas. Evidências locais em `.cache/panel-validation/`.
+
+O E2E nativo de Chromium também passou: exportação com leitura integral e sem mutações, importação de pasta/ZIP, criação e imagem fictícias, backup, painel fechado durante o envio, conferência após reload, restauração protegida e recuperação da conexão. Nenhuma requisição alcançou a Yampi. Esta revisão de interface não acrescenta validação de gravação numa loja real.
+
 ## Bloqueio explicado, em 17/10/2026
 
 `npm run check` passou com 258 testes em 17 arquivos; `tests/explain.test.ts` cobre a frase para um arquivo usado que mudou só na loja, em conflito, os dois juntos e a ausência de bloqueio; `tests/folder.test.ts` cobre a gravação na pasta do projeto (quebras de linha e marca de ordem de bytes mantidas, recusa quando o arquivo mudou depois da comparação, arquivo ausente não criado, caminho com `..` recusado, projeto dentro de uma pasta acima) e a leitura da pasta. `npm run test:e2e` passou.

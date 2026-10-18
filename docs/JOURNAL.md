@@ -103,3 +103,11 @@ Decisão do proprietário: além de copiar, o painel pode gravar a versão da lo
 Proteções: só por clique, num arquivo que mudou só na loja; só troca um arquivo de `tema/` que já existe e que continua como na comparação; nada é criado; quebras de linha e marca de ordem de bytes do arquivo ficam como estavam. A localização do projeto dentro da pasta escolhida passou a ser a mesma na leitura e na escrita.
 
 A demonstração passou a guardar em memória a pasta escolhida, como a extensão faz no IndexedDB; antes, ela a esquecia a cada comparação.
+
+## 18/10/2026 — Abas, orientações e ações junto do conteúdo
+
+Pedido do proprietário depois de instalar a 0.6.0: manter suas cores e botões, recuperar as abas e o estado de conexão explícito da interface anterior, tirar a ação fixa do rodapé, melhorar a escolha do ZIP e tornar as orientações e os backups visíveis de novo.
+
+O painel abre em **Baixar tema** e mantém **Enviar alterações** ao lado. As abas preservam o projeto e a comparação, com navegação por teclado. Cada etapa recebe seus próprios botões no fluxo da página. A escolha do ZIP informa o arquivo lido e explica `npm run pack`. A ajuda explica o download, a edição, o conteúdo da pasta e a confirmação do envio. **Backups e recuperação** reúne o histórico e as ações na página; o menu do topo leva até ela. Etapas e registro do progresso começam abertos.
+
+A cópia do tema continua em ZIP: exportar diretamente para uma pasta não foi implementado. A execução em segundo plano, a retomada e as proteções do envio da 0.6.0 foram preservadas. Testes e capturas usam somente a demonstração e o editor fictício; nenhuma loja real foi acessada. O trabalho local anterior à integração foi mantido separado, e esta revisão parte do merge `0806888`.

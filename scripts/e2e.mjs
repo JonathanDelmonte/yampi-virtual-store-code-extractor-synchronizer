@@ -90,7 +90,10 @@ try {
   await editor.frameLocator('#test-toolbar').locator('body[data-result="true"]').waitFor();
   panel = await driver.attach();
   console.log('E2E: painel lateral nativo iniciado pelo handler do ícone.');
-  await panel.waitForFunction(() => document.body.dataset.view === 'home');
+  await panel.waitForFunction(() => document.body.dataset.view === 'export');
+  assert.equal(await panel.locator('#connection-state').textContent(), 'Editor conectado');
+  assert.equal(await panel.evaluate(() => document.querySelector('#mode-export').getAttribute('aria-selected')), 'true');
+  assert.equal(await panel.evaluate(() => !!document.querySelector('#export-section #dock') && getComputedStyle(document.querySelector('#dock')).position === 'static'), true);
   assert.deepEqual(await editor.evaluate(() => {const root = document.querySelector('yampi-code-editor').shadowRoot; return [root.querySelectorAll('.selected').length, root.querySelectorAll('.cm-content').length];}), [0, 0]);
   assert.deepEqual(await readdir(downloads), []);
   assert.ok((await worker.evaluate(() => globalThis.testRequests)).every(op => ['context', 'lock:read'].includes(op)));
@@ -177,7 +180,7 @@ try {
   for (const relative of ['tema', '.yampi-sync']) await cp(path.join(project, relative), path.join(folderImport, relative), {recursive: true});
   await mkdir(path.join(folderImport, 'node_modules'), {recursive: true});
   await writeFile(path.join(folderImport, 'node_modules/ignored.txt'), 'Dependência fictícia não enviada');
-  await editor.bringToFront(); await panel.locator('#finish').click(); await panel.waitForFunction(() => document.body.dataset.view === 'home');
+  await editor.bringToFront(); await panel.locator('#finish').click(); await panel.waitForFunction(() => document.body.dataset.view === 'export');
   await panel.locator('#mode-import').click(); await panel.waitForFunction(() => document.body.dataset.view === 'pick');
   await panel.waitForFunction(() => !document.querySelector('#folder').disabled);
   await panel.locator('#folder').setInputFiles(folderImport, {timeout: 15000});
@@ -239,7 +242,7 @@ try {
   const sessions = () => worker.evaluate(async () => Object.entries(await chrome.storage.session.get(null)).filter(([key]) => !key.includes(':')).map(([, value]) => value));
   assert.equal((await sessions())[0].access, undefined);
   assert.match(await panel.locator('#journal-info').textContent(), /3 de 3 itens conferidos/);
-  await panel.locator('#menu').click(); await panel.waitForFunction(() => !document.querySelector('#menu-sheet').hidden);
+  await panel.locator('#menu').click(); await panel.waitForFunction(() => document.querySelector('#recovery').open);
   await panel.locator('#restore').click(); await panel.waitForFunction(() => document.body.dataset.view === 'review' && document.querySelector('#status').textContent.startsWith('Restaurar'));
   // Undo: the changed file goes back and the created one returns to Yampi's empty content; nothing is deleted.
   assert.match(await panel.locator('#summary').textContent(), /2 itens para enviar/);
@@ -255,10 +258,12 @@ try {
   assert.equal(await panel.evaluate(() => document.querySelector('#retry').hidden), false);
   await worker.evaluate(() => globalThis.testDisconnectPanels());
   await panel.waitForFunction(() => !document.querySelector('#retry').hidden);
+  assert.equal(await panel.locator('#connection-state').textContent(), 'Editor desconectado');
   assert.equal(await panel.locator('#status').textContent(), 'Não foi possível conectar');
   assert.match(await panel.locator('#detail').textContent(), /Nome da loja não reconhecido/);
   await editor.locator('#ambiguous').evaluate(el => el.remove());
   await panel.locator('#retry').click(); await panel.waitForFunction(() => document.body.dataset.connection === 'connected');
+  assert.equal(await panel.locator('#connection-state').textContent(), 'Editor conectado');
   await worker.evaluate(() => globalThis.testDisconnectPanels());
   await panel.waitForFunction(() => document.querySelector('#status').textContent === 'Conexão encerrada');
   await panel.locator('#retry').click(); await panel.waitForFunction(() => document.body.dataset.connection === 'connected');
@@ -295,8 +300,7 @@ try {
   const publicResources=Object.fromEntries(Object.entries(visual.resources).map(([url,resource])=>[url.replace(visual.snapshot.context.previewOrigin,previewOrigin),{...resource,...(resource.text?{text:resource.text.split(visual.snapshot.context.previewOrigin).join(previewOrigin)}:{})}]));
   await worker.evaluate(resources=>{const realFetch=globalThis.fetch;globalThis.testVisualReads=[];globalThis.fetch=async(url,options)=>{const resource=resources[String(url)];if(!resource)return realFetch(url,options);if(options?.method!=='GET'||options?.credentials!=='omit'||options?.redirect!=='error')throw new Error('Leitura pública sem proteção');globalThis.testVisualReads.push(String(url));const body=resource.base64?Uint8Array.from(atob(resource.base64),c=>c.charCodeAt(0)):resource.text;const response=new Response(body,{headers:{'content-type':resource.type}});Object.defineProperty(response,'url',{value:String(url)});return response;};},publicResources);
   await currentEditor.frameLocator('#test-toolbar').locator('#open').click();const visualTabId=await worker.evaluate(async()=> (await chrome.tabs.query({})).find(t=>t.url?.endsWith('?codemirror=current')).id);panel=await driver.attach(visualTabId);await panel.waitForFunction(()=>document.body.dataset.connection==='connected');
-  // The same store keeps its review across tabs: go back to the start screen, then download.
-  if(await panel.evaluate(()=>document.body.dataset.view)!=='home')await panel.locator('#back').click();
+  // Persistent tabs switch directly from the store's remembered review to download.
   await panel.locator('#mode-export').click();
   await panel.locator('#export').click();await panel.waitForFunction(()=>['Falta autorizar imagens e fontes'].includes(document.querySelector('#status').textContent)||document.body.dataset.view==='result');
   assert.equal(await panel.locator('#status').textContent(),'Falta autorizar imagens e fontes',await panel.locator('#detail').textContent());

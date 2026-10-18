@@ -16,46 +16,50 @@
     <symbol id="i-more" viewBox="0 0 16 16"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"/></symbol>
   </svg>
   <header id="topbar" class="bar top">
-    <button id="back" class="bar-button" aria-label="Voltar ao início" hidden><svg class="glyph"><use href="#i-back"/></svg></button>
     <span class="light" aria-hidden="true"></span>
-    <span id="store" class="store">Conectando…</span>
-    <span id="connection-state" class="sr-only">Aguardando conexão</span>
-    <button id="menu" class="bar-button" aria-label="Histórico, backups e opções" aria-haspopup="dialog"><svg class="glyph wide"><use href="#i-more"/></svg></button>
+    <div class="connection-copy"><span id="store" class="store">Editor de código da Yampi</span><span id="connection-state" class="connection-state" role="status">Conectando ao editor…</span></div>
+    <button id="menu" class="bar-button" aria-label="Abrir backups e recuperação" aria-controls="recovery"><svg class="glyph wide"><use href="#i-more"/></svg></button>
   </header>
   <main class="page">
+    <nav class="operation-tabs" role="tablist" aria-label="Operação">
+      <button id="mode-export" role="tab" aria-selected="true" aria-controls="operation-panel">Baixar tema</button>
+      <button id="mode-import" role="tab" aria-selected="false" aria-controls="operation-panel">Enviar alterações</button>
+    </nav>
     <p id="demo-notice" class="demo" hidden>Editor fictício. <button id="demo-local" class="link">Carregar alterações fictícias</button></p>
+    <div id="resume-area" class="resume-area" hidden>
+      <div id="resume-card" class="callout" hidden><strong>Um envio ficou pela metade</strong><p id="resume-text"></p></div>
+      <p id="last-send" class="aside" hidden></p>
+    </div>
+    <div id="operation-panel" role="tabpanel" aria-labelledby="mode-export">
     <header class="view-head">
       <h1 id="status" tabindex="-1">Conectando ao editor…</h1>
       <p id="detail"></p>
     </header>
     <div id="notice" class="notice" role="alert" hidden></div>
 
-    <section id="view-home" class="view" aria-label="Início" hidden>
-      <div id="resume-card" class="callout" hidden>
-        <strong>Um envio ficou pela metade</strong>
-        <p id="resume-text"></p>
-      </div>
-      <button id="mode-import" class="tile primary-tile"><span class="tile-body"><span class="tile-title">Enviar alterações</span><span id="send-tile-text" class="tile-text">Do seu projeto para a loja</span></span><svg class="glyph"><use href="#i-next"/></svg></button>
-      <button id="mode-export" class="tile"><span class="tile-body"><span class="tile-title">Baixar tema</span><span class="tile-text">Uma cópia do código em ZIP</span></span><svg class="glyph"><use href="#i-next"/></svg></button>
-      <p id="last-send" class="aside" hidden></p>
-    </section>
+    <div id="connection-actions" class="action-slot"></div>
 
     <section id="export-section" class="view" aria-label="Baixar tema" hidden>
-      <label class="option"><span class="option-text"><strong>Incluir a vitrine publicada</strong><span>Para a prévia local ficar parecida com a loja.</span></span><span class="toggle"><input type="checkbox" id="include-preview" checked><span aria-hidden="true"></span></span></label>
-      <p id="copy-safety" class="safe">Só leitura: nada muda na loja.</p>
+      <label class="option"><span class="option-text"><strong>Incluir a vitrine publicada</strong><span>Leva páginas, imagens e fontes públicas para a prévia local.</span></span><span class="toggle"><input type="checkbox" id="include-preview" checked><span aria-hidden="true"></span></span></label>
+      <p id="copy-safety" class="safe">Só leitura. A extensão não edita, salva nem publica nada na loja durante o download.</p>
+      <div id="export-actions" class="action-slot"></div>
       <p id="baseline-info" class="aside" hidden></p>
-      <details class="help"><summary>Como editar depois</summary><p>Extraia o ZIP e abra a pasta no VS Code. Com Node 24, rode <code>npm ci</code> e <code>npm run dev</code> e edite os arquivos de <code>tema/</code>. Mantenha a pasta <code>.yampi-sync/</code>: é com ela que a extensão compara e envia.</p><p>Com a vitrine, a prévia usa as páginas, fontes e imagens públicas da loja, lidas sem cookies e sem dados pessoais. Sem ela, usa dados de exemplo.</p></details>
+      <details class="help"><summary>O que vem no download?</summary><dl class="folder-guide"><div><dt><code>tema/</code></dt><dd>O código da loja para editar no computador.</dd></div><div><dt><code>.yampi-sync/</code></dt><dd>Os originais e os hashes usados para comparar e devolver as alterações.</dd></div><div><dt><code>preview/</code></dt><dd>A captura da vitrine, quando autorizada, e o relatório do que ficou faltando.</dd></div></dl><p>A captura usa páginas e recursos públicos, sem cookies. O conteúdo publicado pode ser diferente do rascunho. Sem essa opção, a prévia usa exemplos.</p></details>
+      <details class="help"><summary>Como editar no computador</summary><ol class="help-steps"><li>Extraia o ZIP em uma pasta fora do repositório da extensão e abra essa pasta no VS Code.</li><li>Com Node 24 instalado, execute <code>npm ci</code>, <code>npm run check</code> e <code>npm run dev</code>.</li><li>Edite os arquivos de <code>tema/</code>. Preserve <code>.yampi-sync/</code> para conferir os originais.</li><li>Volte à aba <strong>Enviar alterações</strong> e escolha a pasta inteira do projeto.</li></ol><button id="go-import" class="link help-link">Já editei o projeto. Enviar alterações</button></details>
     </section>
 
     <section id="import-section" class="view" aria-label="Escolher o projeto" hidden>
-      <div id="dropzone" class="dropzone"><p>Solte a pasta aqui</p><span>ou use o botão abaixo</span></div>
+      <div id="dropzone" class="dropzone"><p>Seu projeto, do computador para a loja</p><span>Solte a pasta inteira aqui ou escolha abaixo.</span><small>Use a pasta extraída do ZIP, com tema/ e .yampi-sync/.</small></div>
       <div id="project-card" class="project" hidden>
         <p class="project-name"><strong id="project-name"></strong></p>
         <p id="local-info" class="aside">Nenhum projeto escolhido.</p>
         <p id="reference-info" class="aside"></p>
       </div>
-      <details class="help"><summary>Usar um ZIP de retorno</summary><label class="file-label">ZIP de retorno<input id="baseline" type="file" accept=".zip"></label></details>
+      <div id="pick-actions" class="action-slot"></div>
+      <details id="zip-choice" class="help zip-choice"><summary><span>Usar um ZIP de retorno<small>Uma alternativa à pasta do projeto</small></span></summary><div class="zip-content"><p>No projeto editado, execute <code>npm run pack</code> e escolha o arquivo <code>retorno-yampi.zip</code>.</p><label class="file-picker"><span class="file-picker-copy"><strong>ZIP de retorno</strong><span id="zip-name">Nenhum ZIP selecionado</span></span><span class="file-picker-action">Escolher ZIP</span><input id="baseline" type="file" accept=".zip,application/zip" aria-label="Escolher ZIP de retorno" aria-describedby="zip-help"></label><p id="zip-help" class="aside">A comparação começa após a leitura. Nada é enviado sem sua revisão e confirmação.</p></div></details>
       <label class="file-fallback">Pasta do projeto<input id="folder" type="file" webkitdirectory multiple></label>
+      <details class="help"><summary>O que a extensão encontra na pasta?</summary><dl class="folder-guide"><div><dt><code>tema/</code></dt><dd>Textos e imagens do projeto que você editou.</dd></div><div><dt><code>.yampi-sync/</code></dt><dd>A referência original para comparar com o estado atual da loja.</dd></div></dl><p>Dependências, ferramentas, documentação e a prévia local ficam fora do envio. Você também pode escolher só <code>tema/</code> se o original desta loja já estiver guardado na extensão.</p></details>
+      <details class="help"><summary>Como funciona o envio?</summary><ol class="help-steps"><li>Escolha a pasta ou o ZIP e confira os arquivos comparados.</li><li>Revise conflitos e selecione o que deseja enviar. A loja de destino aparece na confirmação.</li><li>A extensão guarda e baixa o backup antes de gravar, e confere o conteúdo após recarregar o editor.</li><li>Confira em <strong>Ver prévia</strong> na Yampi. Publicar continua sendo uma ação sua.</li></ol><p>Criações e imagens usam os controles do editor, sem criar pastas. O envio para no primeiro erro e preserva o registro do que já foi feito.</p></details>
     </section>
 
     <section id="review" class="view" aria-label="Revisão" hidden>
@@ -83,12 +87,14 @@
         <p id="reference-detail" class="aside"></p>
       </details>
       <p class="links"><button id="compare" class="link" disabled>Comparar de novo</button><button id="pick-other" class="link">Trocar a pasta</button></p>
+      <div id="review-actions" class="action-slot"></div>
     </section>
 
     <section id="view-job" class="view" aria-label="Operação em andamento" hidden>
       <div class="hero"><span id="percent" class="hero-figure">0%</span><div class="meter"><div id="progress" class="meter-fill" role="progressbar" aria-label="Progresso" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div></div>
       <p id="current" class="current" hidden></p>
       <p id="job-meta" class="aside" hidden></p>
+      <div id="job-actions" class="action-slot"></div>
       <div id="preview-pending" class="decision" hidden>
         <p>Imagens e fontes estão em <span id="preview-origins"></span>.</p>
         <button id="preview-allow" class="button primary">Autorizar e terminar o ZIP</button>
@@ -96,8 +102,8 @@
         <button id="preview-discard" class="link">Cancelar o download</button>
       </div>
       <p id="background-note" class="safe" hidden>Pode fechar o painel. A operação continua, e o ícone mostra o progresso.</p>
-      <details id="phases-box" class="help"><summary>Etapas</summary><ol id="phases" class="phases"></ol></details>
-      <details id="events" class="help" hidden><summary>Registro</summary><ol id="event-list" class="log"></ol></details>
+      <details id="phases-box" class="help" open><summary>Etapas em tempo real</summary><ol id="phases" class="phases"></ol></details>
+      <details id="events" class="help" open hidden><summary>Registro dos arquivos</summary><ol id="event-list" class="log"></ol></details>
     </section>
 
     <section id="done" class="view" aria-label="Resultado" hidden>
@@ -111,11 +117,22 @@
       <details id="preview-more" class="help" hidden><summary>Sobre a prévia</summary><p id="preview-details" class="aside"></p></details>
       <ul id="done-warnings" class="attention-list" hidden></ul>
       <p class="links"><button id="undo" class="link" hidden>Desfazer este envio</button></p>
+      <div id="result-actions" class="action-slot"></div>
     </section>
-
+    </div>
+    <details id="recovery" class="help recovery">
+      <summary>Backups e recuperação <span id="history-count" class="history-count">0</span></summary>
+      <p>Os envios e backups ficam guardados nesta extensão, separados por loja. <span id="recovery-store"></span></p>
+      <label class="field">Histórico desta loja<select id="history" aria-label="Envio para recuperar"></select></label>
+      <p id="journal-info" class="aside">Nenhum envio nesta instalação.</p>
+      <p id="journal-error" class="recovery-error" hidden></p>
+      <div class="menu-actions"><button id="download-backup" class="button" disabled>Baixar backup do envio</button><button id="download-journal" class="button" disabled>Baixar registro do envio</button><button id="restore" class="button" disabled>Comparar para restaurar</button></div>
+      <p>A restauração compara de novo antes de gravar e protege alterações feitas depois do envio. Nada é restaurado automaticamente.</p>
+      <details class="help local-data"><summary>Gerenciar dados locais</summary><p>Remove desta extensão os originais, o projeto e os backups guardados. Os ZIPs já baixados e os arquivos da loja são preservados.</p><button id="clear" class="link danger">Apagar dados locais da extensão</button></details>
+    </details>
+    <p class="about"><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer"><img src="brand/zirtuno-logo.png" alt="" width="16" height="16">Zirtuno Sync <span class="version">0.6.0</span></a><span>Ferramenta independente. Sem telemetria. Nunca exclui, renomeia nem publica.</span></p>
     <details id="fixture" class="help" hidden><summary>Editor fictício usado nos testes</summary><iframe id="fixture-frame" title="Editor fictício"></iframe></details>
-  </main>
-  <div id="dock" class="bar dock" hidden>
+  <div id="dock" class="dock" hidden>
     <div class="dock-actions">
       <button id="retry" class="button primary" hidden>Tentar conectar de novo</button>
       <button id="export" class="button primary" aria-describedby="copy-safety" hidden disabled>Baixar ZIP</button>
@@ -129,6 +146,7 @@
       <button id="finish" class="button" hidden>Concluir</button>
     </div>
   </div>
+  </main>
   <div id="sheet-scrim" class="scrim" hidden></div>
   <div id="confirm-panel" class="sheet" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
     <h2 id="confirm-title" class="sheet-title">Enviar para <span id="target-store"></span>?</h2>
@@ -151,18 +169,6 @@
     <p id="diff-stats" class="aside"></p>
     <div id="diff-body" class="diff-body" tabindex="0" role="region" aria-label="Linhas alteradas"></div>
     <div class="sheet-actions"><button id="diff-write-store" class="button primary" hidden>Usar no projeto</button><button id="diff-copy-store" class="button primary" hidden>Copiar a versão da loja</button><button id="diff-use-project" class="button primary" hidden>Usar a versão do projeto</button><button id="diff-keep-store" class="button" hidden>Manter a versão da loja</button></div>
-  </div>
-  <div id="menu-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="menu-title" hidden>
-    <div class="sheet-head"><h2 id="menu-title" class="sheet-title">Histórico e backups</h2><button id="close-menu" class="bar-button" aria-label="Fechar"><svg class="glyph"><use href="#i-x"/></svg></button></div>
-    <label class="field">Envio<select id="history" aria-label="Envio para recuperar"></select></label>
-    <p id="journal-info" class="aside">Nenhum envio nesta instalação.</p>
-    <div class="menu-actions">
-      <button id="restore" class="button" disabled>Restaurar este envio</button>
-      <button id="download-backup" class="button" disabled>Baixar o backup</button>
-      <button id="download-journal" class="button" disabled>Baixar o registro</button>
-    </div>
-    <p class="menu-footer"><button id="clear" class="link danger">Apagar os dados locais</button></p>
-    <p class="about"><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer"><img src="brand/zirtuno-logo.png" alt="" width="16" height="16">Zirtuno Sync <span class="version">0.6.0</span></a><span>Sem telemetria. Nunca exclui, renomeia nem publica.</span></p>
   </div>
   <div id="toast" class="toast" role="status" hidden></div>
   <span id="announcer" class="sr-only" aria-live="polite"></span>

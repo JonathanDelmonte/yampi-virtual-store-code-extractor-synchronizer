@@ -67,6 +67,21 @@ Uma cor de destaque, o ciano da Zirtuno, marca só a ação principal, o progres
 
 Referências: as diretrizes de Liquid Glass da Apple (vidro na camada de navegação e controles, tinta só na ação principal), ferramentas de trabalho com cromo discreto e um só destaque, e mostradores de instrumento para os números do andamento.
 
+## Revisão de navegação em 18/10/2026
+
+Mantém a paleta clara/escura, as fontes Atkinson e o desenho dos botões da 0.6.0. A revisão substitui a tela inicial e a ação fixa no rodapé por navegação persistente e ações junto do conteúdo. A execução em segundo plano, a comparação, a confirmação, o backup e a recuperação continuam com o mesmo contrato.
+
+| Antes | Depois | Motivo |
+| --- | --- | --- |
+| Tela inicial com duas escolhas | Abas **Baixar tema** e **Enviar alterações**, com abertura direta no download | Reduzir um clique e manter o contexto visível |
+| Ponto de conexão sem texto visível | Nome da loja, estado conectado/desconectado e aviso de operação em andamento | Explicar a situação sem depender de cor |
+| Ação na barra fixa inferior | Ação na seção de download, escolha, revisão, andamento ou resultado | Aproximar o botão do conteúdo a que ele se refere |
+| Campo nativo de ZIP sem orientação | Seletor integrado com foco visível, nome do arquivo e instrução de `npm run pack` | Tornar a alternativa ao uso da pasta compreensível |
+| Histórico no menu | **Backups e recuperação** na página, com atalho no topo | Expor histórico, downloads, erros e restauração |
+| Ajuda resumida e progresso recolhido | Tutoriais próximos das ações; etapas e registro inicialmente abertos | Recuperar a informação sem voltar à aparência antiga |
+
+As abas aceitam mouse, Tab, setas, Home e End. As ações continuam bloqueadas durante uma operação, e trocar de aba preserva o projeto e a comparação. A orientação fora do editor mantém seu próprio fluxo. Não foi acrescentada exportação direta para uma pasta: a cópia do tema continua em ZIP, e escolher uma pasta serve para ler o projeto editado.
+
 ## Movimento e acesso
 
 - Troca de tela: 240 ms, com opacidade e deslocamento de 6 px, em curva de desaceleração. Folhas sobem em 280 ms; a barra de progresso anda em 450 ms; botões respondem à pressão em 120 ms.
