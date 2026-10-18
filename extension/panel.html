@@ -14,6 +14,7 @@
     <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></symbol>
     <symbol id="i-next" viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></symbol>
     <symbol id="i-more" viewBox="0 0 16 16"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 16 16"><path d="M8 10.5v-8m-3 3 3-3 3 3M3 10v3.5h10V10"/></symbol>
   </svg>
   <header id="topbar" class="bar top">
     <span class="light" aria-hidden="true"></span>
@@ -56,7 +57,11 @@
         <p id="reference-info" class="aside"></p>
       </div>
       <div id="pick-actions" class="action-slot"></div>
-      <details id="zip-choice" class="help zip-choice"><summary><span>Usar um ZIP de retorno<small>Uma alternativa à pasta do projeto</small></span></summary><div class="zip-content"><p>No projeto editado, execute <code>npm run pack</code> e escolha o arquivo <code>retorno-yampi.zip</code>.</p><label class="file-picker"><span class="file-picker-copy"><strong>ZIP de retorno</strong><span id="zip-name">Nenhum ZIP selecionado</span></span><span class="file-picker-action">Escolher ZIP</span><input id="baseline" type="file" accept=".zip,application/zip" aria-label="Escolher ZIP de retorno" aria-describedby="zip-help"></label><p id="zip-help" class="aside">A comparação começa após a leitura. Nada é enviado sem sua revisão e confirmação.</p></div></details>
+      <section id="zip-choice" class="zip-import" aria-labelledby="zip-title">
+        <div class="zip-heading"><span class="zip-document" aria-hidden="true">.zip</span><div><h2 id="zip-title">Importar por ZIP</h2><p>Uma alternativa à pasta do projeto.</p></div></div>
+        <label class="file-picker"><span class="file-picker-action"><svg class="glyph" aria-hidden="true"><use href="#i-upload"/></svg>Escolher ZIP de retorno</span><span id="zip-name" class="file-picker-name" aria-live="polite">Nenhum ZIP selecionado</span><input id="baseline" type="file" accept=".zip,application/zip" aria-label="Escolher ZIP de retorno" aria-describedby="zip-help zip-generate"></label>
+        <div class="zip-guidance"><p id="zip-generate">Gere o arquivo no projeto com <code>npm run pack</code>.</p><p id="zip-help">Você revisa a comparação antes de confirmar qualquer envio.</p></div>
+      </section>
       <label class="file-fallback">Pasta do projeto<input id="folder" type="file" webkitdirectory multiple></label>
       <details class="help"><summary>O que a extensão encontra na pasta?</summary><dl class="folder-guide"><div><dt><code>tema/</code></dt><dd>Textos e imagens do projeto que você editou.</dd></div><div><dt><code>.yampi-sync/</code></dt><dd>A referência original para comparar com o estado atual da loja.</dd></div></dl><p>Dependências, ferramentas, documentação e a prévia local ficam fora do envio. Você também pode escolher só <code>tema/</code> se o original desta loja já estiver guardado na extensão.</p></details>
       <details class="help"><summary>Como funciona o envio?</summary><ol class="help-steps"><li>Escolha a pasta ou o ZIP e confira os arquivos comparados.</li><li>Revise conflitos e selecione o que deseja enviar. A loja de destino aparece na confirmação.</li><li>A extensão guarda e baixa o backup antes de gravar, e confere o conteúdo após recarregar o editor.</li><li>Confira em <strong>Ver prévia</strong> na Yampi. Publicar continua sendo uma ação sua.</li></ol><p>Criações e imagens usam os controles do editor, sem criar pastas. O envio para no primeiro erro e preserva o registro do que já foi feito.</p></details>

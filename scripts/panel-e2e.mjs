@@ -63,7 +63,6 @@ try {
   assert.equal(await page.locator('#recovery-controls').isVisible(), false);
   assert.equal(await page.locator('#import-section #pick-folder').isVisible(), true);
   await shot('importar-dark');
-  await page.locator('#zip-choice > summary').click();
   await page.locator('#baseline').focus();
   assert.equal(await page.locator('.file-picker').evaluate(node => node.matches(':focus-within')), true);
   assert.equal(await page.locator('#zip-name').textContent(), 'Nenhum ZIP selecionado');
