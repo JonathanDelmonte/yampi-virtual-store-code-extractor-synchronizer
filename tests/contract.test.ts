@@ -93,7 +93,7 @@ describe('contrato único entre captura, check, dev e testes', () => {
     expect(blocked).toEqual({'assets/styles/main.scss': ['assets/styles/_novo.scss'], 'templates/home.twig': ['assets/images/hero.png', 'components/NovoCard.vue', 'sections/home/nova.twig'], 'components/Old.vue': ['components/NovoCard.vue'], 'elements/scripts/components.twig': ['components/NovoCard.vue']});
     expect(report.warnings).toContainEqual({path: 'sections/home/a.twig', message: 'Referência sem arquivo correspondente: sections/home/inexistente.twig'});
     const unlisted = dependencyReport({targets: [], texts: {'elements/scripts/components.twig': ''}, local: ['components/Solta.vue', 'elements/scripts/components.twig'], remote: ['elements/scripts/components.twig']});
-    expect(unlisted.warnings[0]).toMatchObject({path: 'components/Solta.vue'}); expect(unlisted.warnings[0].message).toContain('não será carregado na Yampi');
+    expect(unlisted.warnings[0]).toMatchObject({path: 'components/Solta.vue'}); expect(unlisted.warnings[0].message).toContain('a prévia local só registra os componentes listados');
     expect(resolvedReferences('templates/home.twig', texts['templates/home.twig'], local).sort()).toEqual(['assets/images/hero.png', 'components/NovoCard.vue', 'sections/home/a.twig', 'sections/home/nova.twig']);
   });
   test('paridade de CSS ignora diferenças de minificação e detecta divergências', () => {

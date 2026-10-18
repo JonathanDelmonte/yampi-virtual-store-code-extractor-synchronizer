@@ -1,9 +1,9 @@
 import {sanitizeRaw} from '../core/preview';
 import type {EditorView} from '@codemirror/view';
 import {editorView, readDocument} from './editor-document';
-import {assertContext, validatePath, validatePaths, validateImage, imagePath, writable, MAX_FILE_BYTES, type Context} from '../core/model';
-export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write'; context?: Context; path?: string; expected?: string; content?: string}
-export const version = '0.4.0';
+import {assertContext, validatePath, validatePaths, validateImage, imagePath, writable, creatableName, uploadablePath, imageType, dataUrlBytes, MAX_FILE_BYTES, type Context} from '../core/model';
+export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write' | 'create' | 'upload' | 'links'; context?: Context; path?: string; expected?: string; content?: string}
+export const version = '0.6.0';
 type Reply = {ok: true; value: unknown} | {ok: false; error: string};
 const clean = (e: Element | null) => e?.textContent?.trim() || '';
 type EditorRoot = ShadowRoot | HTMLElement;
@@ -26,6 +26,13 @@ function findButton(label: string): HTMLButtonElement {
   if (matches.length !== 1) throw new Error(`Controle do editor não reconhecido: ${label}`);
   return matches[0];
 }
+let previewAnchor: HTMLAnchorElement | undefined;
+function previewLink(): URL {
+  getContext();
+  const url = new URL(previewAnchor!.href);
+  if (!['https:', 'http:'].includes(url.protocol)) throw new Error('URL de prévia inválida.');
+  return url;
+}
 function getContext(): Context {
   const headers = root().querySelectorAll('header');
   if (headers.length !== 1) throw new Error('Cabeçalho do componente do editor não reconhecido.');
@@ -33,6 +40,7 @@ function getContext(): Context {
   const dividers = header.querySelectorAll('.divider');
   const previews = header.querySelectorAll<HTMLAnchorElement>('a[href][target="_blank"]');
   if (dividers.length !== 1 || previews.length !== 1) throw new Error('Identificação da loja e link de prévia não reconhecidos no cabeçalho. Nenhum arquivo foi enviado.');
+  previewAnchor = previews[0];
   const divider = dividers[0];
   const walker = document.createTreeWalker(header, NodeFilter.SHOW_TEXT);
   const names: string[] = []; let found = false;
@@ -88,13 +96,10 @@ async function completeInventory(context: Context): Promise<string[]> {
     if (!title) throw new Error('Pasta não reconhecida.');
     title.click(); await until(() => folder.classList.contains('active'));
   }
-  let previous = '', stable = 0;
+  const settled = stability();
   await until(() => {
     guard(context);
-    if (root().querySelector('aside [aria-busy="true"], aside .loading, aside .spinner, aside .loader-bg')) {stable = 0; return false;}
-    const current = JSON.stringify([...inventory().keys()].sort());
-    stable = current === previous ? stable + 1 : 0; previous = current;
-    return stable >= 4;
+    return settled(root().querySelector('aside [aria-busy="true"], aside .loading, aside .spinner, aside .loader-bg') ? undefined : JSON.stringify([...inventory().keys()].sort()));
   });
   // A lazy tree can add folders after the initial expansion.
   if ([...root().querySelectorAll('aside .collapse-list:not(.active)')].some(n => clean([...n.children].find(c => c.classList.contains('folder-title')) || null) !== 'logs')) throw new Error('A árvore adicionou pastas durante a leitura. Exporte novamente.');
@@ -113,12 +118,45 @@ function assertClean(): void {
   if (dirty()) throw new Error('Existe um arquivo com alterações não salvas. Salve ou descarte manualmente antes de continuar.');
 }
 function guard(context: Context): void {assertContext(context, getContext());}
+// Waits react to the editor's own DOM changes. In a hidden tab the browser runs timers about
+// once a second, and chained timers can wait up to a minute; DOM changes still arrive at once.
+// The fallback check hops through a message first, so its timer never counts as chained.
 async function until(check: () => boolean, timeout = 10000): Promise<void> {
-  const start = performance.now();
-  while (!check()) {
-    if (performance.now() - start > timeout) throw new Error('O editor não confirmou a operação dentro do prazo.');
-    await new Promise(r => setTimeout(r, 80));
-  }
+  if (check()) return;
+  const target: Node = activeRoot ?? document;
+  await new Promise<void>((resolve, reject) => {
+    const start = performance.now();
+    let done = false, timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new MutationObserver(() => test());
+    const finish = (error?: unknown) => {
+      if (done) return;
+      done = true; observer.disconnect(); target.removeEventListener('load', test, true); clearTimeout(timer);
+      if (error) reject(error); else resolve();
+    };
+    function test() {
+      if (done) return;
+      try {if (check()) {finish(); return;}} catch (error) {finish(error); return;}
+      // A hidden tab answers slower: allow it more time before calling it a failure.
+      if (performance.now() - start > (document.hidden ? timeout * 3 : timeout)) finish(new Error('O editor não confirmou a operação dentro do prazo.'));
+    }
+    function schedule() {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {channel.port1.close(); if (!done) timer = setTimeout(() => {test(); if (!done) schedule();}, 80);};
+      channel.port2.postMessage(null);
+    }
+    observer.observe(target, {subtree: true, childList: true, attributes: true, characterData: true});
+    target.addEventListener('load', test, true);
+    schedule();
+  });
+}
+// The same value for at least 320 ms, seen at least twice: a file opens before its content
+// arrives, and the editor can swap documents while loading.
+function stability(): (value: unknown) => boolean {
+  let last: unknown, since = 0, checks = 0;
+  return value => {
+    if (value === undefined || value !== last) {last = value; since = performance.now(); checks = 0; return false;}
+    return ++checks >= 2 && performance.now() - since >= 320;
+  };
 }
 function selectedPath(): string | undefined {
   const selected = root().querySelectorAll('aside .collapse-item.selected .file-name');
@@ -149,16 +187,13 @@ async function open(path: string, context: Context, reading=false): Promise<void
     return selectedPath() === path && clean(root().querySelector('main .tab-item.active p')) === path.split('/').pop() && (imagePath(path) ? !!image?.complete && !!image.naturalWidth : !!root().querySelector('main .cm-content'));
   });
   // CodeMirror and the active tab can switch before async file loading finishes. Require stable UI/document.
-  let last: unknown, stable = 0;
+  const settled = stability();
   await until(() => {
     guard(context);
-    if (selectedPath() !== path || root().querySelector('main [aria-busy="true"], main .loading, main .spinner, main .loader-bg')) {stable = 0; return false;}
+    if (selectedPath() !== path || root().querySelector('main [aria-busy="true"], main .loading, main .spinner, main .loader-bg')) return settled(undefined);
     // CodeMirror Text is immutable: a new document resets the same stability window.
     // Copy/validate the full text once after stabilization, rather than on each poll.
-    const value = imagePath(path) ? visibleImage().src : view().state.doc;
-    stable = value === last ? stable + 1 : 0;
-    last = value;
-    return stable >= 4;
+    return settled(imagePath(path) ? visibleImage().src : view().state.doc);
   });
   assertClean();
 }
@@ -167,11 +202,7 @@ function visibleImage(): HTMLImageElement {
   if (images.length !== 1 || !images[0].complete || !images[0].naturalWidth) throw new Error('Prévia da imagem não reconhecida. Nenhuma exportação parcial será entregue.');
   return images[0];
 }
-async function readImage(path: string, context: Context): Promise<string> {
-  const source = visibleImage().src;
-  const url = new URL(source, location.href);
-  if (url.username || url.password || (!['https:', 'data:', 'blob:'].includes(url.protocol) && url.origin !== location.origin) || (url.protocol === 'blob:' && url.origin !== location.origin)) throw new Error('Origem da imagem não permitida.');
-  if (source.length > MAX_FILE_BYTES * 1.5) throw new Error('Imagem grande demais.');
+async function downloadImage(url: URL): Promise<Uint8Array> {
   const response = await fetch(url.href, {credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(15000)});
   if (!response.ok || Number(response.headers.get('content-length')) > MAX_FILE_BYTES) throw new Error('Não foi possível baixar a imagem dentro dos limites.');
   const reader = response.body?.getReader();
@@ -186,12 +217,121 @@ async function readImage(path: string, context: Context): Promise<string> {
   } finally {await reader.cancel().catch(() => {});}
   const bytes = new Uint8Array(size); let offset = 0;
   for (const chunk of chunks) {bytes.set(chunk, offset); offset += chunk.length;}
+  return bytes;
+}
+async function readImage(path: string, context: Context): Promise<string> {
+  const source = visibleImage().src;
+  const url = new URL(source, location.href);
+  if (url.username || url.password || (!['https:', 'data:', 'blob:'].includes(url.protocol) && url.origin !== location.origin) || (url.protocol === 'blob:' && url.origin !== location.origin)) throw new Error('Origem da imagem não permitida.');
+  if (source.length > MAX_FILE_BYTES * 1.5) throw new Error('Imagem grande demais.');
+  const bytes = url.protocol === 'data:' ? dataUrlBytes(source) : await downloadImage(url);
+  if (bytes.length > MAX_FILE_BYTES) throw new Error('Imagem grande demais.');
   guard(context);
   if (selectedPath() !== path || visibleImage().src !== source) throw new Error('A imagem selecionada mudou durante a leitura.');
   validateImage(path, bytes);
   let binary = '';
   for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
   return btoa(binary);
+}
+// Creation goes through the editor's own controls, as a person would: the folder's
+// "Adicionar arquivo" button opens a dialog (name and extension) or, for assets/images,
+// the image uploader. Yampi validates, saves to the draft and lists the new file.
+const EXTENSION_LABEL: Record<string, string> = {scss: 'SCSS', vue: 'Vue', twig: 'Twig'};
+function folderPath(list: Element): string {
+  const parts: string[] = [];
+  for (let node: Element | null = list; node && node.tagName !== 'ASIDE'; node = node.parentElement) {
+    if (!node.classList.contains('collapse-list')) continue;
+    const title = [...node.children].find(c => c.classList.contains('folder-title'));
+    const label = title && [...title.children].find(c => c.tagName === 'SPAN');
+    if (!label) throw new Error('Pasta sem identificação.');
+    parts.unshift(clean(label));
+  }
+  return parts.join('/');
+}
+const activeDialogs = () => [...root().querySelectorAll<HTMLElement>('.ds-modal-overlay.ds-modal-overlay--active')];
+function dialogButton(dialog: HTMLElement, label: string): HTMLButtonElement {
+  const matches = [...dialog.querySelectorAll<HTMLButtonElement>('button')].filter(b => clean(b) === label);
+  if (matches.length !== 1) throw new Error(`Controle da janela da Yampi não reconhecido: ${label}`);
+  return matches[0];
+}
+async function openAddDialog(folder: string, kind: 'file' | 'image', context: Context): Promise<HTMLElement> {
+  if (activeDialogs().length) throw new Error('Há uma janela aberta no editor da Yampi. Feche-a e tente novamente.');
+  const lists = [...root().querySelectorAll<HTMLElement>('aside .collapse-list')].filter(list => folderPath(list) === folder);
+  if (lists.length !== 1) throw new Error(`A pasta ${folder} não existe no editor, e a Yampi não permite criar pastas.`);
+  const title = [...lists[0].children].find(c => c.classList.contains('folder-title'));
+  const add = title && [...title.children].find(c => c.classList.contains('add-item')) as HTMLElement | undefined;
+  if (!add) throw new Error(`Sem permissão para adicionar arquivos em ${folder}.`);
+  guard(context);
+  add.click();
+  let dialog: HTMLElement | undefined;
+  await until(() => {
+    const open = activeDialogs();
+    if (open.length !== 1 || clean(open[0].querySelector('.ds-modal h3')) !== 'Adicionar arquivo') return false;
+    const fits = kind === 'file' ? !!open[0].querySelector('form .ds-select') && open[0].querySelectorAll('input.ds-input__field').length === 1 : open[0].querySelectorAll('.ds-file-uploader input.ds-file-uploader__input').length === 1;
+    if (fits) dialog = open[0];
+    return fits;
+  });
+  return dialog!;
+}
+async function finishDialog(dialog: HTMLElement, path: string, error: string, context: Context, timeout: number): Promise<void> {
+  try {
+    await until(() => !dialogButton(dialog, 'Adicionar arquivo').disabled || !!clean(dialog.querySelector(error)));
+    const refused = clean(dialog.querySelector(error));
+    if (refused) throw new Error(`A Yampi recusou ${path}: ${refused}`);
+    guard(context);
+    dialogButton(dialog, 'Adicionar arquivo').click();
+    await until(() => {
+      const message = clean(dialog.querySelector(error));
+      if (message) throw new Error(`A Yampi recusou ${path}: ${message}`);
+      return !dialog.classList.contains('ds-modal-overlay--active') && inventory().has(path);
+    }, timeout);
+  } catch (failure) {
+    // Leave the editor as it was: close the dialog without confirming anything.
+    if (dialog.classList.contains('ds-modal-overlay--active')) try {dialogButton(dialog, 'Cancelar').click();} catch { /* The error below explains the stop. */ }
+    throw failure;
+  }
+}
+async function createFile(path: string, context: Context): Promise<void> {
+  validatePath(path);
+  const name = path.split('/').at(-1)!, folder = path.slice(0, -name.length - 1), match = /^(.+)\.(twig|vue|scss)$/.exec(name);
+  if (!creatableName(path) || !match) throw new Error(`A Yampi não cria arquivos com esse nome ou tipo: ${path}`);
+  if (inventory().has(path)) throw new Error(`O arquivo já existe na loja: ${path}. A extensão não cria duplicatas.`);
+  const dialog = await openAddDialog(folder, 'file', context);
+  try {
+    const select = dialog.querySelector<HTMLElement>('form .ds-select')!, label = EXTENSION_LABEL[match[2]];
+    const chosen = () => clean(select.querySelector('.ds-select__trigger span'));
+    if (chosen() !== label) {
+      select.click();
+      await until(() => [...select.querySelectorAll('.ds-select__option')].filter(o => clean(o) === label).length === 1);
+      [...select.querySelectorAll<HTMLElement>('.ds-select__option')].find(o => clean(o) === label)!.click();
+      await until(() => chosen() === label);
+    }
+    const input = dialog.querySelector<HTMLInputElement>('input.ds-input__field')!;
+    input.value = match[1];
+    input.dispatchEvent(new Event('input', {bubbles: true, composed: true}));
+  } catch (failure) {
+    try {dialogButton(dialog, 'Cancelar').click();} catch { /* The error below explains the stop. */ }
+    throw failure;
+  }
+  await finishDialog(dialog, path, '.ds-input__error', context, 20000);
+}
+async function uploadImage(path: string, data: string, context: Context): Promise<void> {
+  validatePath(path);
+  if (!uploadablePath(path)) throw new Error(`A Yampi guarda imagens só direto em assets/images, com nome em minúsculas: ${path}`);
+  if (inventory().has(path)) throw new Error(`A imagem já existe na loja: ${path}. A extensão não cria duplicatas.`);
+  const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+  validateImage(path, bytes);
+  const dialog = await openAddDialog('assets/images', 'image', context);
+  try {
+    const input = dialog.querySelector<HTMLInputElement>('input.ds-file-uploader__input')!, transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], path.split('/').at(-1)!, {type: imageType(path)}));
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', {bubbles: true, composed: true}));
+  } catch (failure) {
+    try {dialogButton(dialog, 'Cancelar').click();} catch { /* The error below explains the stop. */ }
+    throw failure;
+  }
+  await finishDialog(dialog, path, '.ds-file-uploader__error', context, 30000);
 }
 let busy = false;
 export async function command(input: Command): Promise<Reply> {
@@ -203,6 +343,8 @@ export async function command(input: Command): Promise<Reply> {
     if (input.context) guard(input.context);
     assertClean();
     if (input.op === 'context') return {ok: true, value: context};
+    // The editor's own "Ver prévia" link, for the panel's shortcut after a send.
+    if (input.op === 'links') return {ok: true, value: {preview: previewLink().href}};
     if (input.op === 'visual') {
       // Only a draft theme configuration in the platform format is read here; the
       // admin page's account, session and store data are never collected.
@@ -213,6 +355,12 @@ export async function command(input: Command): Promise<Reply> {
     }
     if (input.op === 'inventory') return {ok: true, value: await completeInventory(context)};
     if (!input.path) throw new Error('Arquivo não informado.');
+    // The full tree is listed first, so the absence check sees every folder.
+    if (input.op === 'create') {await completeInventory(context); await createFile(input.path, context); return {ok: true, value: {created: true}};}
+    if (input.op === 'upload') {
+      if (typeof input.content !== 'string') throw new Error('Comando inválido.');
+      await completeInventory(context); await uploadImage(input.path, input.content, context); return {ok: true, value: {uploaded: true}};
+    }
     await open(input.path, context,input.op==='read'||input.op==='readAsset');
     if (input.op === 'readAsset' && imagePath(input.path)) return {ok: true, value: await readImage(input.path, context)};
     if (imagePath(input.path)) throw new Error('Imagens são exportadas para uso local; envio binário está bloqueado.');
@@ -235,7 +383,7 @@ export async function command(input: Command): Promise<Reply> {
       guard(context);
       return save.disabled && !save.querySelector('.loading, .spinner, .button__loader, .button__spinner') && !root().querySelector('main [aria-busy="true"]');
     }, 20000);
-    // Do not click publish, delete, rename, or create controls. A separate fresh-page verification follows.
+    // Do not click publish, delete or rename controls. A separate fresh-page verification follows.
     if (readDocument(view()) !== input.content) throw new Error('Conteúdo diferente após salvar.');
     return {ok: true, value: {saved: true}};
   } catch (error) {return {ok: false, error: error instanceof Error ? error.message : String(error)};}

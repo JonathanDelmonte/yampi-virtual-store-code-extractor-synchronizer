@@ -1,4 +1,5 @@
 import {openEditorFromGuide} from './browser/guide-navigation';
+import {lens, adaptiveShadows} from './panel/glass';
 const button = document.getElementById('open-editor') as HTMLButtonElement;
 const detail = document.getElementById('guide-detail')!;
 button.addEventListener('click', async () => {
@@ -11,4 +12,7 @@ button.addEventListener('click', async () => {
     detail.classList.add('guide-error'); button.disabled = false;
   }
 });
+lens(document.getElementById('topbar')!, 'lens-top', {radius: 18, bezel: 14, shift: 6});
+lens(document.getElementById('dock')!, 'lens-dock', {radius: 18, bezel: 14, shift: 6});
+adaptiveShadows(document.getElementById('topbar')!, document.getElementById('dock')!);
 document.body.dataset.guideReady = 'true';

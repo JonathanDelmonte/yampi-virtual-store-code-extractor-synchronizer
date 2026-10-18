@@ -1,5 +1,5 @@
 import {beforeEach, afterEach, describe, test, expect, vi} from 'vitest';
-type Session = {tabId: number; editorUrl: string; documentId?: string; locked: boolean; access?: 'read' | 'write'; previewOrigins?:string[]};
+type Session = {tabId: number; editorUrl: string; documentId?: string; locked: boolean; access?: 'read' | 'write'; previewOrigins?:string[]; job?: string};
 let stored: Record<string, Session>, tabs: Map<number, {id: number; url: string}>, contexts: Map<string, chrome.runtime.ExtensionContext>, injected: Set<number>;
 let chromeMock: typeof chrome, clicked: (tab: chrome.tabs.Tab) => Promise<void>, removed: (id: number) => Promise<void>;
 let listener: (message: unknown, sender: chrome.runtime.MessageSender, response: (r: unknown) => void) => boolean;
@@ -7,6 +7,7 @@ let connect: (port: chrome.runtime.Port) => void;
 let updated: Set<(id: number, change: {status?: string; url?: string}) => void>;
 let panelClosed: (info: {tabId?: number; path: string}) => void, installed: () => void;
 let panelOptions: Map<number, chrome.sidePanel.PanelOptions>;
+let runnerMessages: {target?: string; action?: string; job?: {id: string}}[], runnerHas: boolean;
 const extId = 'fictitious-test-extension', url = 'https://app.yampi.com.br/store/code-editor/';
 function sender(token: string, documentId?: string): chrome.runtime.MessageSender {
   return {id: extId, url: `chrome-extension://${extId}/panel.html?tab=${stored[token]?.tabId || 1}`, documentId};
@@ -31,13 +32,16 @@ function port(token: string) {
   return (removeContext = true) => {if (removeContext) contexts.delete(`doc-${token}`); disconnect();};
 }
 beforeEach(async () => {
-  vi.resetModules(); stored = {}; tabs = new Map([[1, {id: 1, url}], [2, {id: 2, url}]]); contexts = new Map(); injected = new Set(); updated = new Set();
+  vi.resetModules(); stored = {}; tabs = new Map([[1, {id: 1, url}], [2, {id: 2, url}]]); contexts = new Map(); injected = new Set(); updated = new Set(); runnerMessages = []; runnerHas = true;
   panelOptions = new Map();
   chromeMock = {
-    runtime: {id: extId, getURL: (p: string) => `chrome-extension://${extId}/${p}`, sendMessage: vi.fn(async () => {}),
+    runtime: {id: extId, getURL: (p: string) => `chrome-extension://${extId}/${p}`, sendMessage: vi.fn(async (message: {target?: string; action?: string}) => {runnerMessages.push(message); return message?.target === 'runner' ? {ok: true, value: message.action === 'has' ? runnerHas : null} : undefined;}),
       getContexts: vi.fn(async (filter: {documentIds?: string[]; contextTypes?: string[]; documentUrls?: string[]}) => [...contexts.values()].filter(c => (!filter.documentIds || filter.documentIds.includes(c.documentId!)) && (!filter.documentUrls || filter.documentUrls.includes(c.documentUrl!)) && (!filter.contextTypes || filter.contextTypes.includes(c.contextType)))),
       onInstalled: {addListener: vi.fn(fn => {installed = fn;})}, onMessage: {addListener: vi.fn(fn => {listener = fn;})}, onConnect: {addListener: vi.fn(fn => {connect = fn;})}},
-    action: {onClicked: {addListener: vi.fn(fn => {clicked = fn;})}, setBadgeText: vi.fn(async () => {}), setTitle: vi.fn(async () => {})},
+    action: {onClicked: {addListener: vi.fn(fn => {clicked = fn;})}, setBadgeText: vi.fn(async () => {}), setTitle: vi.fn(async () => {}), setBadgeBackgroundColor: vi.fn(async () => {}), setBadgeTextColor: vi.fn(async () => {})},
+    offscreen: {createDocument: vi.fn(async ({url}: {url: string}) => {contexts.set('runner-doc', {contextType: 'OFFSCREEN_DOCUMENT', documentId: 'runner-doc', documentUrl: `chrome-extension://${extId}/${url}`, frameId: 0} as chrome.runtime.ExtensionContext);})},
+    notifications: {create: vi.fn(async () => ''), clear: vi.fn(async () => true), onClicked: {addListener: vi.fn()}},
+    downloads: {download: vi.fn(async () => 7), search: vi.fn(async () => [{id: 7, state: 'complete'}]), onChanged: {addListener: vi.fn()}},
     permissions:{contains:vi.fn(async()=>true)},
     sidePanel: {open: vi.fn(async () => {}),
       setOptions: vi.fn(async (options: chrome.sidePanel.PanelOptions) => {if (options.tabId !== undefined) panelOptions.set(options.tabId, {...panelOptions.get(options.tabId), ...options});}),
@@ -47,7 +51,7 @@ beforeEach(async () => {
       get: vi.fn(async (key: string | null) => structuredClone(key === null ? stored : {[key]: stored[key]})),
       set: vi.fn(async (values: Record<string, Session>) => {Object.assign(stored, structuredClone(values));}),
       remove: vi.fn(async (key: string) => {delete stored[key];})}},
-    tabs: {create: vi.fn(), query: vi.fn(async () => [...tabs.values()]), get: vi.fn(async (id: number) => {const tab = tabs.get(id); if (!tab) throw new Error('closed'); return tab;}),
+    tabs: {create: vi.fn(), update: vi.fn(async (id: number) => tabs.get(id)), query: vi.fn(async () => [...tabs.values()]), get: vi.fn(async (id: number) => {const tab = tabs.get(id); if (!tab) throw new Error('closed'); return tab;}),
       reload: vi.fn(async (id: number) => {for (const fn of updated) {fn(id, {status: 'loading'}); fn(id, {status: 'complete'});}}),
       onUpdated: {addListener: vi.fn(fn => updated.add(fn)), removeListener: vi.fn(fn => updated.delete(fn))}, onRemoved: {addListener: vi.fn(fn => {removed = fn;})}},
     scripting: {executeScript: vi.fn(async (request: {target: {tabId: number}; files?: string[]; args?: unknown[]}) => {
@@ -254,5 +258,109 @@ describe('painel lateral, permissões e isolamento do editor', () => {
   test('fechar editor remove a sessão', async () => {
     const token = await open(); await removed(1); expect(stored[token]).toBeUndefined();
     expect((await message(token, {action: 'lock'})).ok).toBe(false);
+  });
+});
+const runnerSender = (documentId = 'runner-doc'): chrome.runtime.MessageSender => ({id: extId, url: `chrome-extension://${extId}/runner.html`, documentId});
+const shop = {storeName: 'Fictícia A', previewOrigin: 'https://store-a.invalid', editorOrigin: 'https://app.yampi.com.br'};
+async function fromRunner(input: Record<string, unknown>, source = runnerSender()) {
+  return new Promise<{ok: boolean; value?: unknown; error?: string}>(resolve => {
+    const accepted = listener(input, source, result => resolve(result as {ok: boolean; value?: unknown; error?: string}));
+    if (!accepted) resolve({ok: false, error: 'rejected-sender'});
+  });
+}
+async function startJob(kind: 'send' | 'compare' = 'send') {
+  const token = await open(), id = 'job-' + kind + '-0001';
+  const reply = await message(token, {action: 'job-start', job: {id, kind, scope: 'project'}, context: shop});
+  return {token, id, reply};
+}
+const jobState = (id: string, status: string, fraction = 0.5) => ({id, kind: 'send', status, context: shop, title: 'Enviando para Fictícia A', detail: '', phases: [], fraction, elapsedMs: 0, startedAt: 0, updatedAt: 0, events: []});
+const storedJob = () => (stored as unknown as Record<string, {status: string; fraction: number}>)['job:1'];
+describe('operações em segundo plano: o painel pode fechar', () => {
+  test('iniciar entrega o editor à execução em segundo plano, com acesso só do tipo da operação', async () => {
+    const {token, id, reply} = await startJob();
+    expect(reply.ok).toBe(true);
+    expect(stored[token]).toMatchObject({locked: true, access: 'write', job: id});
+    expect(chromeMock.offscreen.createDocument).toHaveBeenCalledWith(expect.objectContaining({url: 'runner.html'}));
+    expect(runnerMessages.find(m => m.target === 'runner' && m.action === 'start')).toMatchObject({job: {id, kind: 'send'}, tabId: 1, token});
+    expect(chromeMock.tabs.update).toHaveBeenCalledWith(1, {autoDiscardable: false});
+    expect((await message(token, {action: 'job-start', job: {id: 'job-compare-0002', kind: 'compare'}, context: shop})).error).toContain('em andamento');
+  });
+  test('fechar o painel não libera o editor; outro painel acompanha, mas não comanda o editor', async () => {
+    const {token} = await startJob(), close = port(token);
+    close(); await new Promise(r => setTimeout(r, 0));
+    expect(stored[token].locked).toBe(true);
+    context(token, 'doc-new');
+    expect((await message(token, {action: 'heartbeat'}, sender(token, 'doc-new'))).ok).toBe(true);
+    expect((await message(token, {action: 'lock', access: 'read'}, sender(token, 'doc-new'))).error).toContain('segundo plano');
+    expect((await message(token, {command: {op: 'read', path: 'templates/home.twig'}}, sender(token, 'doc-new'))).ok).toBe(false);
+    expect((await message(token, {action: 'unlock'}, sender(token, 'doc-new'))).ok).toBe(true);
+    expect(stored[token].locked).toBe(true);
+    expect(chromeMock.scripting.executeScript).not.toHaveBeenCalled();
+  });
+  test('a execução em segundo plano só age na aba e na operação que recebeu', async () => {
+    const {token, id} = await startJob(), other = await open(2);
+    expect((await fromRunner({runner: id, session: token, command: {op: 'inventory'}})).ok).toBe(true);
+    expect(vi.mocked(chromeMock.scripting.executeScript).mock.calls.every(([r]) => r.target.tabId === 1)).toBe(true);
+    expect((await fromRunner({runner: 'outra-operacao', session: token, command: {op: 'inventory'}})).error).toContain('não autorizada');
+    expect((await fromRunner({runner: id, session: other, command: {op: 'inventory'}})).error).toContain('não autorizada');
+    // A tab, a page or another extension page cannot pose as the runner.
+    expect((await fromRunner({runner: id, session: token, command: {op: 'inventory'}}, {...runnerSender(), tab: {id: 5} as chrome.tabs.Tab})).error).toBe('rejected-sender');
+    expect((await fromRunner({runner: id, session: token, command: {op: 'inventory'}}, {...runnerSender(), url: `chrome-extension://${extId}/panel.html?tab=1`})).error).toBe('rejected-sender');
+    expect((await fromRunner({runner: id, session: token, command: {op: 'inventory'}}, runnerSender('documento-falso'))).ok).toBe(false);
+    expect((await fromRunner({runner: id, session: token, command: {op: 'publish'}})).ok).toBe(false);
+  });
+  test('comparação em segundo plano não pode gravar', async () => {
+    const {token, id} = await startJob('compare');
+    expect(stored[token].access).toBe('read');
+    expect((await fromRunner({runner: id, session: token, command: {op: 'write', path: 'templates/home.twig', expected: 'a', content: 'b'}})).error).toContain('apenas copiar');
+  });
+  test('progresso fica no ícone; o fim libera o editor e avisa quando o painel está fechado', async () => {
+    const {token, id} = await startJob();
+    contexts.delete(`doc-${token}`);
+    await fromRunner({runner: id, session: token, action: 'job-report', state: jobState(id, 'running', 0.42)});
+    expect(storedJob()).toMatchObject({status: 'running', fraction: 0.42});
+    expect(chromeMock.action.setBadgeText).toHaveBeenLastCalledWith({tabId: 1, text: '42%'});
+    await fromRunner({runner: id, session: token, action: 'job-finish', state: {...jobState(id, 'completed', 1), result: {kind: 'send', verified: 3, uploaded: 1, created: 1, total: 4, warnings: []}}});
+    expect(stored[token]).toMatchObject({locked: false}); expect(stored[token].job).toBeUndefined();
+    expect(chromeMock.action.setBadgeText).toHaveBeenLastCalledWith({tabId: 1, text: '✓'});
+    expect(chromeMock.notifications.create).toHaveBeenCalledWith(expect.stringContaining('zirtuno:1:'), expect.objectContaining({title: 'Envio concluído · Fictícia A', message: expect.stringContaining('4 itens conferidos')}));
+    expect(chromeMock.tabs.update).toHaveBeenLastCalledWith(1, {autoDiscardable: true});
+    // After the end, a panel can use the editor again.
+    context(token);
+    expect((await message(token, {action: 'lock', access: 'read'})).ok).toBe(true);
+  });
+  test('com o painel aberto não há notificação', async () => {
+    const {token, id} = await startJob();
+    await fromRunner({runner: id, session: token, action: 'job-finish', state: jobState(id, 'completed', 1)});
+    expect(chromeMock.notifications.create).not.toHaveBeenCalled();
+  });
+  test('download pedido pela execução aceita só endereços da própria extensão', async () => {
+    const {token, id} = await startJob();
+    expect((await fromRunner({runner: id, session: token, action: 'job-download', url: 'https://outra.invalid/a.zip', name: 'a.zip'})).ok).toBe(false);
+    expect((await fromRunner({runner: id, session: token, action: 'job-download', url: `blob:chrome-extension://${extId}/123`, name: '../a.zip'})).ok).toBe(false);
+    expect((await fromRunner({runner: id, session: token, action: 'job-download', url: `blob:chrome-extension://${extId}/123`, name: 'backup-antes-do-envio-loja.zip'})).ok).toBe(true);
+    expect(chromeMock.downloads.download).toHaveBeenCalledTimes(1);
+  });
+  test('operação sem execução viva é marcada como interrompida e libera o editor', async () => {
+    const {token, id} = await startJob();
+    await fromRunner({runner: id, session: token, action: 'job-report', state: jobState(id, 'running')});
+    runnerHas = false;
+    const reply = await message(token, {action: 'job-state'});
+    expect(reply.value).toMatchObject({status: 'failed', error: expect.stringContaining('reiniciada')});
+    expect(stored[token].locked).toBe(false);
+  });
+  test('o ícone durante a operação reabre o painel sem apagar o progresso', async () => {
+    const {token, id} = await startJob();
+    await fromRunner({runner: id, session: token, action: 'job-report', state: jobState(id, 'running', 0.3)});
+    vi.mocked(chromeMock.action.setBadgeText).mockClear();
+    expect(await open()).toBe(token);
+    expect(chromeMock.action.setBadgeText).not.toHaveBeenCalled();
+  });
+  test('fechar a aba do editor cancela a operação e apaga a sessão', async () => {
+    const {token, id} = await startJob();
+    await fromRunner({runner: id, session: token, action: 'job-report', state: jobState(id, 'running')});
+    await removed(1);
+    expect(runnerMessages.some(m => m.target === 'runner' && m.action === 'cancel')).toBe(true);
+    expect(stored[token]).toBeUndefined();
   });
 });

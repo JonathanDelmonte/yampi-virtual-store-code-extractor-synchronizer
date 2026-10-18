@@ -27,3 +27,79 @@ Ainda sem validação real: gravação e restauração na Yampi, leitura de imag
 Os quatro commits de `ZIRTUNO/zirtuno-sync-yampi`, de `9fbf728` até `9654001`, foram incorporados com o histórico original. A branch alternativa `claude/yampi-redesign-transfer-tool-43cde9` tem a mesma árvore de arquivos da principal. O trabalho local da 0.4.0 foi preservado antes da integração e combinado com o nome Zirtuno Sync Yampi, a conferência por arquivo após reload e o preenchimento de textos criados vazios à mão. O remoto principal continua sendo `JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer`; links de instalação e página da extensão apontam para ele.
 
 As proteções da 0.4.0 continuam valendo: dependências ausentes bloqueiam quem as usa; textos dependentes precisam ser selecionados juntos, inclusive os novos criados vazios; conflitos e troca de loja interrompem o envio. Imagens ausentes não bloqueiam textos independentes, mas bloqueiam quem as referencia. Os testes de integração usam somente dados fictícios. Nenhuma loja real foi acessada.
+
+## 15/10/2026 — Envio automático (0.5.0)
+
+Pedido do proprietário: a transferência precisa ser simples e quase toda automática, sem o usuário criar arquivos, pastas ou imagens à mão. Na 0.4.0, o envio real de um redesign mostrava 18 textos para criar à mão, imagens para enviar à mão e 15 arquivos bloqueados por dependência.
+
+O módulo público do editor da Yampi foi lido, como dado e sem executá-lo, para conhecer os controles reais. **Adicionar arquivo**, em cada pasta, cria SCSS, Vue, Twig ou JS numa pasta existente, com nome só de letras, números, `_` e `-`; um `.vue` nasce com o componente padrão da Yampi. Na pasta `assets/images`, o mesmo botão abre o envio de imagens, que salva sempre em `assets/images/<nome>`, em minúsculas. Não existe criação de pastas nem substituição de imagem. Tudo vai para o rascunho (`preview=true`).
+
+Decisões:
+
+- A extensão cria textos e envia imagens pelos mesmos controles que uma pessoa usaria. Ela nunca chama a API da Yampi diretamente, e a Yampi continua validando nomes, tipos e duplicatas.
+- Imagens novas fora de `assets/images` ganham um caminho lá. Referências literais são reescritas de forma determinística no que vai para a loja, e o projeto local não muda. Caminho montado em tempo de execução bloqueia o arquivo, com o motivo.
+- Conflito pode ser resolvido arquivo a arquivo com **Usar a versão do projeto**, depois de ver as versões; a da loja fica no backup.
+- `components.twig` nunca é enviado: a Yampi o regenera ao criar um componente, e enviá-lo concorreria com isso.
+- A confirmação deixa de pedir o nome digitado. A identidade da loja continua conferida pela extensão em cada etapa, e o envio pede um clique de confirmação com o nome à vista.
+- O editor fictício passa a reproduzir a marcação real (árvore com `.add-item`, `DsModal`, `DsSelect`, `DsInput`, envio de imagens) para que os testes exercitem o mesmo caminho.
+
+Ainda sem validação real: os controles de criação e envio nunca foram acionados numa loja real, a URL gerada por `assets_url` em `assets/images` não foi conferida, e a leitura das imagens enviadas depende de o editor mostrá-las por data URL, como o módulo indica.
+
+## 16/10/2026 — Primeiro envio real e correção 0.5.1
+
+O proprietário iniciou o envio de um redesign numa loja real com a 0.5.0. A loja tinha mudado depois da exportação: três textos alterados no editor e um quarto que o projeto não tocava. As mudanças da loja foram levadas ao projeto do cliente antes do envio; os três conflitos passaram a mostrar a versão do projeto já com elas.
+
+O que funcionou na loja real:
+
+- **Adicionar arquivo** criou os 18 textos novos (Twig, Vue e SCSS) em pastas existentes. Cada um foi relido depois de recarregar, com o conteúdo inicial da Yampi (vazio ou o componente padrão).
+- O envio de imagens gravou a primeira imagem em `assets/images`. O editor a mostra como `data:image/jpeg;base64,…`, com os mesmos bytes do arquivo do projeto.
+- O backup foi baixado antes da primeira gravação, e o registro do envio parcial ficou no histórico com `pending` e `error`.
+
+O que falhou: a conferência da imagem. `readImage` passava o endereço `data:` por `fetch()`, e a política de segurança (CSP) da página do editor bloqueia essa chamada. O envio parou com **Failed to fetch**, como previsto pela regra de parar no primeiro erro, antes de gravar qualquer texto alterado.
+
+Correção na 0.5.1: endereços `data:` são decodificados diretamente (`dataUrlBytes`), sem rede. Endereços `https:` continuam baixados como antes. O editor fictício ganhou `connect-src 'self'`; sem a correção, o teste de ponta a ponta falha com a mesma mensagem da loja real.
+
+Retomada: uma nova comparação reconhece a imagem já enviada como igual e os 18 textos criados como arquivos a preencher.
+
+Pendente para uma próxima versão: quando um texto depende de um arquivo que só a loja mudou, o painel o mostra como bloqueado, mas não explica que esse arquivo mudou na loja nem como trazê-lo para o projeto.
+
+## 16/10/2026 — Operações em segundo plano e painel por etapas (0.6.0)
+
+Pedido do proprietário depois do primeiro envio real: progresso claro de cada operação, mais velocidade e confiabilidade, continuar com o painel fechado ou em outra aba sem recomeçar, mais automação e uma identidade visual própria, sem aparência genérica.
+
+O que o envio real mostrou: o painel lateral pertence à aba e é destruído quando o usuário troca de aba, levando a operação junto; o editor era recarregado duas vezes por arquivo; e o painel não dizia quanto faltava.
+
+Decisões:
+
+- Baixar, comparar e enviar rodam num documento offscreen da extensão. O worker mantém o bloqueio da aba e guarda o estado em `storage.session`; o painel só mostra esse estado, e reabrir o painel não reinicia nada. O documento só fala com o worker, que confere a operação, a aba e o endereço do editor em cada comando.
+- Menos recargas com a mesma conferência: nenhuma recarga antes de salvar quando o editor acabou de mostrar a versão do servidor; criações e imagens conferidas em grupo depois de uma recarga; cada texto continua salvo, recarregado e relido antes do próximo.
+- Um envio interrompido continua do item em que parou. O registro ganhou `issued` (feito, ainda não conferido), `resumedAt` e `scope`, e o plano confirmado fica guardado com o registro.
+- A comparação lê na loja só o que o projeto mudou e os textos que esses arquivos usam. O resto é listado e tratado como igual à exportação, porque nunca é enviado.
+- Projeto, comparação e escolhas ficam guardados por loja. A referência avança depois de cada envio, para que o que foi enviado não volte como conflito.
+- Painel: a primeira proposta visual (vidro em todo o painel, gradientes e brilhos) foi recusada por parecer genérica; a segunda, por excesso de texto e falta de hierarquia. A versão final mostra um passo por tela, com título de estado, uma ação principal na barra de baixo, vidro só nas barras e um único destaque de cor ([INTERFACE.md](INTERFACE.md)).
+
+Encontrado na revisão final, antes de qualquer uso real, e corrigido com testes:
+
+- Um backup que falhava também deixava o registro como `stopped`, e **Continuar de onde parou** pularia o backup. Agora a decisão de continuar ou recomeçar vem do que o registro mostra feito: sem nenhuma alteração, o envio recomeça com nova conferência e novo backup.
+- A comparação parcial não lia um texto incluído que só a loja mudou, e o arquivo que o usa deixava de ser bloqueado como na comparação completa. Agora os textos usados pelos arquivos alterados também são lidos.
+
+Ainda sem validação real: tudo o que a 0.6.0 acrescentou. Continua pendente o item de 16/10: explicar no painel que a dependência bloqueada mudou na loja e como trazê-la para o projeto.
+
+## 17/10/2026 — Bloqueio por arquivo que mudou só na loja
+
+Resolve o pendente de 16/10. Um arquivo alterado no projeto que usa outro alterado só na loja continua bloqueado: enviá-lo sozinho combinaria a versão nova com uma versão da loja que o projeto nunca testou. O que faltava era explicar.
+
+- O painel diz, numa linha, qual arquivo usado mudou e onde: só na loja ("mudou na loja depois da sua cópia") ou nos dois ("mudou na loja e no projeto"). **Ver a mudança** abre a comparação Original → Loja; num conflito, **Comparar e escolher**.
+- Na comparação de um arquivo que mudou só na loja, **Copiar a versão da loja** põe o texto na área de transferência e diz onde colar no projeto. Escrever direto na pasta do projeto seria a primeira gravação da extensão fora da loja e exigiria permissão de escrita na pasta; ficou para uma decisão do proprietário.
+- **Comparar de novo** relê a pasta lembrada antes de comparar, para que o arquivo colado conte. Sem acesso à pasta, compara a leitura anterior e avisa.
+- A demonstração fictícia passou a alterar também `templates/home.twig`, que usa `components/Example.vue`: alterar esse componente na loja fictícia mostra o caso.
+
+Conferido no Chromium com a demonstração: a linha, a comparação aberta em Original → Loja, o botão de cópia e o texto copiado. A releitura da pasta lembrada depende do seletor de pastas do Chrome e não roda nos testes automáticos.
+
+## 17/10/2026 — Versão da loja gravada na pasta do projeto
+
+Decisão do proprietário: além de copiar, o painel pode gravar a versão da loja direto no arquivo do projeto, pedindo ao Chrome a permissão de escrita na pasta, e comparar de novo. A cópia continua como alternativa.
+
+Proteções: só por clique, num arquivo que mudou só na loja; só troca um arquivo de `tema/` que já existe e que continua como na comparação; nada é criado; quebras de linha e marca de ordem de bytes do arquivo ficam como estavam. A localização do projeto dentro da pasta escolhida passou a ser a mesma na leitura e na escrita.
+
+A demonstração passou a guardar em memória a pasta escolhida, como a extensão faz no IndexedDB; antes, ela a esquecia a cada comparação.

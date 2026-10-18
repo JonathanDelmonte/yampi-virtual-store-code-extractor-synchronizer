@@ -3,97 +3,169 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Zirtuno Sync Yampi</title>
   <link rel="stylesheet" href="panel.css">
 </head>
-<body>
-  <header class="app-header">
-    <div class="brand"><h1><img class="brand-icon" src="icons/icon32.png" alt="" width="24" height="24">Zirtuno Sync Yampi</h1><span class="version">0.4.0</span></div>
-    <a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer" aria-label="Desenvolvido por Zirtuno — abrir Instagram"><span>Desenvolvido por</span><img src="brand/zirtuno-logo.png" alt="" width="18" height="18"><span class="maker-name">Zirtuno</span></a>
-    <div class="connection"><span id="store">Conectando ao editor…</span><span id="connection-state">Aguardando conexão</span></div>
+<body data-view="connecting">
+  <svg class="defs" aria-hidden="true" focusable="false">
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="m3.5 8.4 2.9 2.9 6.1-6.6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 16 16"><path d="m4.5 4.5 7 7m0-7-7 7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></symbol>
+    <symbol id="i-next" viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></symbol>
+    <symbol id="i-more" viewBox="0 0 16 16"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"/></symbol>
+  </svg>
+  <header id="topbar" class="bar top">
+    <button id="back" class="bar-button" aria-label="Voltar ao início" hidden><svg class="glyph"><use href="#i-back"/></svg></button>
+    <span class="light" aria-hidden="true"></span>
+    <span id="store" class="store">Conectando…</span>
+    <span id="connection-state" class="sr-only">Aguardando conexão</span>
+    <button id="menu" class="bar-button" aria-label="Histórico, backups e opções" aria-haspopup="dialog"><svg class="glyph wide"><use href="#i-more"/></svg></button>
   </header>
-  <main class="app-main">
-    <div id="demo-notice" class="notice" hidden>Editor fictício para testes. <button id="demo-local">Carregar alterações fictícias</button></div>
-    <section class="activity" aria-live="polite" aria-atomic="true">
-      <strong id="status">Conectando…</strong>
-      <progress id="progress" aria-label="Progresso da operação" max="1" value="0" hidden></progress>
+  <main class="page">
+    <p id="demo-notice" class="demo" hidden>Editor fictício. <button id="demo-local" class="link">Carregar alterações fictícias</button></p>
+    <header class="view-head">
+      <h1 id="status" tabindex="-1">Conectando ao editor…</h1>
       <p id="detail"></p>
-      <button id="cancel" hidden>Interromper após o arquivo atual</button>
-      <button id="retry" hidden>Tentar conectar novamente</button>
+    </header>
+    <div id="notice" class="notice" role="alert" hidden></div>
+
+    <section id="view-home" class="view" aria-label="Início" hidden>
+      <div id="resume-card" class="callout" hidden>
+        <strong>Um envio ficou pela metade</strong>
+        <p id="resume-text"></p>
+      </div>
+      <button id="mode-import" class="tile primary-tile"><span class="tile-body"><span class="tile-title">Enviar alterações</span><span id="send-tile-text" class="tile-text">Do seu projeto para a loja</span></span><svg class="glyph"><use href="#i-next"/></svg></button>
+      <button id="mode-export" class="tile"><span class="tile-body"><span class="tile-title">Baixar tema</span><span class="tile-text">Uma cópia do código em ZIP</span></span><svg class="glyph"><use href="#i-next"/></svg></button>
+      <p id="last-send" class="aside" hidden></p>
     </section>
-    <nav class="modes" aria-label="Operação">
-      <button id="mode-export" aria-pressed="true" aria-controls="export-section">Baixar arquivos</button>
-      <button id="mode-import" aria-pressed="false" aria-controls="import-section">Enviar alterações</button>
-    </nav>
-    <section id="export-section" class="workspace" aria-labelledby="export-title">
-      <h2 id="export-title">Baixar o código da loja.</h2>
-      <p>Baixe uma cópia em ZIP, extraia a pasta e abra no VS Code. Confira o nome da loja acima antes de confirmar.</p>
-      <p id="copy-safety">Esta operação apenas lê os arquivos e baixa uma cópia em ZIP. Ela abre os arquivos para leitura, sem editar, salvar, excluir ou publicar conteúdo na Yampi.</p>
-      <div class="capture-options">
-        <label class="check-label"><input type="checkbox" id="include-preview" checked><span>Incluir contexto visual da vitrine publicada</span></label>
-        <details class="capture-help"><summary>O que está incluído na prévia?</summary><p>Uma página de cada tipo da vitrine, com configurações públicas, fontes, ícones e imagens exibidas, além das leituras públicas de catálogo usadas pelas seções visíveis. Tudo é lido sem cookies; segredos, rastreamento e dados pessoais são removidos. O Chrome solicita leitura somente das origens necessárias. Dados publicados podem diferir do rascunho. Nenhum serviço de carrinho, checkout ou gravação é executado. Sem essa captura, a prévia usa dados demonstrativos.</p></details>
+
+    <section id="export-section" class="view" aria-label="Baixar tema" hidden>
+      <label class="option"><span class="option-text"><strong>Incluir a vitrine publicada</strong><span>Para a prévia local ficar parecida com a loja.</span></span><span class="toggle"><input type="checkbox" id="include-preview" checked><span aria-hidden="true"></span></span></label>
+      <p id="copy-safety" class="safe">Só leitura: nada muda na loja.</p>
+      <p id="baseline-info" class="aside" hidden></p>
+      <details class="help"><summary>Como editar depois</summary><p>Extraia o ZIP e abra a pasta no VS Code. Com Node 24, rode <code>npm ci</code> e <code>npm run dev</code> e edite os arquivos de <code>tema/</code>. Mantenha a pasta <code>.yampi-sync/</code>: é com ela que a extensão compara e envia.</p><p>Com a vitrine, a prévia usa as páginas, fontes e imagens públicas da loja, lidas sem cookies e sem dados pessoais. Sem ela, usa dados de exemplo.</p></details>
+    </section>
+
+    <section id="import-section" class="view" aria-label="Escolher o projeto" hidden>
+      <div id="dropzone" class="dropzone"><p>Solte a pasta aqui</p><span>ou use o botão abaixo</span></div>
+      <div id="project-card" class="project" hidden>
+        <p class="project-name"><strong id="project-name"></strong></p>
+        <p id="local-info" class="aside">Nenhum projeto escolhido.</p>
+        <p id="reference-info" class="aside"></p>
       </div>
-      <button id="export" class="primary" aria-describedby="copy-safety" disabled>Confirmar e baixar ZIP</button>
-      <small id="baseline-info">Nenhuma exportação concluída.</small>
-      <p id="preview-info" class="note">Sem contexto visual capturado: a prévia será demonstrativa.</p>
-      <div id="preview-pending" hidden>
-        <p>Recursos em: <span id="preview-origins"></span></p>
-        <button id="preview-allow">Autorizar recursos e finalizar ZIP</button>
-        <button id="preview-partial">Baixar com prévia parcial</button>
-        <button id="preview-discard">Descartar preparação</button>
+      <details class="help"><summary>Usar um ZIP de retorno</summary><label class="file-label">ZIP de retorno<input id="baseline" type="file" accept=".zip"></label></details>
+      <label class="file-fallback">Pasta do projeto<input id="folder" type="file" webkitdirectory multiple></label>
+    </section>
+
+    <section id="review" class="view" aria-label="Revisão" hidden>
+      <div class="counts">
+        <div class="count"><strong id="count-update">0</strong><span id="count-update-label">alterados</span></div>
+        <div class="count"><strong id="count-create">0</strong><span id="count-create-label">novos</span></div>
+        <div class="count"><strong id="count-upload">0</strong><span id="count-upload-label">imagens</span></div>
       </div>
-      <details class="local-help">
-        <summary>Como editar no computador</summary>
-        <p>Extraia o ZIP e abra a pasta no VS Code, ou abra o arquivo .code-workspace. O README.md explica a estrutura; preserve .yampi-sync/ para comparar e devolver as alterações. Com Node 24 instalado, execute <code>npm ci</code> e <code>npm run dev</code>. Edite os arquivos de <code>tema/</code>.</p>
-        <p>Depois, volte a <strong>Enviar alterações</strong> e selecione a pasta extraída. Se preferir ZIP, execute <code>npm run pack</code> e selecione o ZIP indicado no terminal.</p>
-        <p>A prévia local informa se usa contexto capturado ou demonstrativo; recursos ausentes e limitações estão em preview/report.json. Confira o resultado também na Yampi.</p>
+      <div id="attention" class="attention" hidden><h2 id="attention-title">Precisa da sua decisão</h2><ul id="attention-list"></ul></div>
+      <details id="all-files" class="help files">
+        <summary id="files-summary">Ver os arquivos</summary>
+        <div class="file-tools">
+          <input id="search" class="search" type="search" placeholder="Buscar" aria-label="Buscar arquivo">
+          <select id="filter" aria-label="Mostrar"><option value="changes">Que mudam</option><option value="all">Todos</option><option value="update">Prontos</option><option value="conflict">Conflitos</option><option value="blocked">Bloqueados</option><option value="whitespace">Só espaços</option></select>
+        </div>
+        <div class="select-tools"><button id="select-all" class="link">Marcar todos</button><button id="select-none" class="link">Desmarcar todos</button><button id="discard-whitespace" class="link" hidden>Ignorar mudanças só de espaço</button></div>
+        <ul id="rows" class="file-list" aria-label="Arquivos comparados"></ul>
+        <p id="rows-more" class="aside" hidden></p>
       </details>
-      <button id="go-import" class="text-button">Já editei o projeto. Enviar alterações</button>
+      <details id="more-details" class="help">
+        <summary>Detalhes da comparação</summary>
+        <p id="summary" class="aside"></p>
+        <p id="assumed-note" class="aside" hidden></p>
+        <div id="moves" hidden><p id="moves-title" class="aside"></p><ul id="moves-list" class="paths"></ul></div>
+        <p id="reference-detail" class="aside"></p>
+      </details>
+      <p class="links"><button id="compare" class="link" disabled>Comparar de novo</button><button id="pick-other" class="link">Trocar a pasta</button></p>
     </section>
-    <section id="import-section" class="workspace" aria-labelledby="import-title" hidden>
-      <h2 id="import-title">Enviar suas alterações.</h2>
-      <p>Escolha o projeto editado. Você verá a comparação com a loja antes de selecionar os arquivos e confirmar o envio.</p>
-      <label class="file-label">Pasta do projeto<input id="folder" type="file" webkitdirectory multiple></label>
-      <span class="or">ou selecione um ZIP</span>
-      <label class="file-label">ZIP de retorno<input id="baseline" type="file" accept=".zip"></label>
-      <small id="local-info">Nenhum projeto editado selecionado.</small>
-      <button id="compare" disabled>Comparar novamente com a loja</button>
-      <details class="local-help"><summary>Qual pasta devo escolher?</summary><p>Selecione a pasta inteira exportada, com <code>tema/</code> e <code>.yampi-sync/</code>. Também é possível selecionar apenas <code>tema/</code> quando a cópia original desta loja já estiver guardada.</p></details>
-    </section>
-    <section id="review" aria-labelledby="review-title" hidden>
-      <div class="review-heading">
-        <h2 id="review-title">Alterações encontradas</h2><p id="summary"></p>
-        <label>Mostrar <select id="filter"><option value="changes">Alterações e conflitos</option><option value="all">Todos os arquivos</option><option value="update">Prontos para envio</option><option value="conflict">Conflitos</option><option value="blocked">Bloqueados por dependência</option><option value="whitespace">Só espaço em branco</option></select></label>
+
+    <section id="view-job" class="view" aria-label="Operação em andamento" hidden>
+      <div class="hero"><span id="percent" class="hero-figure">0%</span><div class="meter"><div id="progress" class="meter-fill" role="progressbar" aria-label="Progresso" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div></div>
+      <p id="current" class="current" hidden></p>
+      <p id="job-meta" class="aside" hidden></p>
+      <div id="preview-pending" class="decision" hidden>
+        <p>Imagens e fontes estão em <span id="preview-origins"></span>.</p>
+        <button id="preview-allow" class="button primary">Autorizar e terminar o ZIP</button>
+        <button id="preview-partial" class="button">Baixar sem esses recursos</button>
+        <button id="preview-discard" class="link">Cancelar o download</button>
       </div>
-      <ul id="plan-warnings" class="plan-warnings" hidden></ul>
-      <button id="discard-whitespace" class="text-button" hidden>Descartar alterações só de espaço em branco</button>
-      <div class="table-wrap" tabindex="0" role="region" aria-label="Comparação de arquivos; role horizontalmente para ver todas as colunas"><table><thead><tr><th scope="col">Enviar</th><th scope="col">Arquivo</th><th scope="col">Resultado</th><th scope="col">Versões</th></tr></thead><tbody id="rows"></tbody></table></div>
-      <p class="table-hint">Role para os lados para ver todas as colunas.</p>
-      <p class="note">Só textos existentes e compatíveis são enviados. Arquivo novo: crie-o vazio no editor da Yampi, na mesma pasta, e compare de novo; a extensão preenche o conteúdo. Imagens são enviadas à mão pela Yampi. Arquivos que dependem de caminhos ausentes ficam bloqueados; textos alterados que usam uns aos outros são enviados juntos. Nenhum arquivo ausente será excluído.</p>
+      <p id="background-note" class="safe" hidden>Pode fechar o painel. A operação continua, e o ícone mostra o progresso.</p>
+      <details id="phases-box" class="help"><summary>Etapas</summary><ol id="phases" class="phases"></ol></details>
+      <details id="events" class="help" hidden><summary>Registro</summary><ol id="event-list" class="log"></ol></details>
     </section>
-    <section id="diff" class="workspace" aria-labelledby="diff-title" hidden>
-      <div class="review-heading"><h3 id="diff-title"></h3><button id="close-diff">Fechar comparação</button></div>
-      <div class="diff-grid"><div><h4>Original exportado</h4><pre id="diff-base"></pre></div><div><h4>Arquivo local</h4><pre id="diff-local"></pre></div><div><h4>Estado atual da loja</h4><pre id="diff-remote"></pre></div></div>
+
+    <section id="done" class="view" aria-label="Resultado" hidden>
+      <div id="done-counts" class="counts" hidden>
+        <div class="count"><strong id="done-saved">0</strong><span id="done-saved-label">salvos</span></div>
+        <div class="count"><strong id="done-created">0</strong><span id="done-created-label">criados</span></div>
+        <div class="count"><strong id="done-images">0</strong><span id="done-images-label">imagens</span></div>
+      </div>
+      <p id="done-summary" class="sr-only"></p>
+      <p id="preview-info" class="aside" hidden></p>
+      <details id="preview-more" class="help" hidden><summary>Sobre a prévia</summary><p id="preview-details" class="aside"></p></details>
+      <ul id="done-warnings" class="attention-list" hidden></ul>
+      <p class="links"><button id="undo" class="link" hidden>Desfazer este envio</button></p>
     </section>
-    <section id="send-section" class="workspace" aria-labelledby="send-title" hidden>
-      <h2 id="send-title">Confirme o envio.</h2>
-      <p>Destino: <strong id="target-store"></strong>. Antes de salvar, a extensão guarda e baixa um backup. Depois, recarrega o editor e confere o conteúdo.</p>
-      <label class="confirm-label">Para evitar enviar para outra loja, digite <strong id="confirm-name"></strong><input id="confirm-store" type="text" autocomplete="off" placeholder="Nome da loja"></label>
-      <button id="apply" class="primary" disabled>Enviar alterações para o editor</button>
-      <small>Confira em Ver prévia na Yampi. Publicar loja continua sendo uma ação sua no painel.</small>
-    </section>
-    <details class="recovery">
-      <summary>Backups e recuperação</summary>
-      <label>Histórico desta loja <select id="history" aria-label="Envio para recuperar"></select></label>
-      <p id="journal-info">Nenhum envio nesta instalação.</p>
-      <div class="recovery-actions"><button id="download-backup" disabled>Baixar backup do envio</button><button id="download-journal" disabled>Baixar registro do envio</button><button id="restore" disabled>Comparar para restaurar</button><button id="clear">Apagar dados locais da extensão</button></div>
-    </details>
-    <details id="fixture" hidden><summary>Editor fictício usado nos testes</summary><iframe id="fixture-frame" title="Editor fictício"></iframe></details>
-    <footer>
-      <p>Ferramenta independente. Sem telemetria.</p>
-      <details><summary>Compatibilidade e limites</summary><p>Código e contexto visual ficam separados; recursos visuais não são enviados à loja. Envia textos existentes. Amostra visual datada; catálogo completo, sincronização de configurações e upload de imagens não são suportados. Gravações reais e fidelidade visual ainda não validadas.</p></details>
-    </footer>
+
+    <details id="fixture" class="help" hidden><summary>Editor fictício usado nos testes</summary><iframe id="fixture-frame" title="Editor fictício"></iframe></details>
   </main>
+  <div id="dock" class="bar dock" hidden>
+    <div class="dock-actions">
+      <button id="retry" class="button primary" hidden>Tentar conectar de novo</button>
+      <button id="export" class="button primary" aria-describedby="copy-safety" hidden disabled>Baixar ZIP</button>
+      <button id="reload-folder" class="button primary" hidden><span id="reload-folder-label">Reler a pasta e comparar</span></button>
+      <button id="pick-folder" class="button primary" hidden>Escolher a pasta</button>
+      <button id="apply" class="button primary" hidden disabled><span id="apply-label">Enviar</span></button>
+      <button id="resume" class="button primary" hidden>Continuar de onde parou</button>
+      <button id="open-preview" class="button primary" hidden>Abrir a prévia</button>
+      <button id="show-file" class="button primary" hidden>Mostrar o ZIP</button>
+      <button id="cancel" class="button" hidden>Interromper</button>
+      <button id="finish" class="button" hidden>Concluir</button>
+    </div>
+  </div>
+  <div id="sheet-scrim" class="scrim" hidden></div>
+  <div id="confirm-panel" class="sheet" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
+    <h2 id="confirm-title" class="sheet-title">Enviar para <span id="target-store"></span>?</h2>
+    <p id="confirm-counts" class="sheet-lede"></p>
+    <ul class="points">
+      <li>Um backup do que vai mudar é baixado antes.</li>
+      <li>Cada item é conferido na Yampi. No primeiro erro, o envio para.</li>
+      <li>Nada é publicado. Você publica na Yampi.</li>
+    </ul>
+    <div class="sheet-actions"><button id="confirm-send" class="button primary">Enviar agora</button><button id="cancel-send" class="button">Voltar</button></div>
+  </div>
+  <div id="diff" class="sheet tall" role="dialog" aria-modal="true" aria-labelledby="diff-title" hidden>
+    <div class="sheet-head"><h2 id="diff-title" class="mono-title"></h2><button id="close-diff" class="bar-button" aria-label="Fechar"><svg class="glyph"><use href="#i-x"/></svg></button></div>
+    <div class="switch" role="tablist" aria-label="Versões comparadas">
+      <span class="switch-thumb" aria-hidden="true"></span>
+      <button id="diff-tab-remote" role="tab" aria-selected="true">Loja → projeto</button>
+      <button id="diff-tab-base" role="tab" aria-selected="false">Original → projeto</button>
+      <button id="diff-tab-store" role="tab" aria-selected="false">Original → loja</button>
+    </div>
+    <p id="diff-stats" class="aside"></p>
+    <div id="diff-body" class="diff-body" tabindex="0" role="region" aria-label="Linhas alteradas"></div>
+    <div class="sheet-actions"><button id="diff-write-store" class="button primary" hidden>Usar no projeto</button><button id="diff-copy-store" class="button primary" hidden>Copiar a versão da loja</button><button id="diff-use-project" class="button primary" hidden>Usar a versão do projeto</button><button id="diff-keep-store" class="button" hidden>Manter a versão da loja</button></div>
+  </div>
+  <div id="menu-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="menu-title" hidden>
+    <div class="sheet-head"><h2 id="menu-title" class="sheet-title">Histórico e backups</h2><button id="close-menu" class="bar-button" aria-label="Fechar"><svg class="glyph"><use href="#i-x"/></svg></button></div>
+    <label class="field">Envio<select id="history" aria-label="Envio para recuperar"></select></label>
+    <p id="journal-info" class="aside">Nenhum envio nesta instalação.</p>
+    <div class="menu-actions">
+      <button id="restore" class="button" disabled>Restaurar este envio</button>
+      <button id="download-backup" class="button" disabled>Baixar o backup</button>
+      <button id="download-journal" class="button" disabled>Baixar o registro</button>
+    </div>
+    <p class="menu-footer"><button id="clear" class="link danger">Apagar os dados locais</button></p>
+    <p class="about"><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer"><img src="brand/zirtuno-logo.png" alt="" width="16" height="16">Zirtuno Sync <span class="version">0.6.0</span></a><span>Sem telemetria. Nunca exclui, renomeia nem publica.</span></p>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <span id="announcer" class="sr-only" aria-live="polite"></span>
   <script type="module" src="panel.js"></script>
 </body>
 </html>

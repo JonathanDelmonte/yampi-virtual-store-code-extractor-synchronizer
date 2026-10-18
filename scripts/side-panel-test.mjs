@@ -2,7 +2,7 @@
 // Used exclusively with the disposable browser profile and fictitious editor in e2e.mjs.
 import {copyFile, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-export async function nativePanelDriver(browser, downloadDirectory) {
+export async function nativePanelDriver(browser, downloadDirectory, worker) {
   const cdp = await browser.browser().newBrowserCDPSession();
   await cdp.send('Browser.setDownloadBehavior', {behavior: 'allowAndName', downloadPath: downloadDirectory, eventsEnabled: true});
   const downloads = [], waiters = [], completed = new Map();
@@ -18,6 +18,18 @@ export async function nativePanelDriver(browser, downloadDirectory) {
     const timer = setTimeout(() => reject(new Error('Download não chegou ao driver do teste.')), 60000);
     waiters.push(value => {clearTimeout(timer); resolve(value);});
   });
+  // Downloads started by the extension's service worker (exports and backups run in the
+  // background) have no frame, so DevTools does not announce them; the downloads API does.
+  const seen = new Set();
+  async function waitExtensionDownload() {
+    const since = Date.now() - 1000;
+    for (const deadline = Date.now() + 90000; Date.now() < deadline;) {
+      const item = await worker.evaluate(async ({since, seen}) => (await chrome.downloads.search({orderBy: ['-startTime'], limit: 20})).find(entry => entry.state === 'complete' && new Date(entry.startTime).getTime() >= since && !seen.includes(entry.id)), {since, seen: [...seen]});
+      if (item) {seen.add(item.id); return {filename: item.filename, async saveAs(destination) {await copyFile(item.filename, destination);}};}
+      await new Promise(r => setTimeout(r, 150));
+    }
+    throw new Error('Download da extensão não chegou ao driver do teste.');
+  }
   async function attach(tabId, page = 'panel') {
     let target;
     const deadline = Date.now() + 30000;
@@ -44,8 +56,8 @@ export async function nativePanelDriver(browser, downloadDirectory) {
       if (reply.exceptionDetails) throw new Error(reply.exceptionDetails.exception?.description || reply.exceptionDetails.text);
       return reply.result.value;
     };
-    const waitForFunction = async fn => {
-      const deadline = Date.now() + 45000;
+    const waitForFunction = async (fn, {timeout = 45000} = {}) => {
+      const deadline = Date.now() + timeout;
       while (Date.now() < deadline) {
         if (await evaluate(fn).catch(() => false) && await evaluate(() => !document.querySelector('#cancel') || document.querySelector('#cancel').hidden).catch(() => false)) return;
         await new Promise(r => setTimeout(r, 100));
@@ -66,5 +78,5 @@ export async function nativePanelDriver(browser, downloadDirectory) {
       };}
     };
   }
-  return {attach, waitDownload, cdp};
+  return {attach, waitDownload, waitExtensionDownload, cdp};
 }

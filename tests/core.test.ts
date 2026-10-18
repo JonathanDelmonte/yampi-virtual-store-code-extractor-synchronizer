@@ -1,9 +1,10 @@
 import {describe, test, expect} from 'vitest';
 import {zipSync, strToU8} from 'fflate';
-import {makePlan, missingNewTexts, selectionIssues} from '../src/core/planner';
+import {makePlan, missingNewTexts, selectionIssues, imageMoves} from '../src/core/planner';
 import {capture, applyPlan} from '../src/core/workflow';
 import {encodeSnapshot, decodeProject} from '../src/core/archive';
-import {safeFiles, validatePath, validatePaths, sameIgnoringWhitespace, lineEnding, type Context, type Snapshot, type Files, type Adapter, type Journal, type Plan} from '../src/core/model';
+import {safeFiles, validatePath, validatePaths, sameIgnoringWhitespace, lineEnding, yampiImageName, YAMPI_VUE_TEMPLATE, dataUrlBytes, validateImage, type Context, type Snapshot, type Files, type Adapter, type Journal, type Plan} from '../src/core/model';
+const png = (last: number) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, last]);
 const context: Context = {storeName: 'Loja fictícia', editorOrigin: 'https://app.yampi.com.br', previewOrigin: 'https://loja.invalid'};
 const snapshot = (files: Files): Snapshot => ({context, capturedAt: '2026-01-01T00:00:00Z', files});
 const file = 'templates/home.twig';
@@ -31,12 +32,51 @@ describe('comparação entre três versões', () => {
   test('arquivo novo vazio de tipo sem suporte não é preenchido', () => {
     expect(makePlan(snapshot({}), {'assets/images/novo.md': 'texto'}, snapshot({'assets/images/novo.md': ''})).rows[0].status).toBe('unsupported');
   });
-  test('imagem nova enviada à mão é conferida pelos bytes e só textos novos ausentes bloqueiam', () => {
-    const png = (last: number) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, last]);
-    const image = 'assets/images/hero/capa.png', status = (remote?: Uint8Array) => makePlan(snapshot({}), {}, {...snapshot({}), ...(remote ? {assets: {[image]: remote}} : {})}, {[image]: png(1)}).rows[0].status;
-    expect([status(), status(png(1)), status(png(2))]).toEqual(['new-local', 'already-applied', 'conflict']);
+  test('imagem nova é enviada pela extensão ou conferida pelos bytes; só textos novos impossíveis bloqueiam', () => {
+    const image = 'assets/images/capa.png', status = (remote?: Uint8Array) => makePlan(snapshot({}), {}, {...snapshot({}), ...(remote ? {assets: {[image]: remote}} : {})}, {[image]: png(1)}).rows[0].status;
+    expect([status(), status(png(1)), status(png(2))]).toEqual(['upload', 'already-applied', 'conflict']);
     const plan = makePlan(snapshot({}), {[file]: 'novo'}, snapshot({}), {[image]: png(1)});
     expect(missingNewTexts(plan)).toEqual([file]);
+  });
+  test('texto novo em pasta existente é criado; nome, tipo ou pasta impossíveis ficam com o motivo', () => {
+    const plan = makePlan(snapshot({[file]: 'a'}), {[file]: 'a', 'templates/nova.twig': 'n', 'templates/Nova_2.vue': 'n', 'sections/nova/x.twig': 'n', 'templates/nome com espaço.twig': 'n', 'templates/estilo.css': 'n'}, snapshot({[file]: 'a'}));
+    const row = (path: string) => plan.rows.find(r => r.path === path)!;
+    expect([row('templates/nova.twig').status, row('templates/Nova_2.vue').status]).toEqual(['create', 'create']);
+    expect(row('sections/nova/x.twig')).toMatchObject({status: 'new-local', reason: expect.stringContaining('não permite criar pastas')});
+    expect(row('templates/nome com espaço.twig')).toMatchObject({status: 'new-local', reason: expect.stringContaining('letras, números')});
+    expect(row('templates/estilo.css').status).toBe('new-local');
+    expect(missingNewTexts(plan)).toEqual(['sections/nova/x.twig', 'templates/estilo.css', 'templates/nome com espaço.twig']);
+  });
+  test('componente Vue recém-criado pela Yampi conta como vazio e é preenchido', () => {
+    const path = 'components/Novo.vue';
+    expect(makePlan(snapshot({[file]: 'a'}), {[file]: 'a', [path]: '<template><p/></template>'}, snapshot({[file]: 'a', [path]: YAMPI_VUE_TEMPLATE})).rows.find(r => r.path === path)?.status).toBe('update');
+  });
+  test('nome de imagem igual ao do enviador da Yampi', () => {
+    expect([yampiImageName('Hero Banner 01.JPG'), yampiImageName('hero/gta-vi.png'), yampiImageName('--a__b--.webp'), yampiImageName('sem-extensao')]).toEqual(['hero-banner-01.jpg', 'gta-vi.png', 'a-b.webp', 'sem-extensao']);
+  });
+});
+describe('imagens em subpastas: a Yampi só aceita assets/images', () => {
+  const base = {[file]: '<main></main>'};
+  test('a imagem vai para assets/images e a referência literal acompanha', () => {
+    const plan = makePlan(snapshot(base), {[file]: `<img src="{{ 'images/hero/capa.png' | assets_url }}"><img src="../images/hero/capa.png">`}, snapshot(base), {'assets/images/hero/capa.png': png(1)});
+    expect(plan.rows.find(r => r.path === 'assets/images/capa.png')).toMatchObject({status: 'upload', source: 'assets/images/hero/capa.png'});
+    expect(plan.rows.find(r => r.path === file)).toMatchObject({status: 'update', rewritten: 2, dependsOn: ['assets/images/capa.png']});
+    expect(plan.rows.find(r => r.path === file)?.local).toBe(`<img src="{{ 'images/capa.png' | assets_url }}"><img src="../images/capa.png">`);
+  });
+  test('nomes repetidos em pastas diferentes não colidem; a imagem que já está na loja não se move', () => {
+    const moves = imageMoves({'assets/images/a/x.png': png(1), 'assets/images/b/x.png': png(2), 'assets/images/c/x.png': png(1), 'assets/images/Topo Novo.PNG': png(3), 'assets/images/ja.png': png(4)}, {'assets/images/ja.png': png(4)});
+    expect(Object.fromEntries(moves)).toEqual({'assets/images/a/x.png': 'assets/images/x.png', 'assets/images/b/x.png': 'assets/images/b-x.png', 'assets/images/c/x.png': 'assets/images/x.png', 'assets/images/Topo Novo.PNG': 'assets/images/topo-novo.png'});
+  });
+  test('caminho montado em tempo de execução bloqueia o arquivo, com o motivo', () => {
+    const plan = makePlan(snapshot(base), {[file]: `{{ ('images/hero/' ~ nome) | assets_url }}`}, snapshot(base), {'assets/images/hero/capa.png': png(1)});
+    expect(plan.rows.find(r => r.path === file)).toMatchObject({status: 'blocked-dependency', reason: expect.stringContaining('images/hero/')});
+  });
+});
+describe('conflitos resolvidos pelo usuário', () => {
+  test('usar a versão do projeto vira envio explícito, arquivo a arquivo', () => {
+    const plan = makePlan(snapshot({[file]: 'a'}), {[file]: 'projeto'}, snapshot({[file]: 'loja'}), {}, {overrides: [file]});
+    expect(plan.rows[0]).toMatchObject({status: 'update', override: true, remote: 'loja'});
+    expect(makePlan(snapshot({[file]: 'a'}), {[file]: 'projeto'}, snapshot({[file]: 'loja'})).rows[0].status).toBe('conflict');
   });
 });
 describe('caminhos e arquivos inseguros', () => {
@@ -62,18 +102,29 @@ describe('ZIP e integridade do original', () => {
   test('arquivo grande altamente comprimido é rejeitado antes de extrair', async () => {await expect(decodeProject(zipSync({'tema/templates/home.twig': new Uint8Array(5 * 1024 * 1024)}))).rejects.toThrow('limites');});
 });
 class FakeAdapter implements Adapter {
-  files: Files; writes: string[] = []; refreshed = false; ctx = {...context};
-  beforeWrite?: (path: string) => void; refreshHook?: () => void;
-  constructor(files: Files) {this.files = {...files};}
+  files: Files; assets: Record<string, Uint8Array>; writes: string[] = []; created: string[] = []; uploaded: string[] = []; refreshed = false; ctx = {...context};
+  beforeWrite?: (path: string) => void; refreshHook?: () => void; createHook?: (path: string) => void; uploadHook?: (path: string) => void;
+  constructor(files: Files, assets: Record<string, Uint8Array> = {}) {this.files = {...files}; this.assets = {...assets};}
   async context() {return this.ctx;}
-  async inventory() {return Object.keys(this.files);}
+  async inventory() {return [...Object.keys(this.files), ...Object.keys(this.assets)];}
   async read(path: string) {if (!(path in this.files)) throw new Error('ausente'); return this.files[path];}
+  async readAsset(path: string) {if (!(path in this.assets)) throw new Error('ausente'); return this.assets[path];}
   async write(path: string, expected: string, content: string) {
     this.beforeWrite?.(path);
     if (this.files[path] !== expected) throw new Error('conflito no último momento');
     this.files[path] = content; this.writes.push(path);
   }
   async refresh() {this.refreshed = true; this.refreshHook?.();}
+  // Like the editor: an existing folder, no duplicates, and the content Yampi gives a new file.
+  async create(path: string) {
+    if (path in this.files) throw new Error('já existe');
+    if (!Object.keys(this.files).some(p => p.startsWith(path.slice(0, path.lastIndexOf('/') + 1)))) throw new Error('pasta inexistente');
+    this.files[path] = path.endsWith('.vue') ? YAMPI_VUE_TEMPLATE : ''; this.created.push(path); this.createHook?.(path);
+  }
+  async upload(path: string, bytes: Uint8Array) {
+    if (path in this.assets || !/^assets\/images\/[^/]+$/.test(path)) throw new Error('recusado');
+    this.assets[path] = new Uint8Array(bytes); this.uploaded.push(path); this.uploadHook?.(path);
+  }
 }
 function planFor(adapter: FakeAdapter, changes: Files): Plan {return makePlan(snapshot(adapter.files), changes, snapshot(adapter.files));}
 function hooks() {
@@ -86,6 +137,7 @@ describe('cópia somente para leitura', () => {
     const adapter = new FakeAdapter(source);
     Object.defineProperty(adapter, 'write', {get: () => {throw new Error('Gravação proibida durante a cópia');}});
     Object.defineProperty(adapter, 'refresh', {get: () => {throw new Error('Reload proibido durante a cópia');}});
+    for (const name of ['create', 'upload']) Object.defineProperty(adapter, name, {get: () => {throw new Error('Criação proibida durante a cópia');}});
     const copied = await capture(adapter); expect(copied.files).toEqual(source); expect(adapter.files).toEqual(source);
   });
   test('falha de leitura não modifica arquivos nem entrega uma cópia parcial', async () => {
@@ -148,7 +200,8 @@ describe('envio com preflight, backup e conferência', () => {
   });
   test('cancelamento para antes do próximo arquivo', async () => {
     const other = 'templates/product.twig', adapter = new FakeAdapter({[file]: 'a', [other]: 'a'}), controller = new AbortController();
-    await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b', [other]: 'b'}), [file, other], {...hooks(), signal: controller.signal, progress: () => controller.abort()})).rejects.toThrow('Cancelado'); expect(adapter.writes).toEqual([file]);
+    // Stop requested right after the first file is saved and confirmed.
+    await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b', [other]: 'b'}), [file, other], {...hooks(), signal: controller.signal, progress: p => {if (p.step === 'save' && p.done === 1) controller.abort();}})).rejects.toThrow('Cancelado'); expect(adapter.writes).toEqual([file]);
   });
   test('verificação após reload detecta save que não persistiu', async () => {
     const adapter = new FakeAdapter({[file]: 'a'}); adapter.refreshHook = () => {adapter.files[file] = 'a';};
@@ -162,11 +215,12 @@ describe('envio com preflight, backup e conferência', () => {
     expect(adapter.writes).toEqual([file]); expect(adapter.files[other]).toBe('a');
     expect(h.journals.at(-1)).toMatchObject({status: 'stopped', pending: file, verified: []});
   });
-  test('texto novo ausente na loja bloqueia todo envio, antes de qualquer registro', async () => {
+  test('texto novo que a Yampi não permite criar bloqueia todo envio, antes de qualquer registro', async () => {
+    // No file in elements/ yet: Yampi cannot create the folder.
     const adapter = new FakeAdapter({[file]: 'a'}), h = hooks();
     const plan = makePlan(snapshot({[file]: 'a'}), {[file]: 'b', 'elements/novo.twig': 'novo'}, snapshot({[file]: 'a'}));
-    await expect(applyPlan(adapter, plan, [file], h)).rejects.toThrow('Crie vazios no editor da Yampi');
-    expect(adapter.writes).toEqual([]); expect(adapter.refreshed).toBe(false); expect(h.events).toEqual([]);
+    await expect(applyPlan(adapter, plan, [file], h)).rejects.toThrow('não permite criar');
+    expect(adapter.writes).toEqual([]); expect(adapter.created).toEqual([]); expect(adapter.refreshed).toBe(false); expect(h.events).toEqual([]);
   });
   test('arquivo novo criado vazio à mão é preenchido antes dos arquivos que dependem dele', async () => {
     const created = 'elements/novo.twig', adapter = new FakeAdapter({[file]: 'a', [created]: ''}), h = hooks();
@@ -223,13 +277,23 @@ describe('captura da árvore inteira', () => {
 });
 describe('retorno seguro: dependências, envio parcial e espaço em branco', () => {
   const remote = (files: Files) => snapshot(files);
-  test('arquivo modificado que inclui arquivo novo é bloqueado com o nome dos dois', async () => {
+  test('arquivo modificado que inclui arquivo novo vai junto com a criação dele', async () => {
     const base = {'templates/home.twig': '<main></main>', 'sections/home/a.twig': 'a'};
+    const local = {...base, 'templates/home.twig': '<main>{% include "sections/home/novo.twig" %}</main>', 'sections/home/novo.twig': 'novo'};
+    const plan = makePlan(snapshot(base), local, remote(base));
+    expect(plan.rows.find(r => r.path === 'templates/home.twig')).toMatchObject({status: 'update', dependsOn: ['sections/home/novo.twig']});
+    expect(plan.rows.find(r => r.path === 'sections/home/novo.twig')?.status).toBe('create');
+    await expect(applyPlan(new FakeAdapter(base), plan, ['templates/home.twig'], hooks())).rejects.toThrow('Envio parcial bloqueado');
+    const adapter = new FakeAdapter(base), result = await applyPlan(adapter, plan, ['templates/home.twig', 'sections/home/novo.twig'], hooks());
+    expect(adapter.created).toEqual(['sections/home/novo.twig']); expect(adapter.writes).toEqual(['sections/home/novo.twig', 'templates/home.twig']);
+    expect(adapter.files).toEqual(local); expect(result).toMatchObject({status: 'completed', created: ['sections/home/novo.twig']});
+  });
+  test('sem a pasta na loja, o arquivo novo bloqueia quem o inclui, com o nome dos dois', async () => {
+    const base = {'templates/home.twig': '<main></main>'};
     const plan = makePlan(snapshot(base), {...base, 'templates/home.twig': '<main>{% include "sections/home/novo.twig" %}</main>', 'sections/home/novo.twig': 'novo'}, remote(base));
-    const row = plan.rows.find(r => r.path === 'templates/home.twig')!;
-    expect(row.status).toBe('blocked-dependency'); expect(row.blockedBy).toEqual(['sections/home/novo.twig']);
+    expect(plan.rows.find(r => r.path === 'templates/home.twig')).toMatchObject({status: 'blocked-dependency', blockedBy: ['sections/home/novo.twig']});
     expect(plan.rows.find(r => r.path === 'sections/home/novo.twig')?.status).toBe('new-local');
-    await expect(applyPlan(new FakeAdapter(base), plan, ['templates/home.twig'], hooks())).rejects.toThrow('Crie vazios no editor da Yampi');
+    await expect(applyPlan(new FakeAdapter(base), plan, ['templates/home.twig'], hooks())).rejects.toThrow('não permite criar');
   });
   test('arquivos modificados que se usam vão juntos; envio parcial é recusado antes de gravar', async () => {
     const base = {'assets/styles/main.scss': '@import "colors";\n', 'assets/styles/_colors.scss': '$a: red;\n', [file]: 'x'};
@@ -261,9 +325,89 @@ describe('retorno seguro: dependências, envio parcial e espaço em branco', () 
     expect(cosmetic.rows.every(r => !r.dependsOn)).toBe(true); expect(selectionIssues(cosmetic, ['assets/styles/_colors.scss'])).toEqual([]);
     expect(lineEnding('a\nb')).toEqual({eol: 'lf', finalNewline: false}); expect(lineEnding('a\r\nb\n')).toEqual({eol: 'mixed', finalNewline: true}); expect(lineEnding('')).toEqual({eol: 'none', finalNewline: false});
   });
-  test('componente novo fora de components.twig gera aviso no retorno', () => {
+  test('components.twig nunca é enviado, e quem o inclui não fica bloqueado por isso', () => {
+    const list = 'elements/scripts/components.twig', layout = 'elements/head.twig';
+    const base = {[list]: "<script src='{{ '/components/A.js' | components_url }}'></script>", 'components/A.vue': '<p/>', [layout]: `{% include '${list}' %}`};
+    const plan = makePlan(snapshot(base), {...base, [list]: base[list] + "<script src='{{ '/components/B.js' | components_url }}'></script>", [layout]: `<meta>{% include '${list}' %}`}, snapshot(base));
+    expect(plan.rows.find(r => r.path === list)).toMatchObject({status: 'unsupported', reason: expect.stringContaining('gera este arquivo')});
+    expect(plan.rows.find(r => r.path === layout)).toMatchObject({status: 'update'});
+    expect(plan.rows.find(r => r.path === layout)?.dependsOn).toBeUndefined();
+  });
+  test('componente novo criado pela extensão não gera aviso: a Yampi o lista ao criar', () => {
     const base = {'elements/scripts/components.twig': "<script src='{{ '/components/A.js' | components_url }}'></script>", 'components/A.vue': '<template><p/></template>'};
     const plan = makePlan(snapshot(base), {...base, 'components/Novo.vue': '<template><p/></template>'}, snapshot(base));
-    expect(plan.warnings?.some(w => w.path === 'components/Novo.vue' && w.message.includes('components.twig'))).toBe(true);
+    expect(plan.rows.find(r => r.path === 'components/Novo.vue')?.status).toBe('create');
+    expect(plan.warnings?.some(w => w.message.includes('components.twig'))).toBe(false);
+  });
+});
+describe('envio automático: criar, enviar imagens e preencher', () => {
+  const list = "<script src='{{ '/components/A.js' | components_url }}'></script>";
+  const base = {'elements/scripts/components.twig': list, 'components/A.vue': '<template><p/></template>', [file]: '<main></main>', 'assets/images/readme.md': 'x'};
+  const local = {...base, [file]: `<main><novo-card></novo-card><img src="{{ 'images/hero/capa.png' | assets_url }}"></main>`, 'components/NovoCard.vue': '<template><img src="/x"></template>'};
+  const images = {'assets/images/hero/capa.png': png(7)};
+  test('tudo em uma operação, com cada passo conferido e o componente novo conferido em components.twig', async () => {
+    const adapter = new FakeAdapter(base), h = hooks(), plan = makePlan(snapshot(base), local, snapshot(base), images);
+    const sending = plan.rows.filter(r => ['update', 'create', 'upload'].includes(r.status)).map(r => r.path);
+    expect(sending.sort()).toEqual(['assets/images/capa.png', 'components/NovoCard.vue', file]);
+    // Yampi lists the new component itself.
+    adapter.createHook = path => {adapter.files['elements/scripts/components.twig'] += `<script src='{{ '/${path.replace(/\.vue$/, '.js')}' | components_url }}'></script>`;};
+    const result = await applyPlan(adapter, plan, sending, h);
+    expect(adapter.created).toEqual(['components/NovoCard.vue']); expect(adapter.uploaded).toEqual(['assets/images/capa.png']);
+    expect(adapter.writes).toEqual(['components/NovoCard.vue', file]);
+    expect(adapter.files['components/NovoCard.vue']).toBe(local['components/NovoCard.vue']);
+    expect(adapter.files[file]).toContain("'images/capa.png' | assets_url"); expect(adapter.assets['assets/images/capa.png']).toEqual(png(7));
+    expect(result).toMatchObject({status: 'completed', created: ['components/NovoCard.vue'], uploaded: ['assets/images/capa.png']});
+    expect(result.warnings).toBeUndefined(); expect(result.before['components/NovoCard.vue']).toBe(YAMPI_VUE_TEMPLATE);
+    expect(h.events.indexOf('backup')).toBeLessThan(h.events.indexOf('persist:running'));
+  });
+  test('componente que a Yampi ainda não listou vira aviso no fim, sem desfazer o envio', async () => {
+    const adapter = new FakeAdapter(base), plan = makePlan(snapshot(base), local, snapshot(base), images);
+    const result = await applyPlan(adapter, plan, plan.rows.filter(r => ['update', 'create', 'upload'].includes(r.status)).map(r => r.path), hooks());
+    expect(result.status).toBe('completed'); expect(result.warnings?.[0]).toContain('components/NovoCard.vue');
+  });
+  test('arquivo que apareceu na loja depois da comparação interrompe antes de qualquer criação', async () => {
+    const adapter = new FakeAdapter(base), h = hooks(), plan = makePlan(snapshot(base), local, snapshot(base), images);
+    adapter.files['components/NovoCard.vue'] = 'feito por outra pessoa';
+    await expect(applyPlan(adapter, plan, plan.rows.filter(r => ['update', 'create', 'upload'].includes(r.status)).map(r => r.path), h)).rejects.toThrow('apareceu na loja');
+    expect(adapter.created).toEqual([]); expect(adapter.uploaded).toEqual([]); expect(adapter.writes).toEqual([]); expect(h.events).toEqual([]);
+  });
+  test('criação com conteúdo inesperado para antes de enviar imagens ou preencher', async () => {
+    const adapter = new FakeAdapter(base), h = hooks(), plan = makePlan(snapshot(base), local, snapshot(base), images);
+    adapter.createHook = path => {adapter.files[path] = 'outro conteúdo';};
+    await expect(applyPlan(adapter, plan, plan.rows.filter(r => ['update', 'create', 'upload'].includes(r.status)).map(r => r.path), h)).rejects.toThrow('conteúdo inesperado');
+    expect(adapter.uploaded).toEqual([]); expect(adapter.writes).toEqual([]);
+    expect(h.journals.at(-1)).toMatchObject({status: 'stopped', pending: 'components/NovoCard.vue', created: []});
+  });
+  test('imagem diferente depois do envio para antes dos textos', async () => {
+    const adapter = new FakeAdapter(base), plan = makePlan(snapshot(base), local, snapshot(base), images);
+    adapter.uploadHook = path => {adapter.assets[path] = png(8);};
+    await expect(applyPlan(adapter, plan, plan.rows.filter(r => ['update', 'create', 'upload'].includes(r.status)).map(r => r.path), hooks())).rejects.toThrow('Imagem diferente');
+    expect(adapter.writes).toEqual([]);
+  });
+  test('desfazer devolve o arquivo criado ao conteúdo da Yampi e o alterado ao original', async () => {
+    const adapter = new FakeAdapter(base), plan = makePlan(snapshot(base), local, snapshot(base), images);
+    const result = await applyPlan(adapter, plan, plan.rows.filter(r => ['update', 'create', 'upload'].includes(r.status)).map(r => r.path), hooks());
+    const restore = makePlan(snapshot(result.after), result.before, snapshot(adapter.files));
+    await applyPlan(adapter, restore, restore.rows.filter(r => r.status === 'update').map(r => r.path), hooks());
+    expect(adapter.files[file]).toBe(base[file]); expect(adapter.files['components/NovoCard.vue']).toBe(YAMPI_VUE_TEMPLATE);
+  });
+});
+describe('imagens lidas do editor', () => {
+  // The real editor shows stored images as data: URLs; its page policy blocks fetch() on them.
+  const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 0, 0xff, 0x7f, 0x80, 0xd9]);
+  const base64 = btoa(String.fromCharCode(...jpeg));
+  test('data URL em base64 vira os mesmos bytes enviados', () => {
+    const bytes = dataUrlBytes(`data:image/jpeg;base64,${base64}`);
+    expect([...bytes]).toEqual([...jpeg]);
+    expect(() => validateImage('assets/images/capa.jpg', bytes)).not.toThrow();
+  });
+  test('SVG sem base64 é decodificado como texto', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1"/></svg>';
+    expect(new TextDecoder().decode(dataUrlBytes(`data:image/svg+xml,${encodeURIComponent(svg)}`))).toBe(svg);
+  });
+  test('formato desconhecido ou codificação inválida param a leitura', () => {
+    expect(() => dataUrlBytes('https://cdn.invalid/capa.jpg')).toThrow('formato não reconhecido');
+    expect(() => dataUrlBytes('data:image/jpeg;base64')).toThrow('formato não reconhecido');
+    expect(() => dataUrlBytes('data:image/jpeg;base64,@@@')).toThrow('codificação inválida');
   });
 });

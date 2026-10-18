@@ -3,22 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Zirtuno Sync Yampi — Editor de código</title>
   <link rel="stylesheet" href="panel.css">
 </head>
-<body class="guide">
-  <header class="app-header"><div class="brand"><h1><img class="brand-icon" src="icons/icon32.png" alt="" width="24" height="24">Zirtuno Sync Yampi</h1><span class="version">0.4.0</span></div><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer" aria-label="Desenvolvido por Zirtuno — abrir Instagram"><span>Desenvolvido por</span><img src="brand/zirtuno-logo.png" alt="" width="18" height="18"><span class="maker-name">Zirtuno</span></a></header>
-  <main class="app-main guide-main">
-    <section class="workspace" aria-labelledby="guide-title">
-      <h2 id="guide-title">Abra o editor de código da Yampi.</h2>
-      <p>Para baixar o código ou enviar suas alterações, a extensão precisa estar na tela <strong>Editor de código</strong> da sua loja.</p>
-      <button id="open-editor" class="primary">Abrir editor de código da Yampi</button>
-      <p id="guide-detail" class="note" role="status">Abre o editor nesta aba. Se necessário, entre na sua conta da Yampi.</p>
-      <h3 class="guide-next-title">Quando o editor abrir</h3>
-      <ol class="guide-steps"><li>Clique novamente no ícone da extensão.</li><li>Confira o nome da loja no painel.</li><li>Confirme o download ou escolha Enviar alterações.</li></ol>
+<body class="guide" data-view="guide">
+  <svg class="defs" aria-hidden="true" focusable="false"></svg>
+  <header id="topbar" class="bar top">
+    <span class="light" aria-hidden="true"></span>
+    <span class="store">Zirtuno Sync</span>
+  </header>
+  <main class="page">
+    <header class="view-head">
+      <h1 id="guide-title">Abra o editor de código da Yampi.</h1>
+      <p id="detail">A extensão trabalha na tela Editor de código da sua loja.</p>
+    </header>
+    <section class="view">
+      <ol class="steps"><li>Abra o editor pelo botão abaixo.</li><li>Clique de novo no ícone da extensão.</li><li>Baixe o tema ou envie as suas alterações.</li></ol>
+      <p id="guide-detail" class="aside" role="status">Abre nesta mesma aba. Se a Yampi pedir, entre na sua conta.</p>
+      <p class="safe">Abrir o painel não muda nada na loja.</p>
     </section>
-    <footer><p>Abrir o painel não inicia a cópia. Nenhum arquivo da loja é alterado nesta etapa.</p></footer>
   </main>
+  <div id="dock" class="bar dock"><div class="dock-actions"><button id="open-editor" class="button primary">Abrir o editor de código</button></div></div>
   <script type="module" src="guide.js"></script>
 </body>
 </html>

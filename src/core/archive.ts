@@ -103,24 +103,36 @@ function readThemeEntries(entries: [string, Uint8Array][]): {files: Files; asset
   return {files: safeFiles(files), assets};
 }
 export async function decodeProject(data: Uint8Array): Promise<Project> {return decodeEntries(unzipSafe(data));}
-export async function readProjectDirectory(files: FileList | File[]): Promise<Project | {local: Files; localAssets: Assets}> {
-  const source = Array.from(files).map(file => ({file, path: (file.webkitRelativePath || file.name).split('/').slice(1).join('/')}));
+// One file of a project folder, from a folder picker, drag and drop or a test: its path inside the
+// chosen folder and a way to read it, so only the files that matter are ever read.
+export interface ProjectEntry {path: string; size: number; read(): Promise<Uint8Array>}
+export function isProjectFile(path: string, project: boolean): boolean {
+  return project ? path.startsWith('tema/') || path.startsWith('.yampi-sync/baseline/') || path === metaPath : ROOTS.has(path.split('/')[0]);
+}
+export async function readProjectEntries(source: ProjectEntry[], onProgress?: (done: number, total: number) => void): Promise<Project | {local: Files; localAssets: Assets}> {
   const project = source.some(f => f.path === metaPath);
+  const relevant = project ? source.filter(f => isProjectFile(f.path, true)) : source;
   const entries: Record<string, Uint8Array> = Object.create(null);
   let total = 0, count = 0;
-  for (const {file, path} of source) {
-    if (project && !path.startsWith('tema/') && !path.startsWith('.yampi-sync/baseline/') && path !== metaPath) continue;
+  for (const {path, size} of relevant) {
     if (!project && !ROOTS.has(path.split('/')[0])) throw new Error(`Selecione a raiz do projeto exportado ou a pasta tema. Arquivo fora do tema: ${path}`);
     safeArchivePath(path);
-    if (entries[path]) throw new Error(`Entrada duplicada: ${path}`);
-    if (file.size > MAX_FILE_BYTES || (total += file.size) > (project ? MAX_TOTAL_BYTES * 2 + MAX_FILE_BYTES : MAX_TOTAL_BYTES) || ++count > MAX_FILES * 2 + 1) throw new Error('A pasta ultrapassa os limites de importação.');
-    entries[path] = new Uint8Array(await file.arrayBuffer());
+    if (size > MAX_FILE_BYTES || (total += size) > (project ? MAX_TOTAL_BYTES * 2 + MAX_FILE_BYTES : MAX_TOTAL_BYTES) || ++count > MAX_FILES * 2 + 1) throw new Error('A pasta ultrapassa os limites de importação.');
   }
-  if (!count) throw new Error('Pasta vazia.');
+  onProgress?.(0, relevant.length);
+  for (const [index, {path, read}] of relevant.entries()) {
+    if (entries[path]) throw new Error(`Entrada duplicada: ${path}`);
+    entries[path] = await read();
+    onProgress?.(index + 1, relevant.length);
+  }
+  if (!relevant.length) throw new Error('Pasta vazia.');
   if (project) return decodeEntries(entries);
   const edited = readThemeEntries(Object.entries(entries));
   safeSnapshot({context: {storeName: 'Validação local', previewOrigin: 'https://local.invalid', editorOrigin: 'https://local.invalid'}, capturedAt: new Date().toISOString(), files: edited.files, assets: edited.assets});
   return {local: edited.files, localAssets: edited.assets};
+}
+export async function readProjectDirectory(files: FileList | File[], onProgress?: (done: number, total: number) => void): Promise<Project | {local: Files; localAssets: Assets}> {
+  return readProjectEntries(Array.from(files).map(file => ({path: (file.webkitRelativePath || file.name).split('/').slice(1).join('/'), size: file.size, read: async () => new Uint8Array(await file.arrayBuffer())})), onProgress);
 }
 export async function readDirectory(files: FileList | File[]): Promise<Files> {
   const project = await readProjectDirectory(files);
