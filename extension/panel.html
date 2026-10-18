@@ -120,18 +120,6 @@
       <div id="result-actions" class="action-slot"></div>
     </section>
     </div>
-    <details id="recovery" class="help recovery">
-      <summary>Backups e recuperação <span id="history-count" class="history-count">0</span></summary>
-      <div id="recovery-controls" class="recovery-controls">
-      <p>Os envios e backups ficam guardados nesta extensão, separados por loja. <span id="recovery-store"></span></p>
-      <div class="field"><span id="history-label">Histórico desta loja</span><div id="history-picker" class="history-picker"><button id="history" class="history-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="history-options" aria-labelledby="history-label history-value" disabled><span class="history-trigger-copy"><strong id="history-value">Nenhum envio disponível</strong><span id="history-description">O histórico aparece após o primeiro envio.</span></span><span class="history-chevron" aria-hidden="true"></span></button><div id="history-options" class="history-options" role="listbox" aria-labelledby="history-label" hidden></div></div></div>
-      <p id="journal-info" class="aside">Nenhum envio nesta instalação.</p>
-      <p id="journal-error" class="recovery-error" hidden></p>
-      <div class="menu-actions"><button id="download-backup" class="button" disabled>Baixar backup do envio</button><button id="download-journal" class="button" disabled>Baixar registro do envio</button><button id="restore" class="button" disabled>Comparar para restaurar</button></div>
-      <p>A restauração compara de novo antes de gravar e protege alterações feitas depois do envio. Nada é restaurado automaticamente.</p>
-      <details class="help local-data"><summary>Gerenciar dados locais</summary><p>Remove desta extensão os originais, o projeto e os backups guardados. Os ZIPs já baixados e os arquivos da loja são preservados.</p><button id="clear" class="link danger">Apagar dados locais da extensão</button></details>
-      </div>
-    </details>
     <details id="fixture" class="help" hidden><summary>Editor fictício usado nos testes</summary><iframe id="fixture-frame" title="Editor fictício"></iframe></details>
   <div id="dock" class="dock" hidden>
     <div class="dock-actions">
@@ -151,7 +139,15 @@
   <div id="sheet-scrim" class="scrim" hidden></div>
   <div id="menu-sheet" class="sheet menu-sheet" role="dialog" aria-modal="true" aria-labelledby="menu-title" hidden>
     <div class="sheet-head"><h2 id="menu-title" class="sheet-title">Histórico e backups</h2><button id="close-menu" class="bar-button" aria-label="Fechar menu"><svg class="glyph"><use href="#i-x"/></svg></button></div>
-    <div id="menu-controls"></div>
+    <div id="recovery-controls" class="recovery-controls">
+      <p>Os envios e backups ficam guardados nesta extensão, separados por loja. <span id="recovery-store"></span></p>
+      <div class="field"><span id="history-label">Histórico desta loja</span><div id="history-picker" class="history-picker"><button id="history" class="history-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="history-options" aria-labelledby="history-label history-value" disabled><span class="history-trigger-copy"><strong id="history-value">Nenhum envio disponível</strong><span id="history-description">O histórico aparece após o primeiro envio.</span></span><span class="history-chevron" aria-hidden="true"></span></button><div id="history-options" class="history-options" role="listbox" aria-labelledby="history-label" hidden></div></div></div>
+      <p id="journal-info" class="aside">Nenhum envio nesta instalação.</p>
+      <p id="journal-error" class="recovery-error" hidden></p>
+      <div class="menu-actions"><button id="download-backup" class="button" disabled>Baixar backup do envio</button><button id="download-journal" class="button" disabled>Baixar registro do envio</button><button id="restore" class="button" disabled>Comparar para restaurar</button></div>
+      <p>A restauração compara de novo antes de gravar e protege alterações feitas depois do envio. Nada é restaurado automaticamente.</p>
+      <details class="help local-data"><summary>Gerenciar dados locais</summary><p>Remove desta extensão os originais, o projeto e os backups guardados. Os ZIPs já baixados e os arquivos da loja são preservados.</p><button id="clear" class="link danger">Apagar dados locais da extensão</button></details>
+    </div>
     <p class="about"><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer"><img src="brand/zirtuno-logo.png" alt="" width="16" height="16">Zirtuno Sync <span class="version">0.6.0</span></a><span>Ferramenta independente. Sem telemetria. Nunca exclui, renomeia nem publica.</span></p>
   </div>
   <div id="confirm-panel" class="sheet" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>

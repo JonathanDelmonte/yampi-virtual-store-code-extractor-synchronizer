@@ -242,7 +242,7 @@ try {
   const sessions = () => worker.evaluate(async () => Object.entries(await chrome.storage.session.get(null)).filter(([key]) => !key.includes(':')).map(([, value]) => value));
   assert.equal((await sessions())[0].access, undefined);
   assert.match(await panel.locator('#journal-info').textContent(), /3 de 3 itens conferidos/);
-  await panel.locator('#menu').click(); await panel.waitForFunction(() => document.querySelector('#recovery').open);
+  await panel.locator('#menu').click(); await panel.waitForFunction(() => !document.querySelector('#menu-sheet').hidden);
   await panel.locator('#restore').click(); await panel.waitForFunction(() => document.body.dataset.view === 'review' && document.querySelector('#status').textContent.startsWith('Restaurar'));
   // Undo: the changed file goes back and the created one returns to Yampi's empty content; nothing is deleted.
   assert.match(await panel.locator('#summary').textContent(), /2 itens para enviar/);

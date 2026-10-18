@@ -157,13 +157,6 @@ body[data-connection="error"] .connection-state { color: var(--danger); }
 .dock:not(.bar) .dock-actions { flex-wrap: wrap; }
 .dock:not(.bar) .button { min-height: 46px; }
 .dock:not(.bar) .button:not(.primary) { background: var(--surface); }
-.recovery { margin-top: 24px; }
-.recovery > summary { gap: 10px; }
-.history-count { margin-left: auto; min-width: 22px; padding: 1px 6px; border-radius: 6px; background: var(--sunken); color: var(--muted); font-family: var(--mono); font-size: 11.5px; text-align: center; }
-.recovery > summary::after { margin-left: 0; }
-.recovery .aside { margin-top: 10px; }
-.recovery .menu-actions { margin-bottom: 14px; }
-.recovery .menu-actions .button { justify-content: flex-start; text-align: left; }
 .recovery-error { margin: 10px 0; color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
 .recovery-controls { display: grid; gap: 12px; padding-top: 6px; }
 .recovery-controls > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }

@@ -115,3 +115,7 @@ A cópia do tema continua em ZIP: exportar diretamente para uma pasta não foi i
 ## 18/10/2026 — Menu e seletor do histórico
 
 A pedido do proprietário, a assinatura e as informações da ferramenta saíram do rodapé e ficam apenas no menu **⋯**. Os controles de recuperação são compartilhados entre esse menu e a seção da página; fechar o menu mantém o envio escolhido. O seletor nativo foi substituído por uma lista estilizada com datas, estados e teclado, sem abrir uma lista vazia quando ainda não há envios. O teste conferiu o backup do registro escolhido e o isolamento entre históricos de lojas fictícias, além do fluxo de restauração no editor fictício.
+
+## 18/10/2026 — Recuperação somente no menu
+
+A pedido do proprietário, o bloco **Backups e recuperação** saiu das duas abas. Histórico, download de backups e restauração continuam disponíveis somente no menu **⋯**, sem mover os controles ao abrir ou fechar. A seleção do envio é preservada ao reabrir o menu. As orientações e os testes foram ajustados para esse acesso.

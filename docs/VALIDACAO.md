@@ -2,13 +2,13 @@
 
 ## Revisão da interface, em 18/10/2026
 
-Node 24.15.0. `npm run check` passou com 258 testes em 17 arquivos. A revisão recupera as abas no topo, o estado de conexão por escrito, as ações junto do conteúdo, as orientações de download e envio e a recuperação na página, mantendo o motor da 0.6.0.
+Node 24.15.0. `npm run check` passou com 258 testes em 17 arquivos. A revisão recupera as abas no topo, o estado de conexão por escrito, as ações junto do conteúdo e as orientações de download e envio, mantendo o motor da 0.6.0. Histórico, backups e recuperação ficam somente no menu **⋯**.
 
 `npm run test:panel` usa somente a demonstração e arquivos fictícios: navegação por mouse e teclado (setas e Home), abertura direta no download, escolha de ZIP com nome visível, importação e comparação reais do ZIP fictício, comparação preservada ao trocar de aba, recuperação vazia sem ações habilitadas e etapas abertas durante a leitura. Tema claro e escuro conferidos em 320, 360, 560 e 800 px, sem rolagem lateral. A exportação, a navegação e a comparação registraram zero gravações no editor; requisições fora da demonstração são bloqueadas. Evidências locais em `.cache/panel-validation/`.
 
 O E2E nativo de Chromium também passou: exportação com leitura integral e sem mutações, importação de pasta/ZIP, criação e imagem fictícias, backup, painel fechado durante o envio, conferência após reload, restauração protegida e recuperação da conexão. Nenhuma requisição alcançou a Yampi. Esta revisão de interface não acrescenta validação de gravação numa loja real.
 
-O teste do painel foi ampliado para a assinatura restrita ao menu e o seletor estilizado do histórico: estado vazio desabilitado, dois envios fictícios com datas e estados diferentes, um registro de outra loja que não aparece, navegação por setas/Home/End/Enter, Escape, Tab e clique fora, retorno de foco e seleção preservada entre o menu e a página. O backup baixado depois de escolher o envio anterior foi comparado byte a byte com o ZIP fictício daquele registro. O histórico aberto foi conferido também no tema claro e em 320–800 px. O E2E nativo passou com os controles compartilhados de backup e restauração.
+O teste do painel foi ampliado para a assinatura e a recuperação restritas ao menu, sem repetição nas duas abas, e o seletor estilizado do histórico: estado vazio desabilitado, dois envios fictícios com datas e estados diferentes, um registro de outra loja que não aparece, navegação por setas/Home/End/Enter, Escape, Tab e clique fora, retorno de foco e seleção preservada ao fechar e reabrir o menu. O backup baixado depois de escolher o envio anterior foi comparado byte a byte com o ZIP fictício daquele registro. O histórico aberto foi conferido também no tema claro e em 320–800 px. O E2E nativo passou com o acesso ao backup e à restauração pelo menu.
 
 ## Bloqueio explicado, em 17/10/2026
 

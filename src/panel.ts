@@ -196,7 +196,7 @@ function renderHistorySummary(view: View): void {
   const last = history.find(item => item.status === 'completed');
   $('resume-area').hidden = !connected || view === 'job' || (!resumable && !last);
   $('last-send').hidden = !last || !!resumable;
-  if (last) $('last-send').textContent = `Último envio em ${dateTime(last.startedAt)}: ${plural(last.verified.length + (last.uploaded?.length || 0), 'item conferido', 'itens conferidos')}. Consulte Backups e recuperação abaixo.`;
+  if (last) $('last-send').textContent = `Último envio em ${dateTime(last.startedAt)}: ${plural(last.verified.length + (last.uploaded?.length || 0), 'item conferido', 'itens conferidos')}. Consulte o histórico no menu ⋯.`;
 }
 function renderExport(): void {
   const base = workspace?.baseline;
@@ -517,8 +517,6 @@ $('discard-whitespace').addEventListener('click', () => {
 const sheets = ['confirm-panel', 'diff', 'menu-sheet'];
 function openSheet(id: string): void {
   if (id === 'menu-sheet') {
-    $<HTMLDetailsElement>('recovery').open = true;
-    $('menu-controls').append($('recovery-controls'));
     $('menu').setAttribute('aria-expanded', 'true');
   }
   $(id).hidden = false; $('sheet-scrim').hidden = false;
@@ -529,7 +527,6 @@ function closeSheet(id: string): void {
   $(id).hidden = true;
   if (id === 'menu-sheet') {
     historyPicker.close(false);
-    $('recovery').append($('recovery-controls'));
     $('menu').setAttribute('aria-expanded', 'false');
     $('menu').focus({preventScroll: true});
   }
@@ -814,7 +811,6 @@ function journalInfo(): void {
   $('journal-error').textContent = journal?.error || '';
 }
 function updateHistory(): void {
-  $('history-count').textContent = String(history.length);
   historyPicker.update(history.map(item => ({value: item.id, label: dateTime(item.startedAt), description: `${item.status === 'completed' ? 'Concluído' : 'Interrompido'} · ${plural(item.verified.length + (item.uploaded?.length || 0), 'item conferido', 'itens conferidos')}`})), journal?.id);
 }
 async function save(bytes: Uint8Array, name: string, type = 'application/zip'): Promise<void> {

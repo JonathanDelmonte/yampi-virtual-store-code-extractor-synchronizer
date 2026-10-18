@@ -40,6 +40,8 @@ try {
   assert.equal(await page.locator('#connection-state').textContent(), 'Editor conectado');
   assert.equal(await page.locator('main .about').count(), 0, 'A assinatura e as informações ficam apenas no menu.');
   assert.equal(await page.locator('#menu-sheet .about').isVisible(), false);
+  assert.equal(await page.locator('main #recovery-controls').count(), 0, 'A aba de download não repete a recuperação do menu.');
+  assert.equal(await page.locator('#recovery-controls').isVisible(), false);
   assert.equal(await page.getByRole('tab', {name: 'Baixar arquivos'}).getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator('#export-section #export').count(), 1, 'A ação de baixar deve estar na própria seção.');
   assert.equal(await page.locator('#dock').evaluate(node => getComputedStyle(node).position), 'static');
@@ -57,6 +59,8 @@ try {
   assert.equal(await page.getByRole('tab', {name: 'Importar projeto'}).getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator('#mode-import').evaluate(node => document.activeElement === node), true, 'As setas devem manter o foco nas abas.');
   assert.equal(await page.locator('#import-section').isVisible(), true);
+  assert.equal(await page.locator('main #recovery-controls').count(), 0, 'A aba de importação não repete a recuperação do menu.');
+  assert.equal(await page.locator('#recovery-controls').isVisible(), false);
   assert.equal(await page.locator('#import-section #pick-folder').isVisible(), true);
   await shot('importar-dark');
   await page.locator('#zip-choice > summary').click();
@@ -68,14 +72,14 @@ try {
   await page.locator('#menu').click();
   assert.equal(await page.locator('#menu-sheet').isVisible(), true);
   assert.equal(await page.locator('#menu-sheet .about').isVisible(), true);
-  assert.equal(await page.locator('#recovery').evaluate(node => node.open), true);
+  assert.equal(await page.locator('#menu-sheet #recovery-controls').isVisible(), true);
   assert.equal(await page.locator('#history').isDisabled(), true, 'Histórico vazio não deve abrir uma lista nativa vazia.');
   assert.equal(await page.locator('#download-backup').isDisabled(), true);
   assert.equal(await page.locator('#restore').isDisabled(), true);
   await shot('backups-dark');
   await page.locator('#close-menu').click();
   assert.equal(await page.locator('#menu-sheet').isVisible(), false);
-  assert.equal(await page.locator('#recovery #history').count(), 1, 'A recuperação continua acessível na página.');
+  assert.equal(await page.locator('#recovery-controls').isVisible(), false, 'Fechar o menu oculta a recuperação.');
   await page.getByRole('tab', {name: 'Importar projeto'}).focus(); await page.keyboard.press('Home');
   assert.equal(await page.locator('#export-section').isVisible(), true);
   const exported = page.waitForEvent('download'); await page.locator('#export').click();
@@ -131,7 +135,7 @@ try {
     database.close();
   }, {olderId, newerId, olderZip: [...olderZip]});
   await page.reload();
-  await page.waitForFunction(() => document.querySelector('#history-count').textContent === '2' && document.body.dataset.connection === 'connected');
+  await page.waitForFunction(() => document.querySelectorAll('#history-options [role="option"]').length === 2 && document.body.dataset.connection === 'connected');
   await page.locator('#menu').click(); await page.locator('#history').click();
   assert.equal(await page.locator('#history-options').getByRole('option').count(), 2, 'O histórico deve conter somente os envios desta loja.');
   assert.match(await page.locator('#history-value').textContent(), /18\/10\/2026/);
@@ -156,8 +160,8 @@ try {
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#menu-sheet').isVisible(), false);
   assert.equal(await page.locator('#menu').evaluate(node => document.activeElement === node), true);
-  assert.match(await page.locator('#recovery #history-value').textContent(), /17\/10\/2026/, 'A seleção é preservada ao voltar para a página.');
   await page.locator('#menu').click();
+  assert.match(await page.locator('#menu-sheet #history-value').textContent(), /17\/10\/2026/, 'A seleção é preservada ao reabrir o menu.');
   const backupDownload = page.waitForEvent('download'); await page.locator('#download-backup').click();
   const backupPath = path.join(temporary, 'backup-escolhido.zip'); await (await backupDownload).saveAs(backupPath);
   assert.deepEqual(new Uint8Array(await readFile(backupPath)), olderZip, 'O download deve ser do envio escolhido, não do mais recente.');
