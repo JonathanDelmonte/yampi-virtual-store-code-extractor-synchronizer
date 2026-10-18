@@ -79,8 +79,12 @@ Mantém a paleta clara/escura, as fontes Atkinson e o desenho dos botões da 0.6
 | Campo nativo de ZIP sem orientação | Seletor integrado com foco visível, nome do arquivo e instrução de `npm run pack` | Tornar a alternativa ao uso da pasta compreensível |
 | Histórico no menu | **Backups e recuperação** na página, com atalho no topo | Expor histórico, downloads, erros e restauração |
 | Ajuda resumida e progresso recolhido | Tutoriais próximos das ações; etapas e registro inicialmente abertos | Recuperar a informação sem voltar à aparência antiga |
+| Assinatura e informações no rodapé da página | Somente dentro do menu **⋯** | Deixar as telas de trabalho mais limpas |
+| Lista nativa do histórico, vazia ou sem estilo | Seletor próprio com data, estado, seleção visível e teclado; desabilitado sem envios | Evitar o popup do navegador e identificar o backup escolhido |
 
 Os rótulos distinguem as etapas: **Baixar arquivos** copia da loja para o computador; **Importar projeto** lê a pasta ou o ZIP editado e prepara a comparação; **Enviar N itens para Loja** fica reservado à confirmação da gravação.
+
+O menu **⋯** abre **Histórico e backups**, com assinatura e informações somente dentro dele. O mesmo conjunto de controles é usado no menu e na seção da página, sem duplicar campos ou a seleção. O seletor do histórico mostra apenas os registros da loja atual; setas, Home, End e Enter permitem escolher um envio. Escape fecha primeiro a lista e depois o menu; Tab sai da lista e clicar fora a recolhe. Fechar o menu devolve o foco ao botão **⋯** e preserva a seleção usada para baixar ou restaurar.
 
 As abas aceitam mouse, Tab, setas, Home e End. As ações continuam bloqueadas durante uma operação, e trocar de aba preserva o projeto e a comparação. A orientação fora do editor mantém seu próprio fluxo. Não foi acrescentada exportação direta para uma pasta: a cópia do tema continua em ZIP, e escolher uma pasta serve para ler o projeto editado.
 

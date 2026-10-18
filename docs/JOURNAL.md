@@ -111,3 +111,7 @@ Pedido do proprietário depois de instalar a 0.6.0: manter suas cores e botões,
 O painel abre em **Baixar tema** e mantém **Enviar alterações** ao lado. As abas preservam o projeto e a comparação, com navegação por teclado. Cada etapa recebe seus próprios botões no fluxo da página. A escolha do ZIP informa o arquivo lido e explica `npm run pack`. A ajuda explica o download, a edição, o conteúdo da pasta e a confirmação do envio. **Backups e recuperação** reúne o histórico e as ações na página; o menu do topo leva até ela. Etapas e registro do progresso começam abertos.
 
 A cópia do tema continua em ZIP: exportar diretamente para uma pasta não foi implementado. A execução em segundo plano, a retomada e as proteções do envio da 0.6.0 foram preservadas. Testes e capturas usam somente a demonstração e o editor fictício; nenhuma loja real foi acessada. O trabalho local anterior à integração foi mantido separado, e esta revisão parte do merge `0806888`.
+
+## 18/10/2026 — Menu e seletor do histórico
+
+A pedido do proprietário, a assinatura e as informações da ferramenta saíram do rodapé e ficam apenas no menu **⋯**. Os controles de recuperação são compartilhados entre esse menu e a seção da página; fechar o menu mantém o envio escolhido. O seletor nativo foi substituído por uma lista estilizada com datas, estados e teclado, sem abrir uma lista vazia quando ainda não há envios. O teste conferiu o backup do registro escolhido e o isolamento entre históricos de lojas fictícias, além do fluxo de restauração no editor fictício.

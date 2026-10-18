@@ -17,6 +17,7 @@ import {active, type JobRequest, type JobState, type Scope, type SendInput} from
 import {ExtensionJobs, LocalJobs, type JobClient} from './panel/client';
 import {canPickFolders, droppedItem, folderEntries, permitted, pickFolder, recallFolder, rememberFolder, replaceThemeFile, type Folder, type Remembered} from './panel/folder';
 import {renderDiff} from './panel/diff-view';
+import {HistoryPicker} from './panel/history-picker';
 import {$, el, glyph, list, plural, dateTime, since, enter, toast, copyText} from './panel/dom';
 const isDemo = ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).get('demo') === '1';
 const editorTab = new URLSearchParams(location.search).get('tab');
@@ -42,6 +43,11 @@ let history: Journal[] = [], journal: Journal | undefined, resumable: Journal | 
 let remembered: Remembered | undefined;
 let diffRow: PlanRow | undefined, diffTab: 'remote' | 'base' | 'store' = 'remote';
 let lastAnnounced = '', lastView = '';
+const historyPicker = new HistoryPicker($('history-picker'), value => {
+  const entry = history.find(item => item.id === value);
+  if (!entry) return;
+  journal = entry; journalInfo(); controls();
+});
 // --- Editor connection --------------------------------------------------------------------------
 if (isDemo) {
   $('demo-notice').hidden = false;
@@ -289,7 +295,8 @@ function controls(): void {
   $('export').toggleAttribute('disabled', working || !connected);
   $('include-preview').toggleAttribute('disabled', working);
   for (const id of ['preview-allow', 'preview-partial', 'preview-discard']) $(id).toggleAttribute('disabled', busy);
-  for (const id of ['pick-folder', 'pick-other', 'reload-folder', 'folder', 'baseline', 'clear', 'history', 'demo-local', 'mode-import', 'mode-export', 'go-import']) $(id).toggleAttribute('disabled', working);
+  for (const id of ['pick-folder', 'pick-other', 'reload-folder', 'folder', 'baseline', 'clear', 'demo-local', 'mode-import', 'mode-export', 'go-import']) $(id).toggleAttribute('disabled', working);
+  historyPicker.setDisabled(working);
   $('compare').toggleAttribute('disabled', working || !connected || !workspace?.baseline || !workspace?.project);
   const missing = plan ? missingNewTexts(plan).length : 0, partial = plan ? selectionIssues(plan, selected) : [];
   const blocked = !!missing || partial.length > 0;
@@ -507,14 +514,25 @@ $('discard-whitespace').addEventListener('click', () => {
   render(); toast('Mudanças só de espaço em branco não serão enviadas.');
 });
 // --- Sheets ---------------------------------------------------------------------------------------
-const sheets = ['confirm-panel', 'diff'];
+const sheets = ['confirm-panel', 'diff', 'menu-sheet'];
 function openSheet(id: string): void {
+  if (id === 'menu-sheet') {
+    $<HTMLDetailsElement>('recovery').open = true;
+    $('menu-controls').append($('recovery-controls'));
+    $('menu').setAttribute('aria-expanded', 'true');
+  }
   $(id).hidden = false; $('sheet-scrim').hidden = false;
   requestAnimationFrame(() => ($(id).querySelector<HTMLElement>('button:not([hidden]):not(:disabled)') || $(id)).focus());
 }
 function closeSheet(id: string): void {
   if ($(id).hidden) return;
   $(id).hidden = true;
+  if (id === 'menu-sheet') {
+    historyPicker.close(false);
+    $('recovery').append($('recovery-controls'));
+    $('menu').setAttribute('aria-expanded', 'false');
+    $('menu').focus({preventScroll: true});
+  }
   if (sheets.every(sheet => $(sheet).hidden)) $('sheet-scrim').hidden = true;
 }
 const closeAll = () => {for (const id of sheets) closeSheet(id); diffRow = undefined;};
@@ -583,10 +601,9 @@ $('sheet-scrim').addEventListener('click', closeAll);
 document.addEventListener('keydown', event => {if (event.key === 'Escape') closeAll();});
 $('menu').addEventListener('click', () => {
   updateHistory(); journalInfo(); controls();
-  $<HTMLDetailsElement>('recovery').open = true;
-  const summary = $('recovery').querySelector('summary')!;
-  summary.scrollIntoView({block: 'start'}); summary.focus({preventScroll: true});
+  openSheet('menu-sheet');
 });
+$('close-menu').addEventListener('click', () => closeSheet('menu-sheet'));
 // --- Jobs -------------------------------------------------------------------------------------------
 const newId = () => crypto.randomUUID();
 // The job's first state shows at once; the runner's reports replace it.
@@ -798,11 +815,8 @@ function journalInfo(): void {
 }
 function updateHistory(): void {
   $('history-count').textContent = String(history.length);
-  const picker = $<HTMLSelectElement>('history'); picker.replaceChildren();
-  for (const item of history) picker.append(el('option', {text: `${dateTime(item.startedAt)} — ${item.status === 'completed' ? 'concluído' : 'interrompido'}`, attrs: {value: item.id}}));
-  if (journal) picker.value = journal.id;
+  historyPicker.update(history.map(item => ({value: item.id, label: dateTime(item.startedAt), description: `${item.status === 'completed' ? 'Concluído' : 'Interrompido'} · ${plural(item.verified.length + (item.uploaded?.length || 0), 'item conferido', 'itens conferidos')}`})), journal?.id);
 }
-$('history').addEventListener('change', () => {journal = history.find(j => j.id === $<HTMLSelectElement>('history').value); journalInfo(); controls();});
 async function save(bytes: Uint8Array, name: string, type = 'application/zip'): Promise<void> {
   const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], {type}));
   try {
@@ -824,6 +838,7 @@ async function save(bytes: Uint8Array, name: string, type = 'application/zip'): 
 }
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 $('download-backup').addEventListener('click', () => {
+  closeSheet('menu-sheet');
   void run('Baixando o backup', async () => {
     const stored = await get<{journalId: string; bytes: Uint8Array}>(`backup:${journal?.id}`);
     if (!stored || stored.journalId !== journal?.id) throw new Error('O backup deste envio não foi concluído. Use o registro ou a exportação original.');
@@ -831,6 +846,7 @@ $('download-backup').addEventListener('click', () => {
   });
 });
 $('download-journal').addEventListener('click', () => {
+  closeSheet('menu-sheet');
   void run('Baixando o registro', async () => {
     if (!journal) throw new Error('Escolha um envio no histórico.');
     await save(new TextEncoder().encode(JSON.stringify(journal, null, 2)), `registro-${journal.id}.json`, 'application/json');
@@ -844,7 +860,7 @@ async function prepareRestore(entry: Journal): Promise<void> {
   restoreJournal = entry; route = 'send';
   await startJob({id: newId(), kind: 'compare', scope: 'restore', journalId: entry.id, paths: [...new Set([...Object.keys(entry.before), ...Object.keys(entry.after)])].sort()});
 }
-$('restore').addEventListener('click', () => {const entry = journal; if (entry) void run('Preparando a restauração', () => prepareRestore(entry));});
+$('restore').addEventListener('click', () => {const entry = journal; closeSheet('menu-sheet'); if (entry) void run('Preparando a restauração', () => prepareRestore(entry));});
 $('undo').addEventListener('click', () => {
   const id = job?.result?.kind === 'send' ? job.result.journalId : undefined;
   const entry = history.find(item => item.id === id) || journal;
@@ -852,6 +868,7 @@ $('undo').addEventListener('click', () => {
 });
 $('clear').addEventListener('click', async () => {
   if (!confirm('Apagar as cópias originais, o projeto carregado e os backups guardados nesta extensão? Os ZIPs já baixados continuam no computador. Nada muda na loja.')) return;
+  closeSheet('menu-sheet');
   await clearLocal(); workspace = undefined; plan = undefined; journal = undefined; history = []; resumable = undefined; remembered = undefined; restoreJournal = undefined; selected.clear();
   route = 'export'; updateHistory(); journalInfo(); toast('Dados locais apagados.'); render();
 });

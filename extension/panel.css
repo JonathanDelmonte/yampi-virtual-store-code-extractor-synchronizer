@@ -165,6 +165,30 @@ body[data-connection="error"] .connection-state { color: var(--danger); }
 .recovery .menu-actions { margin-bottom: 14px; }
 .recovery .menu-actions .button { justify-content: flex-start; text-align: left; }
 .recovery-error { margin: 10px 0; color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
+.recovery-controls { display: grid; gap: 12px; padding-top: 6px; }
+.recovery-controls > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.recovery-controls > .field, .recovery-controls > .menu-actions { margin: 0; }
+.recovery-controls .local-data { margin-top: 4px; }
+.history-picker { min-width: 0; }
+.history-trigger { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 66px; padding: 12px 14px; border: 1px solid var(--rule-strong); border-radius: 12px; background: var(--canvas); color: var(--ink); text-align: left; cursor: pointer; transition: border-color .15s var(--ease), background-color .15s var(--ease); }
+.history-trigger-copy { display: grid; flex: 1; gap: 3px; min-width: 0; }
+.history-trigger-copy strong { font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.history-trigger-copy > span { color: var(--muted); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.history-trigger:disabled { cursor: default; color: var(--muted); border-color: var(--rule); }
+.history-chevron { width: 7px; height: 7px; margin: 0 2px 3px 0; flex: none; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); transition: transform .15s var(--ease); }
+.history-trigger[aria-expanded="true"] .history-chevron { transform: rotate(225deg) translate(-2px, -2px); }
+.history-trigger:disabled .history-chevron { opacity: .3; }
+.history-trigger[aria-expanded="true"] { border-color: var(--signal-ink); }
+.history-options { display: grid; gap: 2px; max-height: 220px; margin-top: 6px; padding: 4px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--rule-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 8px 24px -12px var(--glass-shadow-raised); }
+.history-option { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.history-option-copy { display: grid; flex: 1; gap: 3px; min-width: 0; }
+.history-option-copy strong { font-family: var(--mono); font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.history-option-copy > span { color: var(--muted); font-size: 12.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.history-option .glyph { visibility: hidden; width: 15px; height: 15px; color: var(--signal-ink); }
+.history-option[aria-selected="true"] { background: rgba(58, 214, 234, .08); box-shadow: inset 2px 0 0 var(--signal-press); }
+.history-option[aria-selected="true"] .glyph { visibility: visible; }
+.history-option:focus-visible { outline-color: var(--signal-ink); outline-offset: -2px; }
+@media (hover: hover) and (pointer: fine) { .history-trigger:hover:enabled { border-color: var(--signal-ink); } .history-option:hover { background: var(--sunken); } }
 .local-data { margin-top: 8px; }
 .local-data > summary { font-size: 13px; }
 .local-data > .link { margin-bottom: 12px; text-align: left; }

@@ -8,6 +8,8 @@ Node 24.15.0. `npm run check` passou com 258 testes em 17 arquivos. A revisão r
 
 O E2E nativo de Chromium também passou: exportação com leitura integral e sem mutações, importação de pasta/ZIP, criação e imagem fictícias, backup, painel fechado durante o envio, conferência após reload, restauração protegida e recuperação da conexão. Nenhuma requisição alcançou a Yampi. Esta revisão de interface não acrescenta validação de gravação numa loja real.
 
+O teste do painel foi ampliado para a assinatura restrita ao menu e o seletor estilizado do histórico: estado vazio desabilitado, dois envios fictícios com datas e estados diferentes, um registro de outra loja que não aparece, navegação por setas/Home/End/Enter, Escape, Tab e clique fora, retorno de foco e seleção preservada entre o menu e a página. O backup baixado depois de escolher o envio anterior foi comparado byte a byte com o ZIP fictício daquele registro. O histórico aberto foi conferido também no tema claro e em 320–800 px. O E2E nativo passou com os controles compartilhados de backup e restauração.
+
 ## Bloqueio explicado, em 17/10/2026
 
 `npm run check` passou com 258 testes em 17 arquivos; `tests/explain.test.ts` cobre a frase para um arquivo usado que mudou só na loja, em conflito, os dois juntos e a ausência de bloqueio; `tests/folder.test.ts` cobre a gravação na pasta do projeto (quebras de linha e marca de ordem de bytes mantidas, recusa quando o arquivo mudou depois da comparação, arquivo ausente não criado, caminho com `..` recusado, projeto dentro de uma pasta acima) e a leitura da pasta. `npm run test:e2e` passou.
