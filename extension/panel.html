@@ -15,10 +15,11 @@
     <symbol id="i-next" viewBox="0 0 16 16"><path d="m6 3.5 4.5 4.5L6 12.5"/></symbol>
     <symbol id="i-more" viewBox="0 0 16 16"><path d="M3.2 8h.01M8 8h.01M12.8 8h.01"/></symbol>
     <symbol id="i-upload" viewBox="0 0 16 16"><path d="M8 10.5v-8m-3 3 3-3 3 3M3 10v3.5h10V10"/></symbol>
+    <symbol id="i-connection" viewBox="0 0 16 16"><path d="M5 1.5v3m6-3v3M3.5 4.5h9v2a4.5 4.5 0 0 1-9 0v-2Zm4.5 6.5v3.5"/></symbol>
   </svg>
   <header id="topbar" class="bar top">
-    <span class="light" aria-hidden="true"></span>
-    <div class="connection-copy"><span id="store" class="store">Editor de código da Yampi</span><span id="connection-state" class="connection-state" role="status">Conectando ao editor…</span></div>
+    <span class="connection-icon" aria-hidden="true"><svg class="glyph"><use href="#i-connection"/></svg></span>
+    <div class="connection-copy"><span class="connection-line"><span id="store" class="store">Editor de código da Yampi</span><span class="connection-ellipsis" aria-hidden="true">…</span></span><span class="connection-line"><span id="connection-state" class="connection-state" role="status">Conectando ao editor…</span><span class="connection-ellipsis" aria-hidden="true">…</span></span></div>
     <button id="menu" class="bar-button" aria-label="Histórico, backups e informações" aria-haspopup="dialog" aria-expanded="false" aria-controls="menu-sheet"><svg class="glyph wide"><use href="#i-more"/></svg></button>
   </header>
   <main class="page">

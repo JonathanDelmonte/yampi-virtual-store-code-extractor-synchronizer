@@ -119,3 +119,7 @@ A pedido do proprietário, a assinatura e as informações da ferramenta saíram
 ## 18/10/2026 — Recuperação somente no menu
 
 A pedido do proprietário, o bloco **Backups e recuperação** saiu das duas abas. Histórico, download de backups e restauração continuam disponíveis somente no menu **⋯**, sem mover os controles ao abrir ou fechar. A seleção do envio é preservada ao reabrir o menu. As orientações e os testes foram ajustados para esse acesso.
+
+## 18/10/2026 — ZIP como ação e cabeçalho da loja
+
+O proprietário aprovou a proposta **Importar por ZIP**, com bloco próprio e botão direto, e pediu a atualização da pasta instalada. O ZIP deixa de ser um acordeão igual aos tutoriais. No cabeçalho, um ícone de conexão substitui o ponto e fica separado do texto por 12 px. Nome e estado ocupam uma linha; quando não cabem, o fim do texto fica transparente antes das reticências, e o tooltip mantém o conteúdo completo. A medição acompanha texto, carregamento das fontes e largura do painel. Os testes visuais usam nomes e estados fictícios, incluindo nomes sem espaços e redimensionamento.

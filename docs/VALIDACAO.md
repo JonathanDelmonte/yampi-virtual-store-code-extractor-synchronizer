@@ -10,6 +10,8 @@ O E2E nativo de Chromium também passou: exportação com leitura integral e sem
 
 O teste do painel foi ampliado para a assinatura e a recuperação restritas ao menu, sem repetição nas duas abas, e o seletor estilizado do histórico: estado vazio desabilitado, dois envios fictícios com datas e estados diferentes, um registro de outra loja que não aparece, navegação por setas/Home/End/Enter, Escape, Tab e clique fora, retorno de foco e seleção preservada ao fechar e reabrir o menu. O backup baixado depois de escolher o envio anterior foi comparado byte a byte com o ZIP fictício daquele registro. O histórico aberto foi conferido também no tema claro e em 320–800 px. O E2E nativo passou com o acesso ao backup e à restauração pelo menu.
 
+O cabeçalho foi conferido em 300, 320, 360, 560 e 800 px, nos temas claro e escuro: nomes longos com espaços e sem espaços, altura constante, distância do ícone e do menu, degradê até transparente, reticências e tooltip com o texto inteiro. O teste estreita e alarga o painel para conferir que o corte aparece e desaparece, e cobre textos de conexão, operação em andamento e desconexão. O ZIP fica sempre visível e o mesmo teste importa e compara o arquivo fictício pelo controle reformulado.
+
 ## Bloqueio explicado, em 17/10/2026
 
 `npm run check` passou com 258 testes em 17 arquivos; `tests/explain.test.ts` cobre a frase para um arquivo usado que mudou só na loja, em conflito, os dois juntos e a ausência de bloqueio; `tests/folder.test.ts` cobre a gravação na pasta do projeto (quebras de linha e marca de ordem de bytes mantidas, recusa quando o arquivo mudou depois da comparação, arquivo ausente não criado, caminho com `..` recusado, projeto dentro de uma pasta acima) e a leitura da pasta. `npm run test:e2e` passou.

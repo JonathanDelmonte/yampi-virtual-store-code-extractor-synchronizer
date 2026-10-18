@@ -18,9 +18,12 @@ import {ExtensionJobs, LocalJobs, type JobClient} from './panel/client';
 import {canPickFolders, droppedItem, folderEntries, permitted, pickFolder, recallFolder, rememberFolder, replaceThemeFile, type Folder, type Remembered} from './panel/folder';
 import {renderDiff} from './panel/diff-view';
 import {HistoryPicker} from './panel/history-picker';
+import {trackTruncatedLabel} from './panel/truncated-label';
 import {$, el, glyph, list, plural, dateTime, since, enter, toast, copyText} from './panel/dom';
 const isDemo = ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).get('demo') === '1';
 const editorTab = new URLSearchParams(location.search).get('tab');
+trackTruncatedLabel($('store'));
+trackTruncatedLabel($('connection-state'));
 // --- State ------------------------------------------------------------------------------------
 // One screen at a time. The route is where the user chose to go; the view shown also depends on
 // what is happening (connecting, an operation running, its result).
@@ -156,7 +159,8 @@ function render(): void {
   $('review').hidden = view !== 'review';
   $('view-job').hidden = view !== 'job';
   $('done').hidden = view !== 'result';
-  $('store').textContent = connected && context ? context.storeName : view === 'offline' ? 'Editor indisponível' : 'Conectando…';
+  const storeName = connected && context ? context.storeName : view === 'offline' ? 'Editor indisponível' : 'Conectando…';
+  if ($('store').textContent !== storeName) $('store').textContent = storeName;
   const connectionText = connected ? view === 'job' ? 'Editor conectado · operação em andamento' : 'Editor conectado' : view === 'offline' ? 'Editor desconectado' : 'Conectando ao editor…';
   if ($('connection-state').textContent !== connectionText) $('connection-state').textContent = connectionText;
   const activeRoute = job && job.id === liveJob && ['job', 'result'].includes(view) ? job.kind === 'export' ? 'export' : 'send' : route;

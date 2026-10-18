@@ -31,6 +31,7 @@ try {
   });
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(45000);
   const shot = name => page.screenshot({path: path.join(evidence, name + '.png'), fullPage: true, animations: 'disabled', style: '#demo-notice, #fixture { display: none !important; }'});
+  const headerShot = name => page.locator('#topbar').screenshot({path: path.join(evidence, name + '.png'), animations: 'disabled'});
   async function fits(label) {
     const layout = await page.evaluate(() => ({viewport: innerWidth, document: document.documentElement.scrollWidth}));
     assert.ok(layout.document <= layout.viewport, label + ': rolagem lateral ' + JSON.stringify(layout));
@@ -45,6 +46,53 @@ try {
   assert.equal(await page.getByRole('tab', {name: 'Baixar arquivos'}).getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator('#export-section #export').count(), 1, 'A ação de baixar deve estar na própria seção.');
   assert.equal(await page.locator('#dock').evaluate(node => getComputedStyle(node).position), 'static');
+  const headerCopy = await page.evaluate(() => ({store: document.querySelector('#store').textContent, state: document.querySelector('#connection-state').textContent}));
+  await headerShot('cabecalho-curto-dark');
+  const longStoreNames = ['Loja fictícia de decoração, presentes e acessórios para toda a casa — unidade de testes', 'LOJA_FICTICIA_' + 'A'.repeat(110)];
+  for (const colorScheme of ['dark', 'light']) {
+    await page.emulateMedia({colorScheme});
+    for (const width of [300, 320, 360, 560, 800]) {
+      await page.setViewportSize({width, height: 900});
+      const height = await page.locator('#topbar').evaluate(node => node.getBoundingClientRect().height);
+      for (const name of longStoreNames) {
+        await page.locator('#store').evaluate((node, text) => node.textContent = text, name);
+        await page.waitForFunction(() => document.querySelector('#store').parentElement.dataset.truncated === 'true');
+        const geometry = await page.locator('#store').evaluate(node => {
+          const line = node.parentElement, icon = document.querySelector('.connection-icon'), menu = document.querySelector('#menu');
+          return {height: document.querySelector('#topbar').getBoundingClientRect().height, lineHeight: node.getBoundingClientRect().height, mask: getComputedStyle(node).maskImage, ellipsis: getComputedStyle(line.lastElementChild).display, gap: line.getBoundingClientRect().left - icon.getBoundingClientRect().right, menuGap: menu.getBoundingClientRect().left - line.getBoundingClientRect().right};
+        });
+        assert.equal(geometry.height, height, 'O nome longo não aumenta a altura do cabeçalho.');
+        assert.ok(geometry.lineHeight < 21, 'O nome deve ocupar só uma linha.');
+        assert.match(geometry.mask, /linear-gradient/); assert.match(geometry.mask, /rgba\(0, 0, 0, 0\)/);
+        assert.notEqual(geometry.ellipsis, 'none'); assert.ok(geometry.gap >= 12); assert.ok(geometry.menuGap >= 12);
+        assert.equal(await page.locator('#store').getAttribute('title'), name, 'O nome completo fica no tooltip.');
+        await fits('cabeçalho ' + colorScheme + ' ' + width);
+      }
+    }
+    await page.setViewportSize({width: 360, height: 900});
+    await page.locator('#store').evaluate((node, text) => node.textContent = text, longStoreNames[0]);
+    await page.waitForFunction(text => document.querySelector('#store').title === text, longStoreNames[0]);
+    await shot('loja-nome-longo-' + colorScheme);
+    await headerShot('cabecalho-longo-' + colorScheme);
+  }
+  await page.setViewportSize({width: 300, height: 900});
+  await page.locator('#store').evaluate(node => node.textContent = 'Loja fictícia de artigos e acessórios');
+  await page.waitForFunction(() => document.querySelector('#store').parentElement.dataset.truncated === 'true');
+  await page.setViewportSize({width: 800, height: 900});
+  await page.waitForFunction(() => document.querySelector('#store').parentElement.dataset.truncated === 'false');
+  assert.equal(await page.locator('#store + .connection-ellipsis').isVisible(), false, 'Ao ganhar espaço, retira o degradê e as reticências.');
+  assert.equal(await page.locator('#store').evaluate(node => getComputedStyle(node).maskImage), 'none');
+  for (const [state, text] of [['busy', 'Editor conectado · operação em andamento'], ['error', 'Editor desconectado'], ['idle', 'Conectando ao editor…']]) {
+    await page.setViewportSize({width: 300, height: 900});
+    await page.evaluate(({state, text}) => {document.body.dataset.connection = state; document.querySelector('#connection-state').textContent = text;}, {state, text});
+    await page.waitForFunction(text => document.querySelector('#connection-state').title === text, text);
+    assert.ok(await page.locator('#connection-state').evaluate(node => node.getBoundingClientRect().height < 18));
+    await fits('estado ' + state);
+    await shot('loja-' + state);
+  }
+  await page.evaluate(copy => {document.body.dataset.connection = 'connected'; document.querySelector('#store').textContent = copy.store; document.querySelector('#connection-state').textContent = copy.state;}, headerCopy);
+  await page.setViewportSize({width: 360, height: 900});
+  await page.waitForFunction(() => document.querySelector('#store').parentElement.dataset.truncated === 'false');
   await page.locator('#include-preview').uncheck();
   for (const colorScheme of ['dark', 'light']) {
     await page.emulateMedia({colorScheme});
@@ -168,7 +216,7 @@ try {
   const operations = await page.locator('#fixture-frame').evaluate(frame => frame.contentWindow.fictitiousOperations);
   assert.deepEqual(operations, {dispatch: 0, save: 0, forbidden: 0, add: 0}, 'Navegação, exportação e comparação não podem gravar.');
   assert.deepEqual(foreign, []); assert.deepEqual(errors, []);
-  await writeFile(path.join(evidence, 'report.json'), JSON.stringify({fictionalOnly: true, viewports, keyboardTabs: true, zipImported: true, reviewPreserved: true, inlineActions: true, historyPicker: true, historyStoreIsolation: true, selectedBackupCorrect: true, mutations: 0, errors}, null, 2) + '\n');
+  await writeFile(path.join(evidence, 'report.json'), JSON.stringify({fictionalOnly: true, viewports, connectionHeader: true, longStoreNames: true, keyboardTabs: true, zipImported: true, reviewPreserved: true, inlineActions: true, historyPicker: true, historyStoreIsolation: true, selectedBackupCorrect: true, mutations: 0, errors}, null, 2) + '\n');
   console.log('Painel aprovado: abas, ZIP, comparação, progresso e temas; histórico estilizado com teclado, Escape e clique fora; menu e seleção preservados; backup correto do envio escolhido; isolamento de lojas. Zero gravações ou acessos a loja real.');
 } finally {
   await browser.close(); await new Promise(resolve => server.close(resolve));

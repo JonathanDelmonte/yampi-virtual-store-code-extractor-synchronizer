@@ -74,9 +74,9 @@ Mantém a paleta clara/escura, as fontes Atkinson e o desenho dos botões da 0.6
 | Antes | Depois | Motivo |
 | --- | --- | --- |
 | Tela inicial com duas escolhas | Abas **Baixar arquivos** e **Importar projeto**, com abertura direta no download | Reduzir um clique e manter o contexto visível |
-| Ponto de conexão sem texto visível | Nome da loja, estado conectado/desconectado e aviso de operação em andamento | Explicar a situação sem depender de cor |
+| Ponto próximo do nome, com possibilidade de quebra de linha | Ícone de conexão, espaço de 12 px e textos em uma linha; degradê e reticências no excesso, com tooltip completo | Dar espaço ao texto e manter o cabeçalho estável |
 | Ação na barra fixa inferior | Ação na seção de download, escolha, revisão, andamento ou resultado | Aproximar o botão do conteúdo a que ele se refere |
-| Campo nativo de ZIP sem orientação | Seletor integrado com foco visível, nome do arquivo e instrução de `npm run pack` | Tornar a alternativa ao uso da pasta compreensível |
+| ZIP escondido num acordeão igual aos tutoriais | Bloco **Importar por ZIP**, sempre visível, com botão direto, nome do arquivo e instrução de `npm run pack` | Apresentar a alternativa como uma ação |
 | Recuperação repetida abaixo das duas abas | Histórico, backups e restauração somente no menu **⋯** | Evitar duplicação nas telas de trabalho |
 | Ajuda resumida e progresso recolhido | Tutoriais próximos das ações; etapas e registro inicialmente abertos | Recuperar a informação sem voltar à aparência antiga |
 | Assinatura e informações no rodapé da página | Somente dentro do menu **⋯** | Deixar as telas de trabalho mais limpas |
