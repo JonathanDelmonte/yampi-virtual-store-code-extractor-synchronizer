@@ -1,10 +1,11 @@
 import {MAX_FILES, ROOTS, type Context} from '../core/model';
 import type {ProjectEntry} from '../core/archive';
+import {PENDING, projectFolderPath, projectPath, type ProjectFolder} from '../core/project-folder';
 import {contextKey, get, put} from '../storage';
 // Project folders through the File System Access API: only tema/ and .yampi-sync/ are walked and
 // read, so picking a folder with node_modules is instant, and the folder can be remembered
-// for a one-click "read again and compare" next time. The one write is a theme file the user
-// asks to bring from the store (replaceThemeFile).
+// for a one-click "read again and compare" next time. Writes, always after a click of the user
+// that granted write access, go through openProject: tema/ and the extension's own records.
 type Permission = 'granted' | 'denied' | 'prompt';
 type Handle = FileSystemHandle & {kind: 'file' | 'directory'; name: string};
 type Mode = {mode: 'read' | 'readwrite'};
@@ -68,9 +69,59 @@ export async function folderEntries(root: Folder, signal?: AbortSignal): Promise
   if (theme) await collect(theme, 'tema/', found, signal);
   const meta = await child(project, '.yampi-sync', 'directory') as Folder;
   found.push({path: '.yampi-sync/manifest.json', file: await (await child(meta, 'manifest.json', 'file') as FileSystemFileHandle).getFile()});
+  // A reference rewrite that stopped midway: the reader accepts either state per file.
+  const pending = await child(meta, PENDING.split('/').pop()!, 'file') as FileSystemFileHandle | undefined;
+  if (pending) found.push({path: PENDING, file: await pending.getFile()});
   const baseline = await child(meta, 'baseline', 'directory') as Folder | undefined;
   if (baseline) await collect(baseline, '.yampi-sync/baseline/', found, signal);
   return {name, entries: found.map(entry)};
+}
+const missing = (error: unknown) => error instanceof DOMException && ['NotFoundError', 'TypeMismatchError'].includes(error.name);
+// The exported project inside the chosen folder, for the writes of an update, a version or a
+// restore. A bare theme folder has no reference to update and no place for versions.
+export async function openProject(root: Folder): Promise<ProjectFolder> {
+  const {project, name} = await locate(root);
+  if (!project) throw new Error('Esta pasta não tem .yampi-sync/. Escolha a pasta do projeto baixado pela extensão para atualizar e guardar versões.');
+  const walk = async (parts: string[], create: boolean): Promise<FileSystemDirectoryHandle | undefined> => {
+    let current: FileSystemDirectoryHandle = project;
+    for (const part of parts) {
+      try {current = await current.getDirectoryHandle(part, {create});}
+      catch (error) {if (!create && missing(error)) return undefined; throw error;}
+    }
+    return current;
+  };
+  const split = (path: string) => {const parts = projectPath(path).split('/'); return {parts, file: parts.pop()!};};
+  const handle = async (path: string) => {
+    const {parts, file} = split(path), folder = await walk(parts, false);
+    try {return folder && await folder.getFileHandle(file);} catch (error) {if (missing(error)) return undefined; throw error;}
+  };
+  return {
+    name,
+    async read(path) {const found = await handle(path); return found ? new Uint8Array(await (await found.getFile()).arrayBuffer()) : undefined;},
+    async write(path, bytes) {
+      const {parts, file} = split(path), folder = (await walk(parts, true))!;
+      // The browser writes to a temporary file and swaps it in on close: a file is never half written.
+      const writer = await (await folder.getFileHandle(file, {create: true})).createWritable();
+      try {await writer.write(new Uint8Array(bytes));} catch (error) {await writer.abort().catch(() => {}); throw error;}
+      await writer.close();
+    },
+    async remove(path) {
+      const {parts, file} = split(path), folder = await walk(parts, false);
+      try {await folder?.removeEntry(file);} catch (error) {if (!missing(error)) throw error;}
+    },
+    async list(folder) {
+      const start = await walk(projectFolderPath(folder).split('/'), false), out: string[] = [];
+      const visit = async (dir: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
+        for await (const entry of (dir as Folder).values()) {
+          if (entry.kind === 'directory') await visit(entry as unknown as FileSystemDirectoryHandle, `${prefix}${entry.name}/`);
+          else out.push(prefix + entry.name);
+          if (out.length > LIMIT * 4) throw new Error(`Arquivos demais em ${folder}.`);
+        }
+      };
+      if (start) await visit(start, folder + '/');
+      return out.sort();
+    }
+  };
 }
 const entry = ({path, file}: Found): ProjectEntry => ({path, size: file.size, read: async () => new Uint8Array(await file.arrayBuffer())});
 // Reading again later needs the user's permission once more; a click is enough.

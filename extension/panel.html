@@ -57,6 +57,12 @@
         <p id="local-info" class="aside">Nenhum projeto escolhido.</p>
         <p id="reference-info" class="aside"></p>
       </div>
+      <div id="pick-tools" class="tools-slot">
+        <div id="project-tools" class="project-tools" hidden>
+          <p class="links"><button id="update-project" class="link" disabled>Atualizar da loja</button><button id="open-versions" class="link" disabled>Versões</button></p>
+          <p id="project-tools-note" class="aside" hidden>Para atualizar da loja e guardar versões, escolha a pasta do projeto, não o ZIP.</p>
+        </div>
+      </div>
       <div id="pick-actions" class="action-slot"></div>
       <section id="zip-choice" class="zip-import" aria-labelledby="zip-title">
         <div class="zip-heading"><span class="zip-document" aria-hidden="true">.zip</span><div><h2 id="zip-title">Importar por ZIP</h2><p>Uma alternativa à pasta do projeto.</p></div></div>
@@ -74,6 +80,7 @@
         <div class="count"><strong id="count-create">0</strong><span id="count-create-label">novos</span></div>
         <div class="count"><strong id="count-upload">0</strong><span id="count-upload-label">imagens</span></div>
       </div>
+      <label id="images-option" class="option" hidden><span class="option-text"><strong>Enviar imagens novas</strong><span id="images-option-text">Desligado: as imagens novas ficam só no projeto.</span></span><span class="toggle"><input type="checkbox" id="send-images"><span aria-hidden="true"></span></span></label>
       <div id="attention" class="attention" hidden><h2 id="attention-title">Precisa da sua decisão</h2><ul id="attention-list"></ul></div>
       <details id="all-files" class="help files">
         <summary id="files-summary">Ver os arquivos</summary>
@@ -93,7 +100,20 @@
         <p id="reference-detail" class="aside"></p>
       </details>
       <p class="links"><button id="compare" class="link" disabled>Comparar de novo</button><button id="pick-other" class="link">Trocar a pasta</button></p>
+      <div id="review-tools" class="tools-slot"></div>
       <div id="review-actions" class="action-slot"></div>
+    </section>
+
+    <section id="update-view" class="view" aria-label="Atualizar a pasta do projeto" hidden>
+      <div class="counts">
+        <div class="count"><strong id="count-store">0</strong><span id="count-store-label">da loja</span></div>
+        <div class="count"><strong id="count-merged">0</strong><span id="count-merged-label">juntados</span></div>
+        <div class="count"><strong id="count-decide">0</strong><span id="count-decide-label">para decidir</span></div>
+      </div>
+      <div id="update-attention" class="attention" hidden><h2 id="update-attention-title">Para decidir</h2><ul id="update-attention-list"></ul></div>
+      <details id="update-files" class="help files"><summary id="update-files-summary">Ver os arquivos</summary><ul id="update-rows" class="file-list" aria-label="Arquivos da atualização"></ul></details>
+      <p id="update-safety" class="safe">Antes de gravar, a referência, a pasta e a loja ficam guardadas como versões em <code>.yampi-sync/versoes/</code>, só com textos. Nada é enviado à loja.</p>
+      <div id="update-actions" class="action-slot"></div>
     </section>
 
     <section id="view-job" class="view" aria-label="Operação em andamento" hidden>
@@ -134,6 +154,8 @@
       <button id="reload-folder" class="button primary" hidden><span id="reload-folder-label">Reler a pasta e comparar</span></button>
       <button id="pick-folder" class="button primary" hidden>Escolher a pasta</button>
       <button id="apply" class="button primary" hidden disabled><span id="apply-label">Enviar</span></button>
+      <button id="apply-update" class="button primary" hidden disabled>Atualizar a pasta</button>
+      <button id="cancel-update" class="button" hidden>Voltar</button>
       <button id="resume" class="button primary" hidden>Continuar de onde parou</button>
       <button id="open-preview" class="button primary" hidden>Abrir a prévia</button>
       <button id="show-file" class="button primary" hidden>Mostrar o ZIP</button>
@@ -154,7 +176,7 @@
       <p>A restauração compara de novo antes de gravar e protege alterações feitas depois do envio. Nada é restaurado automaticamente.</p>
       <details class="help local-data"><summary>Gerenciar dados locais</summary><p>Remove desta extensão os originais, o projeto e os backups guardados. Os ZIPs já baixados e os arquivos da loja são preservados.</p><button id="clear" class="link danger">Apagar dados locais da extensão</button></details>
     </div>
-    <p class="about"><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer"><img src="brand/zirtuno-logo.png" alt="" width="16" height="16">Zirtuno Sync <span class="version">0.7.0</span></a><span>Ferramenta independente. Sem telemetria. Nunca exclui, renomeia nem publica.</span></p>
+    <p class="about"><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer"><img src="brand/zirtuno-logo.png" alt="" width="16" height="16">Zirtuno Sync <span class="version">0.8.0</span></a><span>Ferramenta independente. Sem telemetria. Nunca exclui, renomeia nem publica.</span></p>
   </div>
   <div id="confirm-panel" class="sheet" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
     <h2 id="confirm-title" class="sheet-title">Enviar para <span id="target-store"></span>?</h2>
@@ -166,6 +188,23 @@
     </ul>
     <div class="sheet-actions"><button id="confirm-send" class="button primary">Enviar agora</button><button id="cancel-send" class="button">Voltar</button></div>
   </div>
+  <div id="versions-sheet" class="sheet tall" role="dialog" aria-modal="true" aria-labelledby="versions-title" hidden>
+    <div class="sheet-head"><h2 id="versions-title" class="sheet-title">Versões do projeto</h2><button id="close-versions" class="bar-button" aria-label="Fechar"><svg class="glyph"><use href="#i-x"/></svg></button></div>
+    <p class="aside">Guardadas na pasta do projeto, em <code>.yampi-sync/versoes/</code>, e levadas junto com ela. Só textos: imagens não entram.</p>
+    <div id="versions-home">
+      <form id="version-form" class="version-form"><input id="version-name" class="search" type="text" maxlength="120" placeholder="Nome, ex.: Banner de Natal aprovado" aria-label="Nome da versão"><button id="save-version" class="button" type="submit">Salvar a pasta</button></form>
+      <ul id="versions-list" class="file-list" aria-label="Versões guardadas"></ul>
+      <p id="versions-empty" class="aside" hidden>Nenhuma versão ainda. A extensão guarda uma antes de cada atualização e de cada recuperação; salve outras quando quiser.</p>
+      <p id="versions-skipped" class="aside" hidden></p>
+    </div>
+    <div id="version-detail" hidden>
+      <p class="links"><button id="version-back" class="link">Todas as versões</button></p>
+      <h3 id="version-title" class="mono-title"></h3>
+      <p id="version-summary" class="aside"></p>
+      <ul id="version-rows" class="file-list" aria-label="Diferenças para a pasta"></ul>
+      <div class="sheet-actions"><button id="restore-all" class="button">Trazer tudo desta versão</button></div>
+    </div>
+  </div>
   <div id="diff" class="sheet tall" role="dialog" aria-modal="true" aria-labelledby="diff-title" hidden>
     <div class="sheet-head"><h2 id="diff-title" class="mono-title"></h2><button id="close-diff" class="bar-button" aria-label="Fechar"><svg class="glyph"><use href="#i-x"/></svg></button></div>
     <div class="switch" role="tablist" aria-label="Versões comparadas">
@@ -176,7 +215,7 @@
     </div>
     <p id="diff-stats" class="aside"></p>
     <div id="diff-body" class="diff-body" tabindex="0" role="region" aria-label="Linhas alteradas"></div>
-    <div class="sheet-actions"><button id="diff-write-store" class="button primary" hidden>Usar no projeto</button><button id="diff-copy-store" class="button primary" hidden>Copiar a versão da loja</button><button id="diff-use-project" class="button primary" hidden>Usar a versão do projeto</button><button id="diff-keep-store" class="button" hidden>Manter a versão da loja</button></div>
+    <div class="sheet-actions"><button id="diff-write-store" class="button primary" hidden>Usar no projeto</button><button id="diff-copy-store" class="button primary" hidden>Copiar a versão da loja</button><button id="diff-use-project" class="button primary" hidden>Usar a versão do projeto</button><button id="diff-keep-store" class="button" hidden>Manter a versão da loja</button><button id="diff-choose-marks" class="button" hidden>Marcar no arquivo</button><button id="diff-choose-mine" class="button" hidden>Manter a da pasta</button><button id="diff-choose-store" class="button" hidden>Usar a da loja</button><button id="diff-restore" class="button primary" hidden>Trazer para a pasta</button></div>
   </div>
   <div id="toast" class="toast" role="status" hidden></div>
   <span id="announcer" class="sr-only" aria-live="polite"></span>

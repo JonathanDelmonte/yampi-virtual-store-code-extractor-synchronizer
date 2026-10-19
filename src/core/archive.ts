@@ -1,10 +1,14 @@
 import {unzipSync, strToU8} from 'fflate';
 import {compressArchive,type ArchiveEntries} from './compression';
-import {MAX_FILES, MAX_TOTAL_BYTES, MAX_FILE_BYTES, ROOTS, safeFiles, safeSnapshot, hashBytes, imagePath, lineEnding, validateContext, validatePath, type Snapshot, type Manifest, type Files, type Assets} from './model';
+import {MAX_FILES, MAX_TOTAL_BYTES, MAX_FILE_BYTES, ROOTS, safeFiles, safeSnapshot, hashBytes, imagePath, lineEnding, validateContext, validatePath, type Snapshot, type Manifest, type FileHash, type Files, type Assets} from './model';
 import {previewEntries, demonstration, TOOL_VERSION, type PreviewBundle} from './preview';
 import {localKit} from './local-kit';
+import {PENDING} from './project-folder';
+import type {PendingReference} from './reference';
 const metaPath = '.yampi-sync/manifest.json';
-export interface Project {baseline: Snapshot; local: Files; localAssets: Assets}
+// manifest: what describes the reference (for a later rewrite). interrupted: a rewrite of the
+// reference stopped midway; each reference file was accepted in either of its two states.
+export interface Project {baseline: Snapshot; local: Files; localAssets: Assets; manifest?: Manifest; interrupted?: boolean}
 export const SKIPPED = [{path: 'logs/', reason: 'Logs do editor não são exportados nem enviados: não fazem parte do tema. Consulte-os no editor da Yampi.'}];
 // The theme identity comes from the published storefront when captured; the
 // editor does not expose whether it edits a draft, so the state stays unknown.
@@ -41,7 +45,7 @@ function safeArchivePath(path: string): void {
 }
 function irrelevant(path: string): boolean {
   const parts = path.split('/');
-  if(path.includes('.yampi-sync/updates/'))return true;
+  if(path.includes('.yampi-sync/updates/')||path.includes('.yampi-sync/versoes/'))return true;
   if (parts.includes('tema') || path.includes('.yampi-sync/baseline/')) return false;
   return parts.some(p => ['node_modules', '.git', '.cache', 'backups', 'exports', 'preview'].includes(p));
 }
@@ -70,28 +74,59 @@ async function decodeEntries(input: Record<string, Uint8Array>): Promise<Project
     if (!p.startsWith(prefix)) throw new Error('O ZIP contém mais de uma raiz de projeto.');
     archive[p.slice(prefix.length)] = value;
   }
-  const m = JSON.parse(text(archive[metaPath])) as Manifest;
-  if (!m || m.format !== 'yampi-theme-sync' || ![1, 2, 3].includes(m.version) || !Array.isArray(m.files) || !m.files.length || m.files.length > MAX_FILES || typeof m.capturedAt !== 'string' || !Number.isFinite(Date.parse(m.capturedAt))) throw new Error('Formato de exportação não reconhecido.');
+  const stored = validManifest(JSON.parse(text(archive[metaPath])));
+  // A rewrite of the reference that stopped midway (see writeReference): its marker names the two
+  // states, and each reference file may be in either. Its new manifest describes the reference.
+  const pending = archive[PENDING] ? validPending(JSON.parse(text(archive[PENDING]))) : undefined;
+  const m = pending?.next ?? stored;
   const context = validateContext(m.context);
+  const states = pending ? [pending.current, pending.next.files] : [m.files];
+  const accepted = new Map<string, FileHash[]>(), names = new Map<string, string>();
+  for (const files of states) {
+    const seen = new Set<string>();
+    for (const f of files) {
+      validFileHash(f);
+      const key = f.path.toLowerCase();
+      if (seen.has(key) || names.has(key) && names.get(key) !== f.path) throw new Error(`Baseline duplicada: ${f.path}`);
+      seen.add(key); names.set(key, f.path);
+      accepted.set(f.path, [...accepted.get(f.path) || [], f]);
+    }
+  }
   const bases: [string, string][] = [], assets: Assets = Object.create(null);
-  const seen = new Set<string>();
-  for (const f of m.files) {
-    if (!f || typeof f.path !== 'string' || !Number.isInteger(f.bytes) || f.bytes < 0 || f.bytes > MAX_FILE_BYTES || typeof f.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(f.sha256) || (f.kind !== undefined && !['text', 'image'].includes(f.kind))) throw new Error('Registro de integridade inválido.');
-    validatePath(f.path);
-    if (seen.has(f.path.toLowerCase())) throw new Error(`Baseline duplicada: ${f.path}`);
-    seen.add(f.path.toLowerCase());
-    const value = archive[`.yampi-sync/baseline/${f.path}`];
-    if (!value || value.length !== f.bytes || await hashBytes(value) !== f.sha256) throw new Error(`Baseline ausente ou alterada: ${f.path}`);
-    if (f.kind === 'image') assets[f.path] = value;
-    else bases.push([f.path, text(value)]);
+  for (const [path, records] of accepted) {
+    const value = archive[`.yampi-sync/baseline/${path}`];
+    if (!value) {
+      // Absent is one of the two states only for a file that one of them does not have.
+      if (pending && records.length < 2) continue;
+      throw new Error(`Baseline ausente ou alterada: ${path}`);
+    }
+    const hash = await hashBytes(value), match = records.find(f => f.bytes === value.length && f.sha256 === hash);
+    if (!match) throw new Error(`Baseline ausente ou alterada: ${path}`);
+    if (match.kind === 'image') assets[path] = value;
+    else bases.push([path, text(value)]);
   }
   for (const path of Object.keys(archive).filter(p => p.startsWith('.yampi-sync/baseline/'))) {
-    if (!m.files.some(f => path === `.yampi-sync/baseline/${f.path}`)) throw new Error(`Baseline sem registro no manifesto: ${path}`);
+    if (!accepted.has(path.slice('.yampi-sync/baseline/'.length))) throw new Error(`Baseline sem registro no manifesto: ${path}`);
   }
   const baseline = safeSnapshot({context, capturedAt: m.capturedAt, files: safeFiles(bases), ...(Object.keys(assets).length ? {assets} : {})});
   const edited = readThemeEntries(Object.entries(archive).filter(([p]) => p.startsWith('tema/')).map(([p, v]) => [p.slice(5), v]));
   safeSnapshot({...baseline, files: edited.files, assets: edited.assets});
-  return {baseline, local: edited.files, localAssets: edited.assets};
+  return {baseline, local: edited.files, localAssets: edited.assets, manifest: m, ...(pending ? {interrupted: true} : {})};
+}
+function validManifest(value: unknown): Manifest {
+  const m = value as Manifest;
+  if (!m || m.format !== 'yampi-theme-sync' || ![1, 2, 3].includes(m.version) || !Array.isArray(m.files) || !m.files.length || m.files.length > MAX_FILES || typeof m.capturedAt !== 'string' || !Number.isFinite(Date.parse(m.capturedAt))) throw new Error('Formato de exportação não reconhecido.');
+  validateContext(m.context);
+  return m;
+}
+function validFileHash(f: FileHash): void {
+  if (!f || typeof f.path !== 'string' || !Number.isInteger(f.bytes) || f.bytes < 0 || f.bytes > MAX_FILE_BYTES || typeof f.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(f.sha256) || (f.kind !== undefined && !['text', 'image'].includes(f.kind))) throw new Error('Registro de integridade inválido.');
+  validatePath(f.path);
+}
+function validPending(value: unknown): Pick<PendingReference, 'current' | 'next'> {
+  const p = value as PendingReference;
+  if (!p || p.format !== 'zirtuno-sync-referencia' || p.version !== 1 || !Array.isArray(p.current) || p.current.length > MAX_FILES) throw new Error('Registro de atualização interrompida inválido. Não apague .yampi-sync/: baixe a loja de novo em outra pasta e compare.');
+  return {current: p.current, next: validManifest(p.next)};
 }
 function readThemeEntries(entries: [string, Uint8Array][]): {files: Files; assets: Assets} {
   const files: [string, string][] = [], assets: Assets = Object.create(null);
@@ -107,7 +142,7 @@ export async function decodeProject(data: Uint8Array): Promise<Project> {return 
 // chosen folder and a way to read it, so only the files that matter are ever read.
 export interface ProjectEntry {path: string; size: number; read(): Promise<Uint8Array>}
 export function isProjectFile(path: string, project: boolean): boolean {
-  return project ? path.startsWith('tema/') || path.startsWith('.yampi-sync/baseline/') || path === metaPath : ROOTS.has(path.split('/')[0]);
+  return project ? path.startsWith('tema/') || path.startsWith('.yampi-sync/baseline/') || path === metaPath || path === PENDING : ROOTS.has(path.split('/')[0]);
 }
 export async function readProjectEntries(source: ProjectEntry[], onProgress?: (done: number, total: number) => void): Promise<Project | {local: Files; localAssets: Assets}> {
   const project = source.some(f => f.path === metaPath);

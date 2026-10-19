@@ -1,9 +1,15 @@
 import {sameContext, type Assets, type Context, type Files, type Journal, type Plan, type Snapshot} from './model';
 import type {Capture} from './workflow';
+import type {Resolution} from './update';
 // What the panel keeps between openings, per store: the reference export, the project loaded
 // from the computer, the last reading of the store and the user's choices. Closing the panel,
 // switching tabs or restarting the browser never sends the user back to the first step.
-export interface Review {reading?: Capture; overrides: string[]; selected?: string[]; discarded?: string[]}
+// images: new images go with this send. Off by default and again after every comparison: the user
+// turns it on, after a warning, for the send at hand.
+export interface Review {reading?: Capture; overrides: string[]; selected?: string[]; discarded?: string[]; images?: boolean}
+// An update of the project folder from the store: the full reading of the store and the user's
+// choice for each file the update cannot decide alone.
+export interface Update {reading?: Capture; choices: Record<string, Resolution>}
 export interface ProjectSource {local: Files; localAssets: Assets; name: string; kind: 'folder' | 'zip' | 'demo'; loadedAt: string}
 // journals: the sends that moved the reference forward since the export.
 export interface Lineage {exportedAt: string; journals: string[]; advancedAt?: string}
@@ -13,6 +19,7 @@ export interface Workspace {
   project?: ProjectSource; review?: Review;
   // Undoing a send compares the send's record instead of the project.
   restore?: Review & {journalId: string};
+  update?: Update;
 }
 export function emptyWorkspace(context: Context): Workspace {return {version: 1, context, updatedAt: new Date().toISOString()};}
 // The export inside a project folder is the reference, unless this installation has already

@@ -432,3 +432,18 @@ body[data-input="keyboard"] * { transition-duration: 0s !important; }
 @media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) {
   :root { --glass: rgba(28, 31, 33, .9); }
 }
+/* Project tools, update review and versions (0.8.0): functional layout, visual pass pending. */
+.tools-slot:empty { display: none; }
+.project-tools { display: grid; gap: 4px; }
+.project-tools .links { margin: 0; }
+.file-row.plain { grid-template-columns: minmax(0, 1fr) auto; }
+.row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; padding-top: 2px; }
+.row-status.u-store, .row-status.u-merged, .row-status.u-removed { color: var(--signal-ink); }
+.row-status.u-same, .row-status.u-mine { color: var(--muted); }
+.row-status.u-conflict, .row-status.u-removed-edited, .row-status.u-deleted-changed, .row-status.u-marked { color: var(--warn); }
+.version-form { display: flex; gap: 8px; margin: 10px 0; }
+.version-form .button { flex: none; min-height: 38px; padding: 6px 14px; }
+.version-row .file-name { font-family: inherit; }
+#version-detail .mono-title { margin-top: 2px; }
+.notice[data-tone="ok"] { background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.notice[data-tone="ok"] strong { color: var(--ok); }

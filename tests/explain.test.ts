@@ -9,11 +9,11 @@ describe('motivo do bloqueio no painel', () => {
   test('arquivo usado que mudou só na loja: diz que mudou na loja e qual ver', () => {
     const plan = makePlan(snapshot(base), {...base, [home]: `{% include '${hero}' %} novo`}, snapshot({...base, [hero]: 'hero da loja'}));
     expect(row(plan, hero).status).toBe('remote-only');
-    expect(explainBlock(plan, row(plan, home))).toEqual({text: `${home} usa ${hero}, que mudou na loja depois da sua cópia.`, storeOnly: [hero], conflicts: []});
+    expect(explainBlock(plan, row(plan, home))).toEqual({text: `${home} usa ${hero}, que mudou na loja depois da sua cópia.`, storeOnly: [hero], conflicts: [], images: []});
   });
   test('arquivo usado em conflito: pede a decisão sobre ele', () => {
     const plan = makePlan(snapshot(base), {...base, [home]: `{% include '${hero}' %} novo`, [hero]: 'hero do projeto'}, snapshot({...base, [hero]: 'hero da loja'}));
-    expect(explainBlock(plan, row(plan, home))).toEqual({text: `${home} usa ${hero}, que mudou na loja e no projeto.`, storeOnly: [], conflicts: [hero]});
+    expect(explainBlock(plan, row(plan, home))).toEqual({text: `${home} usa ${hero}, que mudou na loja e no projeto.`, storeOnly: [], conflicts: [hero], images: []});
   });
   test('vários motivos ficam numa frase, separados', () => {
     const local = {...base, [home]: `{% include '${hero}' %}{% include '${card}' %} novo`, [card]: 'card do projeto'};

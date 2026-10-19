@@ -1,6 +1,6 @@
 # Próximas etapas
 
-**Estado em 16/10/2026:** versão 0.6.0, com as operações em segundo plano, progresso, retomada de envios interrompidos, comparação parcial e o painel por etapas, validada somente com o editor fictício. Numa loja real, a 0.5.0 criou 18 textos e enviou uma imagem, conferidos após recarregar. Próxima etapa: envio real controlado com a 0.6.0, acompanhado pelo proprietário, conferindo textos alterados, as demais imagens, o painel fechado no meio do envio, a retomada, o caminho de `assets_url` e a restauração. Histórico em [JOURNAL.md](JOURNAL.md).
+**Estado em 19/10/2026:** versão 0.8.0, validada somente com o editor fictício. Ela traz **Atualizar da loja** (junção linha a linha, conflitos marcados no arquivo e referência gravada na própria pasta), versões só de texto em `.yampi-sync/versoes/` e envio de imagens desligado por padrão. Numa loja real, a 0.5.0 criou 18 textos e enviou uma imagem, conferidos após recarregar. Próximas etapas: conferir a gravação numa pasta real pelo painel lateral do Chrome; fazer uma atualização real (só leitura da loja) acompanhada pelo proprietário; o envio real controlado da 0.6.0 em diante; e a revisão visual das telas de atualização e versões. Histórico em [JOURNAL.md](JOURNAL.md).
 
 ## Validação controlada do adaptador real
 
@@ -19,7 +19,7 @@
 
 ## Arquivos novos e imagens do tema
 
-Exportação de imagens PNG/JPG/JPEG/WebP/SVG implementada, com ciclo completo de PNG testado no editor fictício; conferir os demais formatos, preview/CORS e a equivalência dos bytes na Yampi real. Investigar controles reais de criação e substituição de imagens. Desde a 0.5.0, a extensão cria textos novos e envia imagens novas pelos controles do próprio editor, e imagens de subpastas vão para `assets/images` com as referências reescritas ([SPEC.md](SPEC.md)). O módulo do editor mostra que a Yampi não cria pastas nem substitui imagens. Falta conferir na Yampi real a criação pelo editor, a URL que `assets_url` gera e a leitura das imagens enviadas. Substituir uma imagem existente exigiria excluir; renomear e excluir continuam desativados e exigem um desenho separado de recuperação.
+Exportação de imagens PNG/JPG/JPEG/WebP/SVG implementada, com ciclo completo de PNG testado no editor fictício; conferir os demais formatos, preview/CORS e a equivalência dos bytes na Yampi real. Investigar controles reais de criação e substituição de imagens. Desde a 0.5.0, a extensão cria textos novos e envia imagens novas pelos controles do próprio editor (desde a 0.8.0, imagens só com a opção ligada na revisão), e imagens de subpastas vão para `assets/images` com as referências reescritas ([SPEC.md](SPEC.md)). O módulo do editor mostra que a Yampi não cria pastas nem substitui imagens. Falta conferir na Yampi real a criação pelo editor, a URL que `assets_url` gera e a leitura das imagens enviadas. Substituir uma imagem existente exigiria excluir; renomear e excluir continuam desativados e exigem um desenho separado de recuperação.
 
 ## Configurações e catálogo
 
@@ -27,4 +27,4 @@ São dados distintos dos arquivos do tema. A 0.4.0 captura os objetos públicos 
 
 ## Manutenção
 
-Histórico de envios isolado por loja, originais independentes, projeto local portátil, check de compilação e importação da pasta inteira/ZIP estão implementados. Ampliar a compatibilidade Twig/Sass/Vue 2 e simular plugins próprios exige exemplos fictícios das estruturas suportadas. A comparação por linhas existe desde a 0.6.0. Retomar uma exportação interrompida (hoje ela recomeça) e a identificação oficial de tema ainda podem ser adicionadas. O proprietário autorizou o código público; projetos e dados das lojas continuam excluídos deste repositório público.
+Histórico de envios isolado por loja, originais independentes, projeto local portátil, check de compilação e importação da pasta inteira/ZIP estão implementados. Ampliar a compatibilidade Twig/Sass/Vue 2 e simular plugins próprios exige exemplos fictícios das estruturas suportadas. A comparação por linhas existe desde a 0.6.0, e a junção por linhas, na atualização da pasta, desde a 0.8.0. Retomar uma exportação interrompida (hoje ela recomeça) e a identificação oficial de tema ainda podem ser adicionadas. O proprietário autorizou o código público; projetos e dados das lojas continuam excluídos deste repositório público.

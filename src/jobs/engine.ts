@@ -61,7 +61,7 @@ function remoteFetch(rpc: RPC, context: Context, signal: AbortSignal): PreviewFe
 }
 function titleFor(request: JobRequest, store: string): string {
   if (request.kind === 'export') return `Baixando o tema de ${store}`;
-  if (request.kind === 'compare') return request.scope === 'restore' ? `Preparando a restauração de ${store}` : `Comparando com ${store}`;
+  if (request.kind === 'compare') return request.scope === 'restore' ? `Preparando a restauração de ${store}` : request.scope === 'update' ? `Lendo ${store} para atualizar o projeto` : `Comparando com ${store}`;
   if (request.resume) return `Continuando o envio para ${store}`;
   return request.scope === 'restore' ? `Restaurando ${store}` : `Enviando para ${store}`;
 }
@@ -201,13 +201,18 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     step('prepare', 'Recarregando o editor');
     await adapter.refresh();
     tracker.finish('prepare');
-    const observed = await capture(adapter, {signal: control.signal, progress, notice, ...(request.full ? {} : {only: request.paths || []})});
+    // An update reads the whole store: any file the store changed may have to come to the project.
+    const whole = !!request.full || request.scope === 'update';
+    if (request.scope === 'update') tracker.relabel('read', 'Ler a loja inteira');
+    const observed = await capture(adapter, {signal: control.signal, progress, notice, ...(whole ? {} : {only: request.paths || []})});
     await updateWorkspace(expected, workspace => {
+      // Kept apart from the send's review: the folder changes only when the user applies it.
+      if (request.scope === 'update') {workspace.update = {reading: observed, choices: {}}; return;}
       const review = {reading: observed, overrides: []};
       if (request.scope === 'restore') workspace.restore = {...review, journalId: request.journalId!};
       else workspace.review = review;
     });
-    return {kind: 'compare' as const, read: Object.keys(observed.files).length + Object.keys(observed.assets || {}).length, listed: observed.inventory.length, full: !!request.full};
+    return {kind: 'compare' as const, read: Object.keys(observed.files).length + Object.keys(observed.assets || {}).length, listed: observed.inventory.length, full: whole};
   }
   async function send() {
     let previous: Journal | undefined;

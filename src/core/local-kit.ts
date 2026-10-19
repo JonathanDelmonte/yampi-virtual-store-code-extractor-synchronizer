@@ -39,6 +39,8 @@ node_modules/
 tema/
 .yampi-sync/baseline/
 .yampi-sync/manifest.json
+.yampi-sync/referencia-pendente.json
+.yampi-sync/versoes/
 preview/
 # Sobreposições locais da prévia; podem conter dados da loja.
 local.data.json
@@ -78,7 +80,15 @@ Abra http://127.0.0.1:5182: as páginas capturadas abrem pelos mesmos caminhos d
 
 Execute \`npm run pack\` e importe o ZIP indicado no terminal em **Enviar alterações** na extensão. Também pode selecionar esta pasta inteira. Confira a comparação e confirme o envio. A publicação continua manual na Yampi.
 
-\`npm run check:integrity -- --original\` confirma que o tema ainda é igual à exportação. \`npm run check:integrity -- --return-zip retorno-yampi.zip\` confere se o ZIP contém exatamente manifesto, originais e \`tema/\`, com os mesmos hashes.
+\`npm run check:integrity -- --original\` confirma que o tema ainda é igual à referência. \`npm run check:integrity -- --return-zip retorno-yampi.zip\` confere se o ZIP contém exatamente manifesto, originais e \`tema/\`, com os mesmos hashes.
+
+## Atualizar com a loja e guardar versões
+
+Antes de um trabalho novo, use **Atualizar da loja** na extensão, com esta pasta escolhida. A extensão lê a loja inteira e mostra o que vem para a pasta antes de gravar: o que só a loja mudou entra; o que só você mudou fica; mudanças dos dois lados em trechos diferentes são juntadas; as mesmas linhas mudadas dos dois jeitos ficam com as duas versões marcadas (\`<<<<<<<\`, \`=======\`, \`>>>>>>>\`) para você resolver no VS Code. Um arquivo com marcações nunca é enviado.
+
+Depois de cada atualização e de cada envio, a referência (\`.yampi-sync/manifest.json\` e \`.yampi-sync/baseline/\`) passa a ser a loja como a extensão a conhece por último. Assim, o próximo envio nunca desfaz o que o cliente mudou na loja.
+
+Antes de mudar a pasta, a extensão guarda versões em \`.yampi-sync/versoes/\`: a referência, a pasta e a loja, só com textos. Imagens não entram. Em **Versões**, abra uma versão para ver o que mudou desde então e trazer um arquivo, ou todos, de volta para \`tema/\`. A pasta de antes também fica guardada. Você pode salvar uma versão com nome a qualquer momento.
 
 ## Limitações do retorno
 
@@ -121,7 +131,7 @@ O primeiro comando mostra o que muda; o segundo aplica. Somente \`.yampi-sync/to
 
 ## Versionar em um repositório privado
 
-O \`.gitignore\` ignora \`tema/\`, originais, manifesto e \`preview/\` para evitar publicação acidental. Num repositório **privado**, remova essas linhas para versionar o tema. \`.gitattributes\` marca \`tema/\` e os originais como binários, preservando os bytes. Nunca versione credenciais, ZIPs de retorno ou dados de clientes.
+O \`.gitignore\` ignora \`tema/\`, originais, manifesto, versões e \`preview/\` para evitar publicação acidental. Num repositório **privado**, remova essas linhas para versionar o tema. \`.gitattributes\` marca \`tema/\` e os originais como binários, preservando os bytes. Nunca versione credenciais, ZIPs de retorno ou dados de clientes.
 
 ## O que há nesta pasta
 
@@ -129,7 +139,7 @@ O \`.gitignore\` ignora \`tema/\`, originais, manifesto e \`preview/\` para evit
 - **local.config.json**: páginas, entradas Sass, mapa de seções gerado a partir das capturas e opções de componentes.
 - **local.data.json**: suas sobreposições da prévia.
 - **preview/**: captura bruta imutável (\`raw/\`), leituras públicas gravadas, recursos, manifesto e relatório.
-- **.yampi-sync/**: arquivos da extensão, recolhidos no VS Code. Guarda originais, manifesto com hashes e ferramentas locais. Preserve essa pasta: ela permite comparar as alterações e preparar o retorno com segurança.
+- **.yampi-sync/**: arquivos da extensão, recolhidos no VS Code. Guarda a referência (manifesto com hashes e originais), as versões do projeto e as ferramentas locais. Preserve essa pasta: ela permite comparar as alterações, preparar o retorno com segurança e voltar a versões anteriores.
 - **.editorconfig** e **.vscode/settings.json**: preservam quebras de linha e espaços, para que abrir e salvar sem editar não gere diferença.
 
 ## Limites da prévia
@@ -138,7 +148,7 @@ O relatório em preview/report.json informa a origem, as chaves que o código us
 
 A prévia compila Twig, Vue 2 e Sass e simula um conjunto explícito de helpers, mixins e leituras públicas gravadas. Rotas da API que não foram gravadas falham com erro explícito. Produtos e categorias são uma amostra datada; não há backend, estoque/preços em tempo real, pagamentos ou checkout. Chamadas externas e formulários são bloqueados. A barra inferior mostra seções renderizadas, imagens em placeholder, fontes com erro e rotas não capturadas. Confira também o resultado na Yampi antes de publicar. Vue 2 é mantido para compatibilidade e está fora de manutenção.
 
-Imagens exportadas ficam em \`tema/assets/\`. Não altere \`.yampi-sync/manifest.json\` ou \`.yampi-sync/baseline/\`.
+Imagens exportadas ficam em \`tema/assets/\`. Não altere à mão \`.yampi-sync/manifest.json\`, \`.yampi-sync/baseline/\` nem \`.yampi-sync/versoes/\`: a extensão os mantém.
 
 O projeto pode conter conteúdo privado da loja. Guarde-o fora do repositório público da extensão. O ZIP de retorno inclui somente o código editado e sua origem.
 `;
@@ -161,7 +171,7 @@ export function localKit(paths: string[], storeName = 'Loja local', preview?: Pr
     'local.config.json': json(config),
     'local.data.json': json({$comment: 'Somente sobreposições da prévia; veja "Como editar local.data.json" no README.', ...emptyOverrides()}),
     '.gitignore': GITIGNORE,
-    '.gitattributes': '* text eol=lf\ntema/** -text\n.yampi-sync/baseline/** -text\npreview/** -text\n',
+    '.gitattributes': '* text eol=lf\ntema/** -text\n.yampi-sync/baseline/** -text\n.yampi-sync/versoes/** -text\npreview/** -text\n',
     '.editorconfig': EDITORCONFIG,
     '.vscode/settings.json': json({'files.exclude': {'.yampi-sync': true, node_modules: true, '.cache': true}, 'search.exclude': {'.yampi-sync': true, node_modules: true, '.cache': true, preview: true}, 'files.eol': '\n', 'files.encoding': 'utf8', 'files.insertFinalNewline': false, 'files.trimFinalNewlines': false, 'files.trimTrailingWhitespace': false, ...PRESERVE, 'editor.codeActionsOnSave': {'source.fixAll': 'never', 'source.organizeImports': 'never'}, ...Object.fromEntries(['[twig]', '[vue]', '[scss]', '[css]', '[html]', '[javascript]', '[json]'].map(language => [language, PRESERVE]))}),
     [`${slug}.code-workspace`]: json({folders: [{path: '.', name: storeName}], settings: {}}),

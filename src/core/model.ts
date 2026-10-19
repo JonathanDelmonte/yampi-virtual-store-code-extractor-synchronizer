@@ -25,6 +25,8 @@ export interface Manifest {
   theme?: {alias: string | null; id: string | number | null; name: string | null; state: 'draft' | 'published' | 'unknown'; source: string};
   skipped?: {path: string; reason: string}[];
   preview?: {manifest: string; format: number};
+  // The reference moved after the download: an update from the store, or a send confirmed after it.
+  reference?: {updatedAt: string; reason: 'update' | 'send'; tool: string};
 }
 export type Status = 'update' | 'create' | 'upload' | 'unchanged' | 'remote-only' | 'already-applied' | 'conflict' | 'missing-local' | 'missing-remote' | 'new-local' | 'unsupported' | 'blocked-dependency' | 'whitespace-only';
 // source: local path of an image the store keeps elsewhere. rewritten: image references adjusted in a text.

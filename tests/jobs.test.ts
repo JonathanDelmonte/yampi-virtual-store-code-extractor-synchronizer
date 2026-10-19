@@ -8,7 +8,7 @@ import {changedPaths} from '../src/core/compare';
 import {chooseBaseline} from '../src/core/workspace';
 import {clearLocal, get, put, journalHistory, loadWorkspace, updateWorkspace} from '../src/storage';
 import type {Journal} from '../src/core/model';
-import {FakeEditor, context, snapshot} from './fixtures/fake-editor';
+import {FakeEditor, context, png, snapshot} from './fixtures/fake-editor';
 const home = 'templates/home.twig', product = 'templates/product.twig';
 const store = {[home]: 'home', [product]: 'product', 'elements/head.twig': 'head'};
 function host(editor: FakeEditor) {
@@ -167,5 +167,20 @@ describe('referência da pasta do projeto', () => {
     const workspace = await loadWorkspace(context);
     expect(workspace?.restore).toBeUndefined(); expect(workspace?.project?.name).toBe('projeto');
     expect(workspace?.baseline?.files[home]).toBe('home');
+  });
+});
+describe('atualizar o projeto: leitura completa da loja', () => {
+  test('lê a loja inteira mesmo com caminhos pedidos, guarda à parte e não mexe na revisão do envio', async () => {
+    const editor = new FakeEditor({...store, 'elements/novo.twig': 'novo'}, {'assets/images/a.png': png(1)}), {host: h} = host(editor);
+    await updateWorkspace(context, workspace => {workspace.baseline = snapshot(store); workspace.review = {reading: {...snapshot(store), inventory: Object.keys(store)}, overrides: ['x'], images: true};});
+    const result = await runJob({id: 'atualizar-1', kind: 'compare', scope: 'update', paths: [home]}, context, h, control());
+    expect(result).toMatchObject({status: 'completed', title: 'Lendo Loja fictícia para atualizar o projeto', result: {kind: 'compare', full: true, read: 5}});
+    expect(editor.writes).toEqual([]);
+    const workspace = (await loadWorkspace(context))!;
+    expect(workspace.update?.reading?.files).toEqual({...store, 'elements/novo.twig': 'novo'});
+    expect(workspace.update?.reading?.assets?.['assets/images/a.png']).toEqual(png(1));
+    expect(workspace.update?.reading?.partial).toBeUndefined();
+    expect(workspace.update?.choices).toEqual({});
+    expect(workspace.review).toMatchObject({overrides: ['x'], images: true});
   });
 });

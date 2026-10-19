@@ -204,6 +204,15 @@ try {
   await panel.locator('#baseline').setInputFiles(path.join(project, 'retorno-yampi.zip'));
   await panel.waitForFunction(() => !document.querySelector('#baseline').disabled);
   await panel.waitForFunction(() => document.body.dataset.view === 'review');
+  // New images stay out of the send until the user turns them on, after a warning; the text that uses one waits.
+  assert.match(await panel.locator('#summary').textContent(), /1 item para enviar: 1 arquivo alterado\. Nenhum conflito\. 1 item bloqueado\. 1 imagem nova fica fora do envio\./);
+  assert.equal(await panel.evaluate(() => document.querySelector('#send-images').checked), false);
+  assert.match(await panel.locator('#attention-list').textContent(), /1 imagem nova fica no projeto: o envio de imagens está desligado\..*templates\/new\.twig usa assets\/images\/nova\.png, que é imagem nova/);
+  const warning = new Promise(resolve => panel.onceDialog(message => {resolve(message); return true;}));
+  await panel.locator('#send-images').click();
+  assert.match(await warning, /^Enviar 1 imagem nova para assets\/images de Loja de testes\?/);
+  await panel.waitForFunction(() => document.querySelector('#apply-label').textContent === 'Enviar 3 itens para Loja de testes');
+  console.log('E2E: imagem nova fora do envio por padrão; ligada só depois do aviso.');
   // One summary in plain words: what changes, what is created and where the image goes. Nothing needs the user's attention.
   assert.match(await panel.locator('#summary').textContent(), /3 itens para enviar: 1 arquivo alterado, 1 arquivo novo e 1 imagem nova\. Nenhum conflito\./);
   assert.equal(await panel.locator('#status').textContent(), '3 alterações prontas');

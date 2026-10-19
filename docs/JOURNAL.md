@@ -131,3 +131,24 @@ Pedido do proprietário ao baixar um tema real de 264 arquivos: a barra saltou p
 O salto vinha dos pesos: listar valia 2 de 11 unidades enquanto o número de arquivos era desconhecido, e a leitura somava 264 logo depois. A lentidão vinha de abrir cada arquivo na tela e esperar 320 ms de estabilidade. A Yampi não tem API pública de temas, mas o módulo público do editor mostra que ele abre um arquivo com um `GET` ao próprio servidor, autenticado só pelos cookies, e indexa o tema inteiro em lotes de 10. A 0.7.0 usa o mesmo pedido a partir da página do editor, confere uma amostra de cada tipo com o CodeMirror e a loja da sessão a cada lote, e recua para a leitura pelo editor em qualquer dúvida.
 
 Ainda sem validação real. No primeiro download, conferir nas etapas a mensagem da leitura direta e comparar os hashes do manifesto com uma cópia lida pelo editor.
+
+## 19/10/2026 — Atualizar da loja, versões na pasta e imagens opcionais (0.8.0)
+
+Pedido do proprietário: o cliente muda a loja na Yampi (remove um bloco, troca imagens), e importar de novo a pasta antiga desfaria esse trabalho. Ele quer atualizar a pasta com o que está na loja antes de mexer, guardar versões antigas no computador para voltar atrás ("traga aquele banner de volta") e não enviar imagens por padrão, com uma opção avisada para enviar. Versões não precisam guardar imagens.
+
+Encontrado:
+
+- A 0.6.0 já avançava a referência depois de cada envio, mas só no IndexedDB deste navegador. A pasta continuava com a exportação: limpar os dados da extensão, ou usar a pasta em outro computador, voltava à referência antiga, e uma reversão feita pelo cliente depois de um envio parecia mudança do projeto.
+- A comparação era por arquivo inteiro: cliente e desenvolvedor mexendo em trechos diferentes do mesmo arquivo davam conflito, e trazer a loja para a pasta era um arquivo por vez (**Usar no projeto**).
+- Desde a 0.5.0, imagens novas iam por padrão.
+
+Decisões:
+
+- **Atualizar da loja**: leitura completa em segundo plano, junção linha a linha como no Git, revisão antes de gravar e versões antes de mudar a pasta. Conflito vira marcações no arquivo (o VS Code oferece aceitar uma ou outra versão), e nada com marcações é enviado. Nenhum padrão desfaz uma mudança da loja.
+- A referência é reescrita na própria pasta, com uma marcação gravada antes, para que uma gravação interrompida deixe a pasta legível.
+- Versões em `.yampi-sync/versoes/`, só textos, cada um guardado uma vez pelo hash. Integração com o GitHub ficou de fora: o histórico local cobre o pedido, e o README do projeto já explica como versioná-lo num repositório privado.
+- Imagens novas só vão com **Enviar imagens novas**, ligado depois de um aviso; a opção volta a desligar a cada comparação.
+- A extensão passa a gravar na pasta do projeto além do arquivo de **Usar no projeto** (atualização, versões, referência), sempre com a permissão do Chrome dada num clique e só em `tema/` e nos seus registros de `.yampi-sync/`.
+- Telas com layout funcional; o acabamento visual fica para uma próxima etapa, a pedido do proprietário.
+
+Ainda sem validação real: a escrita numa pasta real pelo painel lateral e a atualização numa loja real.

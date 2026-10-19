@@ -4,18 +4,22 @@ import {BrowserAdapter, type RPC} from './browser/adapter';
 import {PanelConnection} from './browser/panel-connection';
 import {zipInWorker} from './browser/zip-client';
 import {decodeProject, readProjectDirectory, readProjectEntries, type Project} from './core/archive';
-import {makePlan, missingNewTexts, selectionIssues, sendable} from './core/planner';
+import {makePlan, missingNewTexts, selectionIssues, sendable, IMAGES_OFF} from './core/planner';
 import {changedPaths, remoteFromCapture} from './core/compare';
 import {explainBlock} from './core/explain';
 import {formatDuration} from './core/progress';
 import {chooseBaseline, type Review, type Workspace} from './core/workspace';
+import {CHOICES, applyUpdate, folderChange, planUpdate, type Resolution, type UpdateKind, type UpdatePlan, type UpdateRow} from './core/update';
+import {listVersions, restoreVersion, saveVersion, versionChanges, versionFiles, type Version, type VersionChange} from './core/versions';
+import {writeReference} from './core/reference';
+import type {ProjectFolder} from './core/project-folder';
 import {COMPONENTS_FILE} from '../local-runtime/contract.mjs';
-import {assertContext, writable, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Context, type Assets, type Files, type Plan, type PlanRow, type Journal, type Snapshot} from './core/model';
+import {assertContext, sameContext, writable, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Context, type Assets, type Files, type Plan, type PlanRow, type Journal, type Snapshot} from './core/model';
 import {get, put, clearLocal, journalHistory, loadWorkspace, updateWorkspace} from './storage';
 import {startingState} from './jobs/engine';
 import {active, type JobRequest, type JobState, type Scope, type SendInput} from './jobs/types';
 import {ExtensionJobs, LocalJobs, type JobClient} from './panel/client';
-import {canPickFolders, droppedItem, folderEntries, permitted, pickFolder, recallFolder, rememberFolder, replaceThemeFile, type Folder, type Remembered} from './panel/folder';
+import {canPickFolders, droppedItem, folderEntries, openProject, permitted, pickFolder, recallFolder, rememberFolder, replaceThemeFile, type Folder, type Remembered} from './panel/folder';
 import {renderDiff} from './panel/diff-view';
 import {HistoryPicker} from './panel/history-picker';
 import {trackTruncatedLabel} from './panel/truncated-label';
@@ -28,14 +32,15 @@ trackTruncatedLabel($('connection-state'));
 // One screen at a time. The route is where the user chose to go; the view shown also depends on
 // what is happening (connecting, an operation running, its result).
 type Route = 'export' | 'send';
-type View = 'connecting' | 'offline' | 'export' | 'pick' | 'review' | 'job' | 'result';
+type View = 'connecting' | 'offline' | 'export' | 'pick' | 'review' | 'update' | 'job' | 'result';
 let route: Route = 'export';
 let rpc: RPC;
 let connection: PanelConnection | undefined;
 let client: JobClient;
 let connected = false, context: Context | undefined;
 let offline: {title: string; text: string} | undefined;
-let notice: {title: string; text: string} | undefined;
+// tone ok: a confirmation (green), otherwise a problem to fix (red).
+let notice: {title: string; text: string; tone?: 'ok'} | undefined;
 let busy = false, busyTitle = '', controller: AbortController | undefined;
 let localProgress: {done: number; total: number} | undefined;
 let workspace: Workspace | undefined, plan: Plan | undefined, scope: Scope = 'project', restoreJournal: Journal | undefined;
@@ -45,6 +50,12 @@ let job: JobState | undefined, liveJob = '', settling = false, handled = '', can
 let history: Journal[] = [], journal: Journal | undefined, resumable: Journal | undefined;
 let remembered: Remembered | undefined;
 let diffRow: PlanRow | undefined, diffTab: 'remote' | 'base' | 'store' = 'remote';
+// The update of the project folder under review, and the versions sheet: the folder's versions,
+// the texts of the folder as read when it opened, and the version open in it.
+let updatePlan: UpdatePlan | undefined;
+let versions: {list: Version[]; skipped: string[]; current: Files; open?: {version: Version; saved: Files; changes: VersionChange[]}} | undefined;
+// The diff sheet also shows an update row or a file of a version.
+let diffUpdate: UpdateRow | undefined, diffVersion: {path: string; saved?: string; current?: string} | undefined;
 let lastAnnounced = '', lastView = '';
 const historyPicker = new HistoryPicker($('history-picker'), value => {
   const entry = history.find(item => item.id === value);
@@ -92,7 +103,7 @@ function currentView(): View {
   if (busy || active(job) || settling) return 'job';
   if (job && job.id === liveJob && !(job.kind === 'compare' && job.status === 'completed')) return 'result';
   if (route === 'export') return 'export';
-  if (route === 'send') return plan ? 'review' : 'pick';
+  if (route === 'send') return updatePlan ? 'update' : plan ? 'review' : 'pick';
   return 'export';
 }
 function go(next: Route): void {
@@ -114,6 +125,7 @@ function head(view: View): Head {
   if (view === 'export') return {title: 'Baixar arquivos', detail: `Copie o código de ${store} em ZIP, edite no computador e depois envie as alterações que escolher.`};
   if (view === 'pick') return workspace?.project ? {title: 'Comparar com a loja', detail: 'Releia a pasta depois de editar, ou escolha outra. Você revisa a comparação antes de confirmar o envio.'} : {title: 'Importar projeto', detail: 'Escolha a pasta do projeto editado. A extensão compara com a loja antes de você selecionar os arquivos e confirmar o envio.'};
   if (view === 'review') return reviewHead();
+  if (view === 'update') return updateHead();
   if (view === 'job') {
     if (busy) return {title: busyTitle || 'Um momento…', detail: localProgress ? `${localProgress.done} de ${localProgress.total} arquivos` : '', tone: 'run'};
     const phase = job!.phases.find(p => p.status === 'active');
@@ -129,6 +141,12 @@ function reviewHead(): Head {
   if (!selected.size) return {title: plan!.rows.some(row => row.status === 'conflict' || row.status === 'blocked-dependency') ? 'Nada pronto para enviar' : 'Nada para enviar', detail: plan!.rows.some(row => row.status === 'conflict') ? compared : `A loja já tem tudo o que o projeto mudou. ${compared}`};
   return {title: `${selected.size} ${selected.size === 1 ? 'alteração pronta' : 'alterações prontas'}`, detail: compared};
 }
+function updateHead(): Head {
+  const rows = updatePlan!.rows, decide = rows.filter(row => CHOICES[row.kind]).length, changes = rows.filter(row => folderChange(row)).length;
+  const detail = `Loja lida ${since(updatePlan!.remote.capturedAt)}. Nada foi gravado na pasta ainda.`;
+  if (decide) return {title: `${plural(decide, 'arquivo para decidir', 'arquivos para decidir')} antes de atualizar`, detail};
+  return {title: changes ? `Atualizar a pasta: ${plural(changes, 'mudança da loja', 'mudanças da loja')}` : 'A pasta já tem tudo o que a loja mudou', detail};
+}
 function resultHead(state: JobState): Head {
   const result = state.result, restore = state.scope === 'restore';
   if (state.status === 'completed') {
@@ -138,7 +156,7 @@ function resultHead(state: JobState): Head {
       return {title: restore ? 'Restauração concluída' : 'Envio concluído', detail: `${plural(items, 'item conferido', 'itens conferidos')} na Yampi. Confira a prévia e publique na Yampi quando estiver tudo certo.`, tone: 'ok'};
     }
   }
-  const noun = state.kind === 'export' ? 'Download' : state.kind === 'compare' ? 'Comparação' : restore ? 'Restauração' : 'Envio';
+  const noun = state.kind === 'export' ? 'Download' : state.kind === 'compare' ? (state.scope === 'update' ? 'Leitura da loja' : 'Comparação') : restore ? 'Restauração' : 'Envio';
   const feminine = state.kind === 'compare' || restore;
   if (state.status === 'cancelled') {
     if (/descartad/i.test(state.error || '')) return {title: 'Download cancelado', detail: 'Nada mudou na loja.'};
@@ -154,9 +172,12 @@ function render(): void {
   $('detail').textContent = info.detail;
   $('notice').hidden = !notice || view === 'job' || view === 'offline' || view === 'connecting';
   if (notice) $('notice').replaceChildren(el('strong', {text: notice.title}), notice.text);
+  $('notice').dataset.tone = notice?.tone || '';
+  $('notice').setAttribute('role', notice?.tone === 'ok' ? 'status' : 'alert');
   $('export-section').hidden = view !== 'export';
   $('import-section').hidden = view !== 'pick';
   $('review').hidden = view !== 'review';
+  $('update-view').hidden = view !== 'update';
   $('view-job').hidden = view !== 'job';
   $('done').hidden = view !== 'result';
   const storeName = connected && context ? context.storeName : view === 'offline' ? 'Editor indisponível' : 'Conectando…';
@@ -176,8 +197,10 @@ function render(): void {
   renderHistorySummary(view);
   if (view === 'export') renderExport();
   if (view === 'review') renderPlan();
+  if (view === 'update') renderUpdate();
   if (view === 'job') renderJob();
   if (view === 'result') renderResult();
+  renderProjectTools(view);
   renderDock(view);
   controls();
   // Screen readers hear the screen changing and phase changes, not every percent.
@@ -188,7 +211,7 @@ function render(): void {
     if (lastView) {
       window.scrollTo({top: 0});
       if (document.body.dataset.input === 'keyboard' && !document.activeElement?.closest('.operation-tabs')) $('status').focus({preventScroll: true});
-      const section = {export: 'export-section', pick: 'import-section', review: 'review', job: 'view-job', result: 'done'}[view as string];
+      const section = {export: 'export-section', pick: 'import-section', review: 'review', update: 'update-view', job: 'view-job', result: 'done'}[view as string];
       enter(document.querySelector<HTMLElement>('.view-head')!, ...(section ? [$(section)] : []));
     }
     lastView = view;
@@ -215,7 +238,7 @@ function renderPick(): void {
   const images = Object.keys(project.localAssets).length;
   $('project-name').textContent = project.name;
   $('local-info').textContent = `${Object.keys(project.local).length} textos e ${plural(images, 'imagem', 'imagens')}, lidos ${since(project.loadedAt)}.`;
-  $('reference-info').textContent = workspace?.baseline ? `Exportado em ${dateTime(lineage?.exportedAt || workspace.baseline.capturedAt)}${lineage?.journals.length ? `, com ${plural(lineage.journals.length, 'envio', 'envios')} desde então` : ''}.` : 'Falta a exportação original: escolha a pasta com .yampi-sync/.';
+  $('reference-info').textContent = workspace?.baseline ? `Referência: loja em ${dateTime(lineage?.exportedAt || workspace.baseline.capturedAt)}${lineage?.journals.length ? `, com ${plural(lineage.journals.length, 'envio', 'envios')} desde então` : ''}.${interruptedReference ? ' A última atualização parou no meio: use Atualizar da loja para concluir.' : ''}` : 'Falta a exportação original: escolha a pasta com .yampi-sync/.';
   if (project.kind === 'zip') $('zip-name').textContent = project.name;
 }
 function renderJob(): void {
@@ -273,6 +296,7 @@ function renderDock(view: View): void {
   if (view === 'export') show.push('export');
   if (view === 'pick') show.push(...(remembered && canPickFolders() ? ['reload-folder', 'pick-folder'] : ['pick-folder']));
   if (view === 'review') show.push('apply');
+  if (view === 'update') show.push('apply-update', 'cancel-update');
   // While waiting for the user's choice, the choices are on screen; "stop" would only repeat them.
   if (view === 'job' && (busy ? !!controller : job?.status === 'running')) show.push('cancel');
   if (view === 'result' && job) {
@@ -281,7 +305,7 @@ function renderDock(view: View): void {
     if (job.kind === 'send' && job.status !== 'completed' && resumable) show.push('resume');
     show.push('finish');
   }
-  for (const id of ['retry', 'export', 'reload-folder', 'pick-folder', 'apply', 'resume', 'open-preview', 'show-file', 'cancel', 'finish']) $(id).hidden = !show.includes(id);
+  for (const id of ['retry', 'export', 'reload-folder', 'pick-folder', 'apply', 'apply-update', 'cancel-update', 'resume', 'open-preview', 'show-file', 'cancel', 'finish']) $(id).hidden = !show.includes(id);
   // "Choose a folder" is the main action unless the last folder can simply be read again.
   $('pick-folder').classList.toggle('primary', !show.includes('reload-folder'));
   $('pick-folder').textContent = show.includes('reload-folder') ? 'Outra' : 'Escolher a pasta';
@@ -290,8 +314,18 @@ function renderDock(view: View): void {
   $('resume').classList.toggle('primary', view === 'result');
   $('dock').hidden = !show.length;
   $('dock').dataset.count = String(show.length);
-  const slot = {export: 'export-actions', pick: 'pick-actions', review: 'review-actions', job: 'job-actions', result: 'result-actions'}[view as string] || 'connection-actions';
+  const slot = {export: 'export-actions', pick: 'pick-actions', review: 'review-actions', update: 'update-actions', job: 'job-actions', result: 'result-actions'}[view as string] || 'connection-actions';
   if ($('dock').parentElement !== $(slot)) $(slot).append($('dock'));
+}
+// "Atualizar da loja" and "Versões" stay with the project, on the screen that shows it. Both write
+// to the project folder, so a project read from a ZIP only explains how to get them.
+function renderProjectTools(view: View): void {
+  const tools = $('project-tools'), project = workspace?.project;
+  tools.hidden = !project || !['pick', 'review'].includes(view) || scope === 'restore';
+  if (tools.hidden) return;
+  const slot = view === 'review' ? 'review-tools' : 'pick-tools';
+  if (tools.parentElement !== $(slot)) $(slot).append(tools);
+  $('project-tools-note').hidden = !!projectFolder();
 }
 // --- Controls -------------------------------------------------------------------------------------
 function controls(): void {
@@ -313,6 +347,12 @@ function controls(): void {
   for (const id of ['discard-whitespace', 'select-all', 'select-none', 'filter', 'search']) $(id).toggleAttribute('disabled', working);
   $('cancel').toggleAttribute('disabled', !!job && cancelled === job.id && !busy);
   $('restore').toggleAttribute('disabled', working || !connected || !journal);
+  // The update reads the store; applying it and the versions only touch the project folder.
+  const folderReady = !!projectFolder() && !!workspace?.baseline;
+  $('update-project').toggleAttribute('disabled', working || !connected || !folderReady);
+  $('open-versions').toggleAttribute('disabled', working || !folderReady);
+  $('apply-update').toggleAttribute('disabled', working || !updatePlan || !projectFolder());
+  for (const id of ['cancel-update', 'send-images', 'save-version', 'version-name', 'restore-all', 'diff-restore', 'diff-choose-marks', 'diff-choose-mine', 'diff-choose-store']) $(id).toggleAttribute('disabled', working);
   $('download-backup').toggleAttribute('disabled', busy || !journal);
   $('download-journal').toggleAttribute('disabled', busy || !journal);
   if (remembered) $('reload-folder-label').textContent = `Reler “${remembered.name}”`;
@@ -358,7 +398,7 @@ async function loadStoreData(): Promise<void> {
   // The demo keeps the folder it was given in memory; the extension finds it again in IndexedDB.
   remembered = isDemo ? remembered : await recallFolder(context);
   restoreJournal = workspace?.restore ? history.find(item => item.id === workspace!.restore!.journalId) : undefined;
-  computePlan();
+  computePlan(); computeUpdate();
   updateHistory(); journalInfo();
 }
 function review(): Review | undefined {return scope === 'restore' ? workspace?.restore : workspace?.review;}
@@ -373,13 +413,23 @@ function computePlan(): void {
   if (!base || !local) return;
   try {
     const {remote, assumed} = remoteFromCapture(base, reading);
-    plan = makePlan(base, local, remote, assets, {overrides: current!.overrides, assumed, inventory: reading.inventory});
+    // New images go only when the user turned them on for this send.
+    plan = makePlan(base, local, remote, assets, {overrides: current!.overrides, assumed, inventory: reading.inventory, uploads: !!current!.images});
   } catch (error) {notice = {title: 'A comparação não vale mais', text: error instanceof Error ? error.message : String(error)}; return;}
   const discarded = new Set(current!.discarded || []);
   for (const row of plan.rows) if (row.status === 'update' && row.whitespaceOnly && discarded.has(row.path)) row.status = 'whitespace-only';
   // Whitespace-only differences start unselected; coupled files start together.
   const chosen = current!.selected ? new Set(current!.selected) : undefined;
   for (const row of plan.rows) if (sendable(row) && (chosen ? chosen.has(row.path) : !row.whitespaceOnly)) selected.add(row.path);
+}
+// The update under review: the reference, the folder as last read, the full reading of the store
+// and the choices made so far. Nothing is written until the user applies it.
+function computeUpdate(): void {
+  updatePlan = undefined;
+  const reading = workspace?.update?.reading, base = workspace?.baseline, project = workspace?.project;
+  if (!reading || !base || !project) return;
+  try {updatePlan = planUpdate(base, project.local, project.localAssets, reading, workspace!.update!.choices);}
+  catch (error) {notice = {title: 'A atualização não vale mais', text: error instanceof Error ? error.message : String(error)};}
 }
 let saving: ReturnType<typeof setTimeout> | undefined;
 function persistReview(change: (value: Review) => void): void {
@@ -410,12 +460,17 @@ function attention(): HTMLLIElement[] {
   if (!plan) return [];
   const items: HTMLLIElement[] = [];
   const rows = new Map(plan.rows.map(row => [row.path, row]));
+  // New images left out of the send: one line, with the switch that sends them.
+  const offImages = plan.rows.filter(row => row.reason === IMAGES_OFF).length;
+  if (offImages) items.push(attentionItem(`${plural(offImages, 'imagem nova fica', 'imagens novas ficam')} no projeto: o envio de imagens está desligado.`, linkButton('Ligar o envio de imagens', () => $<HTMLInputElement>('send-images').click())));
   for (const row of plan.rows) {
+    if (row.reason === IMAGES_OFF) continue;
     const block = row.reason ? undefined : explainBlock(plan, row);
     if (block && (block.storeOnly.length || block.conflicts.length)) {
       const look = (paths: string[], one: string, many: (path: string) => string, tab?: 'store') => paths.map(path => linkButton(paths.length === 1 ? one : many(path), () => openDiff(rows.get(path)!, tab)));
       items.push(attentionItem(block.text, ...look(block.storeOnly, 'Ver a mudança', path => `Ver ${path}`, 'store'), ...look(block.conflicts, 'Comparar e escolher', path => `Escolher ${path}`)));
-    } else if (row.override) items.push(attentionItem(`${row.path}: vai a versão do projeto. A da loja fica no backup.`, linkButton('Ver', () => openDiff(row)), linkButton('Manter a da loja', () => setOverride(row, false))));
+    } else if (block?.images.length) items.push(attentionItem(block.text, linkButton('Ver', () => openDiff(row))));
+    else if (row.override) items.push(attentionItem(`${row.path}: vai a versão do projeto. A da loja fica no backup.`, linkButton('Ver', () => openDiff(row)), linkButton('Manter a da loja', () => setOverride(row, false))));
     else if (row.status === 'conflict' && !row.image && writable(row.path)) items.push(attentionItem(`${row.path} mudou na loja depois da sua cópia.`, linkButton('Comparar e escolher', () => openDiff(row))));
     else if (row.status === 'conflict') items.push(attentionItem(`${row.path} mudou na loja, e a extensão não pode substituí-lo.`, linkButton('Ver', () => openDiff(row))));
     else if (row.status === 'new-local' || row.status === 'blocked-dependency' || row.status === 'unsupported' && row.reason && row.path !== COMPONENTS_FILE) items.push(attentionItem(`${row.source || row.path}: ${row.reason || (row.blockedBy?.length ? `usa ${list(row.blockedBy)}, que não pode ser enviado.` : 'não pode ser enviado.')}`, linkButton('Ver', () => openDiff(row))));
@@ -440,13 +495,18 @@ function renderPlan(): void {
   const count = (test: (row: PlanRow) => boolean) => plan!.rows.filter(test).length;
   const changed = count(r => r.status === 'update' && !r.whitespaceOnly && r.base !== undefined), created = count(r => r.status === 'create' || r.status === 'update' && r.base === undefined);
   const images = count(r => r.status === 'upload');
-  const conflicts = count(r => r.status === 'conflict'), blocked = count(r => ['blocked-dependency', 'new-local', 'missing-remote'].includes(r.status) || r.status === 'unsupported' && !!r.reason && r.path !== COMPONENTS_FILE), whitespace = count(r => r.status === 'update' && !!r.whitespaceOnly);
+  const conflicts = count(r => r.status === 'conflict'), blocked = count(r => r.reason !== IMAGES_OFF && (['blocked-dependency', 'new-local', 'missing-remote'].includes(r.status) || r.status === 'unsupported' && !!r.reason && r.path !== COMPONENTS_FILE)), whitespace = count(r => r.status === 'update' && !!r.whitespaceOnly);
+  const offImages = count(r => r.reason === IMAGES_OFF), candidates = images + offImages, sendImages = !!review()?.images;
+  $('images-option').hidden = !candidates || scope === 'restore';
+  $<HTMLInputElement>('send-images').checked = sendImages;
+  $('images-option-text').textContent = sendImages ? `Ligado: ${plural(images, 'imagem nova vai', 'imagens novas vão')} para assets/images da loja.` : `Desligado: ${plural(candidates, 'imagem nova fica', 'imagens novas ficam')} só no projeto.`;
   setCount('count-update', changed, 'alterado', 'alterados'); setCount('count-create', created, 'novo', 'novos'); setCount('count-upload', images, 'imagem', 'imagens');
   const kinds = list([changed ? plural(changed, 'arquivo alterado', 'arquivos alterados') : '', created ? plural(created, 'arquivo novo', 'arquivos novos') : '', images ? plural(images, 'imagem nova', 'imagens novas') : '']);
   $('summary').textContent = [
     `${plural(selected.size, 'item', 'itens')} para enviar${kinds ? `: ${kinds}` : ''}.`,
     conflicts ? `${plural(conflicts, 'conflito precisa', 'conflitos precisam')} da sua decisão.` : 'Nenhum conflito.',
     blocked ? `${plural(blocked, 'item bloqueado', 'itens bloqueados')}.` : '',
+    offImages ? `${plural(offImages, 'imagem nova fica', 'imagens novas ficam')} fora do envio.` : '',
     whitespace ? `${plural(whitespace, 'arquivo muda', 'arquivos mudam')} só em espaços em branco.` : '',
     `${plural(plan.rows.length, 'caminho comparado', 'caminhos comparados')}.`
   ].filter(Boolean).join(' ');
@@ -458,7 +518,7 @@ function renderPlan(): void {
   $('moves-list').replaceChildren(...moved.map(r => el('li', {text: `${short(r.source!)} → ${short(r.path)}`})));
   $('moves').hidden = !moved.length;
   const lineage = workspace?.lineage;
-  $('reference-detail').textContent = scope === 'project' && workspace?.baseline ? `Projeto “${workspace.project?.name || ''}”, comparado com a exportação de ${dateTime(lineage?.exportedAt || workspace.baseline.capturedAt)}${lineage?.journals.length ? ` e ${plural(lineage.journals.length, 'envio feito', 'envios feitos')} depois` : ''}.` : '';
+  $('reference-detail').textContent = scope === 'project' && workspace?.baseline ? `Projeto “${workspace.project?.name || ''}”, comparado com a referência: a loja em ${dateTime(lineage?.exportedAt || workspace.baseline.capturedAt)}${lineage?.journals.length ? ` e ${plural(lineage.journals.length, 'envio feito', 'envios feitos')} depois` : ''}.${interruptedReference ? ' A última atualização da pasta parou no meio: use Atualizar da loja para concluir.' : ''}` : '';
   const items = attention();
   $('attention-list').replaceChildren(...items);
   $('attention').hidden = !items.length;
@@ -517,8 +577,128 @@ $('discard-whitespace').addEventListener('click', () => {
   for (const row of plan.rows) if (paths.includes(row.path)) row.status = 'whitespace-only';
   render(); toast('Mudanças só de espaço em branco não serão enviadas.');
 });
+// New images go only when the user turns them on for this send, after the warning. A comparison
+// starts again with them off.
+$('send-images').addEventListener('change', () => {
+  const input = $<HTMLInputElement>('send-images'), current = review();
+  if (!current || !plan) return;
+  if (input.checked) {
+    const count = plan.rows.filter(row => row.reason === IMAGES_OFF).length;
+    if (!confirm(`Enviar ${plural(count, 'imagem nova', 'imagens novas')} para assets/images de ${plan.context.storeName}?\n\nDepois de enviada, a imagem fica na loja: a extensão não substitui nem apaga imagens, e desfazer o envio não a remove. Confira os nomes na lista de arquivos antes de enviar.`)) {input.checked = false; return;}
+  }
+  current.images = input.checked; delete current.selected;
+  persistReview(value => {value.images = input.checked; delete value.selected;});
+  computePlan(); render();
+  toast(input.checked ? 'As imagens novas vão junto deste envio.' : 'As imagens novas ficam só no projeto.');
+});
+// --- Update of the project folder -------------------------------------------------------------------
+const updateLabels: Record<UpdateKind, string> = {
+  same: 'Igual na pasta e na loja', mine: 'Mudou só na pasta: fica', store: 'Mudou na loja: vem para a pasta', removed: 'Removido na loja: sai da pasta',
+  merged: 'Mudou dos dois lados, em trechos diferentes: juntado', conflict: 'Mudou dos dois lados nas mesmas linhas', 'removed-edited': 'Removido na loja e editado na pasta',
+  'deleted-changed': 'Apagado na pasta e mudado na loja', marked: 'Ainda com marcações de conflito: fica como está'
+};
+const imageLabels: Partial<Record<UpdateKind, string>> = {mine: 'Imagem da pasta: fica', store: 'Imagem da loja: vem para a prévia local', removed: 'Imagem removida na loja: sai da pasta'};
+const choiceLabels: Record<Resolution, string> = {marks: 'Marcar no arquivo', mine: 'Manter a da pasta', store: 'Usar a da loja'};
+function choiceText(row: UpdateRow): string {
+  if (row.kind === 'conflict') return row.resolution === 'marks' ? `Vai com as duas versões marcadas (${plural(row.conflicts || 1, 'trecho', 'trechos')}), para você resolver no editor de código. Nada com marcações é enviado.` : row.resolution === 'mine' ? 'Fica a da pasta. No próximo envio, ela substitui a da loja, que vai para o backup.' : 'Fica a da loja. A sua continua na versão “Pasta antes de atualizar”.';
+  if (row.kind === 'removed-edited') return row.resolution === 'store' ? 'Sai da pasta, como na loja. A sua continua na versão “Pasta antes de atualizar”.' : 'Fica na pasta. Se você enviar, ele volta para a loja.';
+  return row.resolution === 'store' ? 'Volta para a pasta com a versão da loja.' : 'Continua apagado na pasta. Nada muda na loja.';
+}
+function setChoice(row: UpdateRow, choice: Resolution): void {
+  const update = workspace?.update, target = updatePlan?.context;
+  if (!update || !target) return;
+  update.choices = {...update.choices, [row.path]: choice};
+  computeUpdate(); render();
+  const next = updatePlan?.rows.find(item => item.path === row.path);
+  if (diffUpdate && next) openUpdateDiff(next);
+  void updateWorkspace(target, value => {if (value.update) value.update.choices = {...value.update.choices, [row.path]: choice};}).catch(() => {});
+}
+function renderUpdate(): void {
+  if (!updatePlan) return;
+  const rows = updatePlan.rows, texts = rows.filter(row => !row.image);
+  setCount('count-store', texts.filter(row => row.kind === 'store' || row.kind === 'removed').length, 'da loja', 'da loja');
+  setCount('count-merged', texts.filter(row => row.kind === 'merged').length, 'juntado', 'juntados');
+  setCount('count-decide', rows.filter(row => CHOICES[row.kind]).length, 'para decidir', 'para decidir');
+  const items: HTMLLIElement[] = [];
+  for (const row of rows) {
+    const options = CHOICES[row.kind];
+    if (options) items.push(attentionItem(`${row.path}: ${updateLabels[row.kind].toLowerCase()}. ${choiceText(row)}`, linkButton('Comparar', () => openUpdateDiff(row)), ...options.filter(option => option !== row.resolution).map(option => linkButton(choiceLabels[option], () => setChoice(row, option)))));
+    else if (row.kind === 'marked') items.push(attentionItem(`${row.path} ainda tem marcações de conflito. A atualização não mexe nele: resolva no editor de código.`, linkButton('Ver', () => openUpdateDiff(row))));
+  }
+  $('update-attention-list').replaceChildren(...items);
+  $('update-attention').hidden = !items.length;
+  const changing = rows.filter(row => row.kind !== 'same');
+  $('update-files-summary').textContent = `Ver os arquivos (${changing.length})`;
+  $('update-rows').replaceChildren(...changing.slice(0, 400).map(row => {
+    const name = row.path.split('/').pop()!, folder = row.path.slice(0, -name.length);
+    const view = linkButton('Diferenças', () => openUpdateDiff(row)); view.classList.add('row-action');
+    return el('li', {class: 'file-row plain'},
+      el('div', {class: 'file-main'}, el('span', {class: 'file-name', text: name}), el('span', {class: 'file-folder', text: folder}), el('span', {class: `row-status u-${row.kind}`, text: (row.image ? imageLabels[row.kind] : undefined) ?? updateLabels[row.kind]})),
+      row.image ? false : view);
+  }));
+}
+// --- Versions of the project ------------------------------------------------------------------------
+const kindLabels: Record<Version['kind'], string> = {referencia: 'Loja antes de uma atualização', 'antes-de-atualizar': 'Pasta antes de atualizar', loja: 'Loja numa atualização', envio: 'Loja depois de um envio', 'antes-de-restaurar': 'Pasta antes de trazer uma versão', manual: 'Salva por você'};
+const changeLabels: Record<VersionChange['change'], string> = {changed: 'Mudou desde então', 'missing-now': 'Apagado desde então', 'added-since': 'Criado depois: fica como está'};
+async function openVersion(access: ProjectFolder, version: Version): Promise<void> {
+  const saved = await versionFiles(access, version);
+  versions!.open = {version, saved, changes: versionChanges(saved, versions!.current)};
+}
+// The folder is read again each time: the versions are compared with what it has now.
+async function loadVersions(folder: Folder, keep?: string): Promise<void> {
+  const fresh = await readProjectFromFolder(folder), access = await openProject(folder);
+  const {versions: found, skipped} = await listVersions(access, fresh.baseline.context);
+  versions = {list: found, skipped, current: fresh.local};
+  const open = keep && found.find(item => item.id === keep);
+  if (open) await openVersion(access, open);
+  renderVersions();
+}
+function renderVersions(): void {
+  if (!versions) return;
+  const open = versions.open;
+  $('versions-home').hidden = !!open; $('version-detail').hidden = !open;
+  $('versions-empty').hidden = !!versions.list.length;
+  $('versions-skipped').hidden = !versions.skipped.length;
+  $('versions-skipped').textContent = `${plural(versions.skipped.length, 'registro ignorado', 'registros ignorados')}: de outra loja ou ilegível.`;
+  $('versions-list').replaceChildren(...versions.list.map(version => {
+    const button = linkButton('Abrir', () => void run('Abrindo a versão', async () => {const folder = projectFolder(); if (folder) {await openVersion(await openProject(folder), version); renderVersions();}}));
+    button.classList.add('row-action');
+    return el('li', {class: 'file-row plain version-row'},
+      el('div', {class: 'file-main'}, el('span', {class: 'file-name', text: version.label}), el('span', {class: 'file-folder', text: `${dateTime(version.createdAt)} · ${plural(version.files.length, 'texto', 'textos')}`}), el('span', {class: 'row-status', text: kindLabels[version.kind]})),
+      button);
+  }));
+  if (!open) return;
+  $('version-title').textContent = open.version.label;
+  const restorable = open.changes.filter(change => change.change !== 'added-since');
+  $('version-summary').textContent = `${kindLabels[open.version.kind]}, ${dateTime(open.version.createdAt)}. ${open.changes.length ? `${plural(open.changes.length, 'arquivo difere', 'arquivos diferem')} da pasta agora.` : 'A pasta tem exatamente estes textos.'}`;
+  $('restore-all').hidden = !restorable.length;
+  $('restore-all').textContent = `Trazer ${plural(restorable.length, 'arquivo', 'arquivos')} desta versão`;
+  $('version-rows').replaceChildren(...open.changes.slice(0, 400).map(change => {
+    const name = change.path.split('/').pop()!, folder = change.path.slice(0, -name.length);
+    return el('li', {class: 'file-row plain'},
+      el('div', {class: 'file-main'}, el('span', {class: 'file-name', text: name}), el('span', {class: 'file-folder', text: folder}), el('span', {class: 'row-status', text: changeLabels[change.change]})),
+      el('span', {class: 'row-actions'}, linkButton('Ver', () => openVersionDiff(change.path)), change.change === 'added-since' ? false : linkButton('Trazer', () => restorePaths([change.path]))));
+  }));
+}
+// Brings files of the open version into tema/. What the user compared must still be what the folder
+// has; the folder as it is goes into a version first.
+function restorePaths(paths: string[]): void {
+  const folder = projectFolder(), open = versions?.open, shown = versions?.current;
+  if (!folder || !open || !shown || !paths.length) return;
+  const allowed = permitted(folder, true, 'readwrite');
+  void run('Trazendo da versão', async () => {
+    if (!await allowed) throw new Error('O Chrome não liberou a escrita na pasta do projeto. Nada foi gravado.');
+    const fresh = await readProjectFromFolder(folder);
+    const moved = paths.filter(path => fresh.local[path] !== shown[path]);
+    if (moved.length) throw new Error(`${list(moved)} mudou na pasta depois de abrir as versões. Abra as versões de novo.`);
+    const {restored} = await restoreVersion(await openProject(folder), open.version, paths, fresh.local);
+    await readFolder(folder, false, false);
+    await loadVersions(folder, open.version.id);
+    toast(`${plural(restored.length, 'arquivo trazido', 'arquivos trazidos')} para a pasta. A pasta de antes ficou guardada como versão.`, 6000);
+  });
+}
 // --- Sheets ---------------------------------------------------------------------------------------
-const sheets = ['confirm-panel', 'diff', 'menu-sheet'];
+const sheets = ['confirm-panel', 'diff', 'menu-sheet', 'versions-sheet'];
 function openSheet(id: string): void {
   if (id === 'menu-sheet') {
     $('menu').setAttribute('aria-expanded', 'true');
@@ -536,8 +716,32 @@ function closeSheet(id: string): void {
   }
   if (sheets.every(sheet => $(sheet).hidden)) $('sheet-scrim').hidden = true;
 }
-const closeAll = () => {for (const id of sheets) closeSheet(id); diffRow = undefined;};
+const clearDiff = () => {diffRow = undefined; diffUpdate = undefined; diffVersion = undefined;};
+const closeAll = () => {for (const id of sheets) closeSheet(id); clearDiff();};
+const DIFF_ACTIONS = ['diff-write-store', 'diff-copy-store', 'diff-use-project', 'diff-keep-store', 'diff-choose-marks', 'diff-choose-mine', 'diff-choose-store', 'diff-restore'];
+function diffActions(visible: string[]): void {for (const id of DIFF_ACTIONS) $(id).hidden = !visible.includes(id);}
+const diffSwitch = () => $('diff').querySelector<HTMLElement>('.switch')!;
+// A row of the update under review: the same three views (reference, folder, store), and its choices.
+function openUpdateDiff(row: UpdateRow): void {
+  clearDiff(); diffUpdate = row;
+  $('diff-title').textContent = row.path;
+  diffSwitch().hidden = !!row.image;
+  diffActions((CHOICES[row.kind] || []).filter(option => option !== row.resolution).map(option => `diff-choose-${option}`));
+  showDiffTab(row.kind === 'store' || row.kind === 'removed' ? 'store' : 'remote');
+  openSheet('diff');
+}
+// A file of the open version against the folder now.
+function openVersionDiff(path: string): void {
+  const open = versions?.open; if (!open) return;
+  clearDiff(); diffVersion = {path, saved: open.saved[path], current: versions!.current[path]};
+  $('diff-title').textContent = path;
+  diffSwitch().hidden = true;
+  diffActions(diffVersion.saved !== undefined ? ['diff-restore'] : []);
+  showDiffTab('remote');
+  openSheet('diff');
+}
 function openDiff(row: PlanRow, tab?: typeof diffTab): void {
+  clearDiff(); diffActions([]); diffSwitch().hidden = false;
   diffRow = row;
   $('diff-title').textContent = row.source ? `${row.source} → ${row.path}` : row.path;
   showDiffTab(row.status === 'create' || row.base === undefined ? 'remote' : tab ?? diffTab);
@@ -557,6 +761,19 @@ function showDiffTab(tab: typeof diffTab): void {
   const tabs = {remote: 'diff-tab-remote', base: 'diff-tab-base', store: 'diff-tab-store'} as const;
   for (const [key, id] of Object.entries(tabs)) $(id).setAttribute('aria-selected', String(key === tab));
   ($('diff').querySelector('.switch') as HTMLElement).style.setProperty('--index', String(Object.keys(tabs).indexOf(tab)));
+  if (diffVersion) {renderDiff($('diff-body'), $('diff-stats'), diffVersion.saved, diffVersion.current, {before: 'Versão', after: 'Pasta agora'}); return;}
+  if (diffUpdate) {
+    const update = diffUpdate;
+    if (update.image) {
+      $('diff-stats').textContent = 'Imagem. Na atualização, a da loja só entra onde a pasta ainda tinha a imagem antiga.';
+      $('diff-body').replaceChildren(el('p', {class: 'diff-empty', text: 'Imagens servem à prévia local: não entram nas versões e só vão para a loja se você ligar o envio de imagens.'}));
+      return;
+    }
+    const views = {remote: [update.store, update.local, 'Loja', 'Pasta'], base: [update.base, update.local, 'Referência', 'Pasta'], store: [update.base, update.store, 'Referência', 'Loja']} as const;
+    const [from, to, a, b] = views[tab];
+    renderDiff($('diff-body'), $('diff-stats'), from, to, {before: a, after: b});
+    return;
+  }
   const row = diffRow; if (!row) return;
   if (row.image) {
     const size = (bytes?: Uint8Array) => bytes ? `${(bytes.length / 1024).toFixed(1).replace('.', ',')} KB` : 'ausente';
@@ -576,7 +793,9 @@ function showDiffTab(tab: typeof diffTab): void {
 $('diff-tab-remote').addEventListener('click', () => showDiffTab('remote'));
 $('diff-tab-base').addEventListener('click', () => showDiffTab('base'));
 $('diff-tab-store').addEventListener('click', () => showDiffTab('store'));
-$('close-diff').addEventListener('click', () => {closeSheet('diff'); diffRow = undefined;});
+$('close-diff').addEventListener('click', () => {closeSheet('diff'); clearDiff();});
+for (const option of ['marks', 'mine', 'store'] as const) $(`diff-choose-${option}`).addEventListener('click', () => {if (diffUpdate) setChoice(diffUpdate, option);});
+$('diff-restore').addEventListener('click', () => {const path = diffVersion?.path; if (path) {closeSheet('diff'); clearDiff(); restorePaths([path]);}});
 // Explicit, per file, with both versions on screen; the store's version stays in the backup.
 $('diff-use-project').addEventListener('click', () => {if (diffRow) {setOverride(diffRow, true); toast('A versão do projeto será enviada. A da loja fica no backup.');}});
 $('diff-keep-store').addEventListener('click', () => {if (diffRow) {setOverride(diffRow, false); toast('A versão da loja será mantida.');}});
@@ -630,6 +849,7 @@ function onJob(state: JobState | undefined): void {
       if (state.kind === 'compare' && state.status === 'completed') {route = 'send'; dismissJob();}
       render();
       if (state.status === 'completed' && state.kind === 'send') toast(state.scope === 'restore' ? 'Restauração concluída e conferida.' : 'Envio concluído e conferido na Yampi.');
+      if (state.kind === 'send') void recordSendInFolder();
     });
     return;
   }
@@ -671,7 +891,12 @@ $('show-file').addEventListener('click', () => {
   });
 });
 // --- Project folder ---------------------------------------------------------------------------------
-async function adoptProject(project: Project | {local: Files; localAssets: Assets}, source: {name: string; kind: 'folder' | 'zip' | 'demo'}, full = false): Promise<void> {
+// The reference in the folder stopped between two states (an update cut midway): readable and safe
+// to compare, and finished by the next update.
+let interruptedReference = false;
+// compareAfter: compare with the store at once (reading a project); off when only refreshing what
+// the folder has, after the extension itself wrote to it.
+async function adoptProject(project: Project | {local: Files; localAssets: Assets}, source: {name: string; kind: 'folder' | 'zip' | 'demo'}, full = false, compareAfter = true): Promise<void> {
   let target = context;
   if ('baseline' in project) {
     if (connected && context) assertContext(project.baseline.context, context);
@@ -682,11 +907,37 @@ async function adoptProject(project: Project | {local: Files; localAssets: Asset
   workspace = await updateWorkspace(target, value => {
     if (chosen) {value.baseline = chosen.baseline; value.lineage = chosen.lineage;}
     value.project = {local: project.local, localAssets: project.localAssets, name: source.name, kind: source.kind, loadedAt: new Date().toISOString()};
-    value.review = {overrides: []}; delete value.restore;
+    value.review = {overrides: []}; delete value.restore; delete value.update;
   });
   if (chosen?.advanced) toast('Os arquivos já enviados não voltam como conflito.');
-  restoreJournal = undefined; computePlan(); route = 'send';
-  if (connected) await compare(full);
+  interruptedReference = 'interrupted' in project && !!project.interrupted;
+  if (interruptedReference) toast('A última atualização da pasta parou no meio. Use Atualizar da loja para concluir.', 8000);
+  restoreJournal = undefined; computePlan(); computeUpdate(); route = 'send';
+  if (connected && compareAfter) await compare(full);
+}
+async function readProjectFromFolder(folder: Folder): Promise<Project> {
+  const {entries} = await folderEntries(folder, controller?.signal);
+  const project = await readProjectEntries(entries, progressLocal);
+  if (!('baseline' in project)) throw new Error('Esta pasta não tem .yampi-sync/. Escolha a pasta do projeto baixado pela extensão.');
+  return project;
+}
+// After a send, the folder's reference follows the store too, and a version keeps the store's
+// texts: only when write access to the folder is already given, never with a prompt outside a click.
+async function recordSendInFolder(): Promise<void> {
+  const folder = projectFolder(), base = workspace?.baseline, lineage = workspace?.lineage;
+  if (!folder || !base || !lineage?.advancedAt) return;
+  try {
+    if (!await permitted(folder, false, 'readwrite')) return;
+    const {entries} = await folderEntries(folder), fresh = await readProjectEntries(entries);
+    if (!('baseline' in fresh) || !fresh.manifest || fresh.baseline.capturedAt !== lineage.exportedAt || !sameContext(fresh.baseline.context, base.context)) return;
+    const access = await openProject(folder);
+    await writeReference(access, fresh.baseline, base, fresh.manifest, 'send');
+    await saveVersion(access, {kind: 'envio', origin: 'loja', label: 'Loja depois do envio', context: base.context, files: base.files, journals: lineage.journals});
+    toast('Envio registrado também na pasta do projeto.', 4000);
+  } catch (error) {
+    notice = {title: 'O envio está na loja, mas a pasta não registrou', text: `${error instanceof Error ? error.message : String(error)} Use Atualizar da loja para alinhar a pasta.`};
+    render();
+  }
 }
 async function compare(full = false): Promise<void> {
   const base = workspace?.baseline, project = workspace?.project;
@@ -694,13 +945,13 @@ async function compare(full = false): Promise<void> {
   closeSheet('confirm-panel');
   await startJob({id: newId(), kind: 'compare', scope: 'project', paths: changedPaths(base, project.local, project.localAssets), ...(full ? {full: true} : {})});
 }
-async function readFolder(folder: Folder, full = false): Promise<void> {
+async function readFolder(folder: Folder, full = false, compareAfter = true): Promise<void> {
   busyTitle = `Lendo “${folder.name}”`; render();
   const {name, entries} = await folderEntries(folder, controller?.signal);
   const project = await readProjectEntries(entries, (done, total) => {if (controller?.signal.aborted) throw new Error('Leitura da pasta cancelada.'); progressLocal(done, total);});
   if (context) await rememberFolder('baseline' in project ? project.baseline.context : context, folder, name).catch(() => {});
   remembered = {folder, name, savedAt: new Date().toISOString()};
-  await adoptProject(project, {name, kind: 'folder'}, full);
+  await adoptProject(project, {name, kind: 'folder'}, full, compareAfter);
 }
 function chooseFolder(): void {
   if (!canPickFolders()) {$('folder').click(); return;}
@@ -778,6 +1029,69 @@ $('compare').addEventListener('click', event => {
     await compare(full);
   });
 });
+// Update: the folder is read again, the whole store is read in the background, and the user reviews
+// what comes to the folder before anything is written. Chrome asks for write access in this click.
+$('update-project').addEventListener('click', () => {
+  const folder = projectFolder();
+  if (!folder) return;
+  const allowed = permitted(folder, true, 'readwrite');
+  void run('Lendo a pasta do projeto', async () => {
+    if (!await allowed) throw new Error('O Chrome não liberou a escrita na pasta do projeto. Sem ela, a extensão não atualiza a pasta nem guarda versões.');
+    await readFolder(folder, false, false);
+    await startJob({id: newId(), kind: 'compare', scope: 'update', full: true});
+  });
+});
+$('cancel-update').addEventListener('click', () => {
+  const target = updatePlan?.context || context;
+  updatePlan = undefined; closeAll(); render();
+  if (target) void updateWorkspace(target, value => {delete value.update;}).then(next => {workspace = next; render();}).catch(() => {});
+});
+$('apply-update').addEventListener('click', () => {
+  const folder = projectFolder(), current = updatePlan;
+  if (!folder || !current) return;
+  const allowed = permitted(folder, true, 'readwrite');
+  closeAll();
+  void run('Atualizando a pasta', async () => {
+    if (!await allowed) throw new Error('O Chrome não liberou a escrita na pasta do projeto. Nada foi gravado.');
+    const result = await applyUpdate(await openProject(folder), current, await readProjectFromFolder(folder), progressLocal);
+    // The reference is now the store as read: the next comparison starts from it.
+    workspace = await updateWorkspace(current.context, value => {value.baseline = current.reference; value.lineage = {exportedAt: current.reference.capturedAt, journals: []}; delete value.update;});
+    updatePlan = undefined;
+    await readFolder(folder, false, false);
+    notice = {title: 'Pasta atualizada com a loja', tone: 'ok', text: [
+      `${plural(result.written.length, 'arquivo gravado', 'arquivos gravados')}${result.removed.length ? ` e ${plural(result.removed.length, 'removido', 'removidos')}` : ''} em tema/.`,
+      result.marked.length ? `Com marcações de conflito para resolver no editor de código: ${list(result.marked)}.` : '',
+      'Versões guardadas em .yampi-sync/versoes/. Nada foi enviado à loja.'
+    ].filter(Boolean).join(' ')};
+  });
+});
+$('open-versions').addEventListener('click', () => {
+  const folder = projectFolder();
+  if (!folder) return;
+  const allowed = permitted(folder, true);
+  void run('Abrindo as versões', async () => {
+    if (!await allowed) throw new Error('O Chrome não liberou a leitura da pasta. Escolha a pasta de novo.');
+    await loadVersions(folder);
+    openSheet('versions-sheet');
+  });
+});
+$('close-versions').addEventListener('click', () => closeSheet('versions-sheet'));
+$('version-back').addEventListener('click', () => {if (versions) {delete versions.open; renderVersions();}});
+$('restore-all').addEventListener('click', () => {const open = versions?.open; if (open) restorePaths(open.changes.filter(change => change.change !== 'added-since').map(change => change.path));});
+$('version-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const folder = projectFolder();
+  if (!folder) return;
+  const allowed = permitted(folder, true, 'readwrite'), name = $<HTMLInputElement>('version-name').value.trim();
+  void run('Guardando a versão', async () => {
+    if (!await allowed) throw new Error('O Chrome não liberou a escrita na pasta do projeto. Nada foi gravado.');
+    const fresh = await readProjectFromFolder(folder);
+    await saveVersion(await openProject(folder), {kind: 'manual', origin: 'pasta', label: name || `Pasta em ${dateTime(Date.now())}`, context: fresh.baseline.context, files: fresh.local});
+    $<HTMLInputElement>('version-name').value = '';
+    await loadVersions(folder);
+    toast('Versão guardada na pasta do projeto.');
+  });
+});
 // --- Send -------------------------------------------------------------------------------------------
 $('apply').addEventListener('click', () => {
   if (!plan || !selected.size || busy) return;
@@ -791,6 +1105,9 @@ $('cancel-send').addEventListener('click', () => {closeSheet('confirm-panel'); $
 $('confirm-send').addEventListener('click', () => {
   if (!plan) return;
   const current = plan, chosen = [...selected], sendScope = scope, journalId = restoreJournal?.id;
+  // With write access, the send is also recorded in the project folder; refusing changes nothing in the send.
+  const folder = projectFolder();
+  if (folder) void permitted(folder, true, 'readwrite').catch(() => false);
   closeSheet('confirm-panel');
   void run('Preparando o envio', async () => {
     const id = newId();
@@ -867,7 +1184,7 @@ $('undo').addEventListener('click', () => {
   if (entry) {dismissJob(); void run('Preparando a restauração', () => prepareRestore(entry));}
 });
 $('clear').addEventListener('click', async () => {
-  if (!confirm('Apagar as cópias originais, o projeto carregado e os backups guardados nesta extensão? Os ZIPs já baixados continuam no computador. Nada muda na loja.')) return;
+  if (!confirm('Apagar as cópias originais, o projeto carregado e os backups guardados nesta extensão? Os ZIPs já baixados e as versões na pasta do projeto continuam no computador. Nada muda na loja.')) return;
   closeSheet('menu-sheet');
   await clearLocal(); workspace = undefined; plan = undefined; journal = undefined; history = []; resumable = undefined; remembered = undefined; restoreJournal = undefined; selected.clear();
   route = 'export'; updateHistory(); journalInfo(); toast('Dados locais apagados.'); render();
@@ -905,7 +1222,7 @@ async function connect(): Promise<void> {
     }
     connected = true; $('connection-state').textContent = 'Editor conectado';
     await loadStoreData();
-    if (plan) route = 'send';
+    if (plan || updatePlan) route = 'send';
   } catch (error) {
     offline = {title: 'Não foi possível conectar', text: error instanceof Error ? error.message : String(error)};
   } finally {busy = false; render();}

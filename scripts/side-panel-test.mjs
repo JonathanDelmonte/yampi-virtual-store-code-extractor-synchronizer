@@ -39,10 +39,13 @@ export async function nativePanelDriver(browser, downloadDirectory, worker) {
     }
     if (!target) throw new Error('Painel lateral nativo não abriu.');
     const {sessionId} = await cdp.send('Target.attachToTarget', {targetId: target.targetId, flatten: false});
-    let id = 0; const pending = new Map();
+    let id = 0; const pending = new Map(), dialogs = [];
     cdp.on('Target.receivedMessageFromTarget', ({sessionId: received, message}) => {
       if (received !== sessionId) return;
-      const reply = JSON.parse(message), request = pending.get(reply.id);
+      const reply = JSON.parse(message);
+      // A confirm() in the panel: answered by the next handler the test registered, else dismissed, as Playwright does.
+      if (reply.method === 'Page.javascriptDialogOpening') {const handle = dialogs.shift(); void send('Page.handleJavaScriptDialog', {accept: !!handle?.(reply.params.message)}); return;}
+      const request = pending.get(reply.id);
       if (!request) return;
       pending.delete(reply.id); reply.error ? request.reject(new Error(reply.error.message)) : request.resolve(reply.result);
     });
@@ -66,6 +69,8 @@ export async function nativePanelDriver(browser, downloadDirectory, worker) {
     };
     return {
       evaluate, waitForFunction, async reload() {await send('Page.reload');},
+      // handler(message) returns true to accept the next dialog.
+      onceDialog(handler) {dialogs.push(handler);},
       async screenshot({path: destination}) {const {data} = await send('Page.captureScreenshot', {captureBeyondViewport: true}); await writeFile(destination, Buffer.from(data, 'base64'));},
       locator(selector) {return {
         async click() {const point=await evaluate(s => {const el = document.querySelector(s); if (!el || el.disabled || !el.getClientRects().length) throw new Error(`Controle indisponível: ${s}`);el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};},selector);await send('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});},

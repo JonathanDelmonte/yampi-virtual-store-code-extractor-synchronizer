@@ -5,12 +5,14 @@ import type {PhaseState} from '../core/progress';
 export type JobKind = 'export' | 'compare' | 'send';
 export type JobStatus = 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled';
 export type Scope = 'project' | 'restore';
+// update: a compare that reads the whole store, to bring its changes into the project folder.
+export type CompareScope = Scope | 'update';
 export interface JobRequest {
   id: string; kind: JobKind;
   // export: also capture the published storefront (already authorized by the user in the panel).
   includePreview?: boolean;
-  // compare and send: the project or the undo of an earlier send (journalId).
-  scope?: Scope; journalId?: string;
+  // compare and send: the project or the undo of an earlier send (journalId); compare also the update.
+  scope?: CompareScope; journalId?: string;
   // compare: the store files to read; full reads every file.
   paths?: string[]; full?: boolean;
   // send: continue this interrupted send instead of starting one.
@@ -27,7 +29,7 @@ export type JobResult =
   | {kind: 'compare'; read: number; listed: number; full: boolean}
   | {kind: 'send'; journalId?: string; verified: number; created: number; uploaded: number; total: number; warnings: string[]; preview?: string};
 export interface JobState {
-  id: string; kind: JobKind; status: JobStatus; scope?: Scope; resumed?: boolean;
+  id: string; kind: JobKind; status: JobStatus; scope?: CompareScope; resumed?: boolean;
   context: Context; title: string; detail: string; path?: string;
   phases: PhaseState[]; fraction: number; elapsedMs: number; etaMs?: number;
   startedAt: number; updatedAt: number; finishedAt?: number;

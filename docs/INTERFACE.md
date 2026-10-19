@@ -88,6 +88,25 @@ O menu **⋯** abre **Histórico e backups**. Os controles de recuperação, a a
 
 As abas aceitam mouse, Tab, setas, Home e End. As ações continuam bloqueadas durante uma operação, e trocar de aba preserva o projeto e a comparação. A orientação fora do editor mantém seu próprio fluxo. Não foi acrescentada exportação direta para uma pasta: a cópia do tema continua em ZIP, e escolher uma pasta serve para ler o projeto editado.
 
+## Atualizar da loja e versões na 0.8.0
+
+Layout funcional, com os componentes que já existiam; a revisão visual fica para depois, a pedido do proprietário.
+
+- **Atualizar da loja** e **Versões** aparecem como links abaixo do cartão do projeto (escolha da pasta) e da comparação (revisão), quando o projeto veio de uma pasta. Com ZIP, uma nota explica que é preciso escolher a pasta.
+- A revisão da atualização reaproveita:
+  - os contadores (da loja, juntados, para decidir);
+  - o bloco **Para decidir**, com as escolhas por arquivo;
+  - a lista de arquivos;
+  - a folha de diferenças, com as três vistas e os botões **Marcar no arquivo**, **Manter a da pasta** e **Usar a da loja**.
+
+  **Atualizar a pasta** e **Voltar** ficam na própria tela.
+- **Versões** abre uma folha alta com:
+  - um campo para salvar a pasta com um nome;
+  - a lista de versões (nome, data e tipo);
+  - ao abrir uma versão, as diferenças para a pasta, com **Ver** e **Trazer** por arquivo e **Trazer N arquivos desta versão**.
+- **Enviar imagens novas** usa o mesmo interruptor de **Incluir a vitrine publicada**. Ligá-lo abre a confirmação do sistema com o aviso.
+- O aviso de sucesso da atualização usa o tom verde; problemas continuam em vermelho.
+
 ## Movimento e acesso
 
 - Troca de tela: 240 ms, com opacidade e deslocamento de 6 px, em curva de desaceleração. Folhas sobem em 280 ms; a barra de progresso anda em 450 ms; botões respondem à pressão em 120 ms.

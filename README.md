@@ -6,6 +6,38 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
+## Versão 0.8.0
+
+A 0.8.0 faz a pasta do projeto acompanhar a loja e guarda versões do trabalho. Assim, um envio não desfaz o que o cliente mudou na Yampi, e dá para voltar atrás.
+
+- **Atualizar da loja.** Com a pasta do projeto escolhida, **Atualizar da loja** lê a loja inteira e mostra o que vem para a pasta antes de gravar qualquer coisa:
+  - o que só a loja mudou entra, e o que só você mudou fica;
+  - mudanças dos dois lados em trechos diferentes do mesmo arquivo são juntadas linha a linha;
+  - quando os dois mudaram as mesmas linhas, você decide. Por padrão, o arquivo recebe as duas versões entre marcações (`<<<<<<<`, `=======`, `>>>>>>>`) para resolver no VS Code, e nada com marcações é enviado;
+  - arquivo removido na loja sai da pasta, e arquivo novo na loja entra;
+  - imagens da loja entram na pasta só para a prévia local.
+- **A referência fica na pasta.** Depois de uma atualização, `.yampi-sync/manifest.json` e `.yampi-sync/baseline/` passam a ser a loja como foi lida. Depois de um envio também, se a escrita na pasta já estiver liberada.
+  - Antes, a referência só avançava neste navegador: limpar os dados da extensão ou abrir a pasta em outro computador fazia voltar à exportação antiga.
+  - Se a gravação parar no meio, a pasta continua legível e a próxima atualização termina o trabalho.
+- **Versões na pasta do projeto.** Antes de mudar a pasta, a extensão guarda em `.yampi-sync/versoes/` a referência anterior, a pasta como estava e a loja como foi lida.
+  - Só textos: imagens não entram, para economizar espaço. Cada texto é guardado uma vez, pelo SHA-256, então uma versão nova só ocupa o que mudou.
+  - Em **Versões**, salve a pasta com um nome (por exemplo, "Banner de Natal aprovado"), abra uma versão, veja o que mudou desde então e traga um arquivo, ou todos, de volta para `tema/`. A pasta de antes também fica guardada.
+- **Imagens fora do envio por padrão.** Imagens novas ficam no projeto.
+  - **Enviar imagens novas**, na revisão, as inclui depois de um aviso: uma imagem enviada fica na loja, e a extensão não a substitui nem apaga.
+  - A opção volta a desligar a cada comparação. Um texto que usa uma imagem nova espera, com o motivo.
+- **Permissão do Chrome.** Atualizar, salvar ou trazer uma versão pedem, no clique, permissão para editar a pasta.
+  - A extensão grava só em `tema/` e nos seus registros de `.yampi-sync/` (referência e versões). Ferramentas, `package.json`, `preview/` e `node_modules` nunca são tocados.
+  - Cada arquivo precisa estar como foi lido; se mudou depois, nada é gravado.
+
+**Validado só com o editor fictício.** Foram testados com projetos e lojas fictícios ([Validação](docs/VALIDACAO.md)):
+- junção linha a linha e conflito marcado;
+- arquivos removidos e novos;
+- referência reescrita, inclusive com parada no meio;
+- versões e recuperação;
+- envio de imagens desligado.
+
+Ainda não foi conferida a gravação numa pasta real pelo painel lateral do Chrome: o teste automatizado usa o armazenamento privado do navegador no lugar do seletor de pastas. Configurações do editor visual da Yampi (seções e banners definidos no painel, não no código) não estão nos arquivos lidos e não entram nas versões. As telas novas têm layout funcional; o acabamento visual vem depois. [Regras](docs/SPEC.md).
+
 ## Versão 0.7.0
 
 A 0.7.0 acelera o download do tema e corrige a barra de progresso.
@@ -53,7 +85,8 @@ O ícone de código informa no hover que a extensão precisa do **Editor de cód
 | Pasta/arquivo | Uso |
 |---|---|
 | `tema/` | Código editável, copiado do editor |
-| `.yampi-sync/baseline/` e `manifest.json` | Originais, tamanhos e SHA-256 para comparar e devolver código |
+| `.yampi-sync/baseline/` e `manifest.json` | Referência: a loja como a extensão a conhece por último (download, atualização ou envio), com tamanhos e SHA-256, para comparar e devolver código |
+| `.yampi-sync/versoes/` | Versões do projeto: só textos, cada um guardado uma vez pelo SHA-256 |
 | `preview/` | Captura bruta (`raw/`), leituras públicas, recursos, manifesto e relatório |
 | `local.data.json` | Somente sobreposições da prévia (começa vazio) |
 | `local.config.json` | Templates, estilos, mapa de seções e opções de componentes |
@@ -110,7 +143,8 @@ Preços refletem a data da captura. Carrinho, checkout, pagamentos, formulários
 | Arquivo ausente localmente | Não exclui |
 | Texto novo (.twig, .vue, .scss) em pasta que existe na loja | Criado pela extensão e preenchido |
 | Texto novo em pasta nova, ou com nome/tipo que a Yampi recusa | Bloqueia todo o envio, com o motivo |
-| Imagem nova | Enviada para `assets/images`; de subpasta, com as referências ajustadas |
+| Imagem nova | Fica no projeto. Com **Enviar imagens novas** ligado (depois do aviso), vai para `assets/images`; de subpasta, com as referências ajustadas |
+| Texto com marcações de conflito | Nunca enviado: resolva no editor de código |
 | Imagem existente alterada | Não enviada: a Yampi não substitui imagens |
 | `elements/scripts/components.twig` | Nunca enviado: a Yampi gera esse arquivo |
 | Depende de arquivo que não existirá na loja | Bloqueia, com o nome da dependência |
@@ -118,6 +152,24 @@ Preços refletem a data da captura. Carrinho, checkout, pagamentos, formulários
 | Só espaço em branco | Separado, sem seleção inicial; pode ser descartado |
 
 Cada texto existente é relido antes de salvar. Os arquivos criados e as imagens enviadas são conferidos em grupo, depois de recarregar o editor, antes da etapa seguinte; cada texto é salvo e conferido após recarregar, antes do próximo. A operação para no primeiro erro e mantém o registro parcial; **Continuar de onde parou** retoma do item em que parou, sem refazer o que já foi conferido e sem sobrescrever o que outra pessoa alterou na loja. **Desfazer este envio** e **Comparar para restaurar** (no menu **⋯ → Histórico e backups**) protegem alterações posteriores: arquivos criados voltam ao conteúdo inicial da Yampi, e nada é excluído. A extensão nunca publica, exclui ou renomeia. Regras completas: [SPEC.md](docs/SPEC.md).
+
+### Atualizar da loja e versões
+
+Antes de um trabalho novo numa pasta que já tem tempo, use **Atualizar da loja** (abaixo da pasta, em **Importar projeto**). Assim você mexe sobre o que está na loja hoje, e o próximo envio não volta atrás no que o cliente fez. Nada vai para a loja. A pasta só muda quando você confirma **Atualizar a pasta**, depois de revisar:
+
+| Situação | Na pasta |
+|---|---|
+| Só a loja mudou | Recebe a versão da loja |
+| Só a pasta mudou | Fica como está |
+| Os dois mudaram, em trechos diferentes | Recebe as duas mudanças juntas |
+| Os dois mudaram as mesmas linhas | Você decide: as duas versões marcadas no arquivo (padrão), **Manter a da pasta** (vai no próximo envio, com a da loja no backup) ou **Usar a da loja** |
+| Removido na loja | Sai da pasta. Se você o tinha editado, decide (padrão: seguir a loja) |
+| Novo na loja | Entra na pasta |
+| Apagado na pasta e mudado na loja | Volta com a versão da loja, a menos que você escolha deixá-lo apagado |
+| Ainda com marcações de uma atualização anterior | Fica como está até você resolver; a referência dele não avança |
+| Imagem | A da loja entra para a prévia local; uma imagem mudada na pasta fica |
+
+Antes de gravar, a extensão guarda três versões em `.yampi-sync/versoes/`: a referência, a pasta e a loja. Em **Versões**, abra uma delas para ver o que mudou desde então e trazer arquivos de volta. Também é possível salvar a pasta com um nome. Versões guardam só textos.
 
 O projeto local não precisa mudar por causa das imagens: a prévia continua usando as subpastas, e só a loja recebe os caminhos em `assets/images`. Uma referência montada em tempo de execução (por exemplo, `'images/hero/' ~ nome`) não pode ser ajustada e bloqueia o arquivo, com o motivo.
 

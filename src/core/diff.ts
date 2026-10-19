@@ -45,17 +45,21 @@ function myers(a: string[], b: string[]): DiffKind[] | undefined {
   }
   return steps.reverse();
 }
-export function diffLines(before: string, after: string, context = 3): LineDiff {
-  const a = splitLines(before), b = splitLines(after);
+// The steps from a to b. Too different for the limits, the middle is replaced as a whole: the
+// review says so, and a merge only gets more cautious (a wider conflict, never a wrong merge).
+export function editScript(a: string[], b: string[]): {steps: DiffKind[]; approximate: boolean} {
   let start = 0;
   while (start < a.length && start < b.length && a[start] === b[start]) start++;
   let endA = a.length, endB = b.length;
   while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {endA--; endB--;}
   const middleA = a.slice(start, endA), middleB = b.slice(start, endB);
-  let middle = middleA.length + middleB.length > MAX_LINES ? undefined : myers(middleA, middleB);
-  const approximate = !middle;
-  middle ||= [...middleA.map(() => 'del' as const), ...middleB.map(() => 'add' as const)];
-  const kinds: DiffKind[] = [...Array<DiffKind>(start).fill('same'), ...middle, ...Array<DiffKind>(a.length - endA).fill('same')];
+  const middle = middleA.length + middleB.length > MAX_LINES ? undefined : myers(middleA, middleB);
+  const steps = middle || [...middleA.map(() => 'del' as const), ...middleB.map(() => 'add' as const)];
+  return {steps: [...Array<DiffKind>(start).fill('same'), ...steps, ...Array<DiffKind>(a.length - endA).fill('same')], approximate: !middle};
+}
+export function diffLines(before: string, after: string, context = 3): LineDiff {
+  const a = splitLines(before), b = splitLines(after);
+  const {steps: kinds, approximate} = editScript(a, b);
   // Number every line on its side; "same" lines advance both.
   const lines: DiffLine[] = [];
   let ia = 0, ib = 0, added = 0, removed = 0;

@@ -1,5 +1,54 @@
 # Validação
 
+## Atualização da pasta, versões e imagens opcionais na 0.8.0, em 19/10/2026
+
+Node 24.15.0, depois de `npm ci`. `npm run check` passou com 571 testes em 39 arquivos. Tudo usa o editor fictício e projetos fictícios; nenhuma requisição alcançou a Yampi.
+
+- **Junção** (`tests/merge.test.ts`, 13 testes):
+  - bloco removido na loja e trecho mudado na pasta ficam os dois;
+  - a mesma mudança dos dois lados não é conflito;
+  - mudanças nas mesmas linhas, ou em linhas vizinhas, viram marcações com as duas versões, e linhas iguais nas bordas ficam fora delas;
+  - começo e fim mudados em lados diferentes juntam;
+  - a quebra final de linha segue quem mexeu nela, e `\r\n` vindo da loja não atrapalha;
+  - arquivo criado nos dois lados é conflito do arquivo inteiro;
+  - arquivo grande demais para a comparação detalhada vira conflito, nunca junção errada;
+  - marcações são reconhecidas só na forma completa.
+- **Atualização** (`tests/update.test.ts`, 9 testes), sobre um projeto exportado pela extensão, com mudanças fictícias na pasta e na loja:
+  - cada arquivo recebeu o estado esperado: juntado, conflito marcado, da loja, só da pasta, removido, novo, imagem da loja para a prévia;
+  - a referência passou a ser a loja lida, e as ferramentas locais (`readProject`) a leram;
+  - a comparação seguinte bloqueou o arquivo marcado e deixou pronto o trabalho da pasta;
+  - três versões foram guardadas antes de mudar a pasta, cada texto uma vez, nenhuma imagem;
+  - arquivo mudado depois da leitura parou tudo sem gravar nada;
+  - as escolhas "manter a da pasta" e "usar a da loja" funcionaram, e um arquivo apagado na pasta e mudado na loja voltou;
+  - arquivo ainda marcado não foi juntado de novo, e sua referência não avançou;
+  - gravação interrompida no segundo original deixou a pasta legível, com o aviso, e a atualização seguinte terminou;
+  - leitura parcial da loja é recusada, e original adulterado sem marcação continua recusado.
+- **Versões** (`tests/versions.test.ts`, 7 testes):
+  - versão nomeada é listada e conferida, e só os textos que mudam ocupam espaço;
+  - automática igual à anterior não se repete;
+  - texto alterado, versão de outra loja e registro estragado ficam de fora;
+  - trazer guarda a pasta antes, recria o arquivo apagado e mantém `\r\n`;
+  - arquivo mudado depois da leitura não é sobrescrito;
+  - a extensão grava só em `tema/` e nos seus registros de `.yampi-sync/`, e pasta de tema solta não recebe versões.
+- **Imagens e marcações** (`tests/images-off.test.ts`, 4 testes):
+  - com a opção desligada, a imagem nova fica no projeto com o motivo, e o texto que a usa espera, explicado;
+  - ligada, a imagem vai junto do texto, como antes, e texto independente segue pronto;
+  - texto com marcações fica bloqueado até ser resolvido.
+- **Operações** (`tests/jobs.test.ts`, `tests/background.test.ts`):
+  - a leitura para atualizar lê a loja inteira mesmo com caminhos pedidos, guarda à parte sem tocar a revisão do envio e não grava nada;
+  - o worker recusa um envio com escopo de atualização e trata a leitura como só leitura.
+- **Chromium, extensão real** (`npm run test:e2e`): a imagem nova ficou fora do envio, com o texto que a usa esperando. Ligar **Enviar imagens novas** mostrou o aviso no painel lateral; aceito, o envio de 3 itens seguiu igual ao da 0.7.0, com backup, conferência após recarregar e restauração.
+- **Chromium, painel de demonstração** (`npm run test:update`): uma pasta fictícia no armazenamento privado do navegador foi entregue ao painel no lugar do seletor de pastas.
+  - Mudanças fictícias da pasta: linha 10 de um template longo e o head. Da loja: linha 1991 do mesmo template, o head, os estilos, um arquivo removido e um novo.
+  - A revisão mostrou 3 da loja, 1 juntado e 1 para decidir. Comparar e trocar a escolha não gravou nada.
+  - Aplicar gravou a junção, as marcações, os estilos e o arquivo novo, removeu o arquivo apagado, reescreveu a referência sem deixar marcação e guardou 3 versões sem imagens. A comparação seguinte bloqueou o arquivo marcado.
+  - Em **Versões**, trazer o head da versão "Pasta antes de atualizar" recuperou a versão da pasta e guardou uma quarta; uma versão nomeada ficou como quinta.
+  - Até aqui, zero gravações na loja fictícia.
+  - Um envio em seguida (o template juntado e o head trazido da versão) foi registrado na pasta: a referência passou a ter o conteúdo conferido, com o motivo `send`, e uma sexta versão (`envio`) guardou a loja. Capturas em `.cache/update-validation/`.
+- Também aprovados depois da mudança: `npm run test:panel`, `npm run test:preview`, `npm run test:direct` e `scripts/compression-e2e.mjs`.
+
+Sem validação real: a gravação numa pasta real pelo painel lateral do Chrome (permissão de edição, gravação e releitura) não foi conferida; o teste usa o armazenamento privado do navegador numa página comum. A leitura completa da loja para atualizar é a mesma da cópia (0.7.0), também sem validação real.
+
 ## Leitura direta e barra de progresso na 0.7.0, em 18/10/2026
 
 Node 24.15.0. `npm run check` passou com 278 testes em 18 arquivos. Tudo usa o editor fictício e um servidor fictício que responde nas rotas que o módulo público do editor lê; nenhuma requisição alcançou a Yampi.

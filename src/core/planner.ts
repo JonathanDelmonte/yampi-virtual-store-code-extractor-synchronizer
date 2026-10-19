@@ -1,9 +1,13 @@
 import {assertContext, safeSnapshot, validatePaths, writable, sameIgnoringWhitespace, creatableName, freshFile, uploadablePath, yampiImageName, type Assets, type Snapshot, type Files, type Plan, type PlanRow} from './model';
 import {dependencyReport, resolvedReferences} from '../../local-runtime/dependencies.mjs';
 import {COMPONENTS_FILE} from '../../local-runtime/contract.mjs';
+import {hasConflictMarks} from './merge';
 // assumed: store paths whose content was not read (taken as exported). inventory: every path the
 // store lists, which decides existing folders and dependencies when the remote snapshot is partial.
-export interface PlanOptions {overrides?: Iterable<string>; assumed?: Iterable<string>; inventory?: Iterable<string>}
+// uploads: new images go to the store; off, they stay in the project and texts using them wait.
+export interface PlanOptions {overrides?: Iterable<string>; assumed?: Iterable<string>; inventory?: Iterable<string>; uploads?: boolean}
+export const IMAGES_OFF = 'Imagem nova, fora do envio: ligue “Enviar imagens novas” na revisão ou envie pela Yampi.';
+export const MARKED = 'Ainda tem marcações de conflito de uma atualização (<<<<<<< e >>>>>>>). Resolva no editor de código e compare de novo.';
 const equalBytes = (a?: Uint8Array, b?: Uint8Array) => !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]);
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const parent = (path: string) => path.slice(0, path.lastIndexOf('/'));
@@ -73,6 +77,7 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
       if (!l) status = 'missing-local';
       else if (!b) {
         if (r) status = equalBytes(l, r) ? 'already-applied' : 'conflict';
+        else if (uploadablePath(path) && options.uploads === false) {status = 'new-local'; reason = IMAGES_OFF;}
         else if (uploadablePath(path)) status = 'upload';
         else {status = 'new-local'; reason = 'A Yampi guarda imagens só direto em assets/images, e outra imagem já usa esse nome.';}
       }
@@ -100,7 +105,8 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
     else status = writable(path) ? 'update' : 'unsupported';
     // Yampi rewrites this list itself whenever a component is created; sending it would race that.
     if (path === COMPONENTS_FILE && (status === 'update' || status === 'conflict')) {status = 'unsupported'; reason = 'A Yampi gera este arquivo sozinha, com os componentes que existem na loja. A extensão não o envia.';}
-    if (leftovers[path] && (status === 'update' || status === 'create')) {status = 'blocked-dependency'; reason = `Usa imagens que vão direto para assets/images por um caminho que a extensão não consegue ajustar (${leftovers[path].join(', ')}). Escreva no código o caminho completo, como 'images/pasta/arquivo.jpg'.`;}
+    if (l !== undefined && (status === 'update' || status === 'create') && hasConflictMarks(l)) {status = 'blocked-dependency'; reason = MARKED;}
+    if (leftovers[path] && (status === 'update' || status === 'create')) {status = 'blocked-dependency'; reason =`Usa imagens que vão direto para assets/images por um caminho que a extensão não consegue ajustar (${leftovers[path].join(', ')}). Escreva no código o caminho completo, como 'images/pasta/arquivo.jpg'.`;}
     return {path, status, base: b, local: l, remote: r, ...(rewritten[path] ? {rewritten: rewritten[path]} : {}), ...(override ? {override} : {}), ...(reason ? {reason} : {}), ...(assumed.has(path) ? {assumed: true} : {})};
   });
   for (const row of rows) if (row.status === 'update' && sameIgnoringWhitespace(row.local!, row.remote!)) row.whitespaceOnly = true;

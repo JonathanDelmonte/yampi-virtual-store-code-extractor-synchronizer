@@ -364,3 +364,12 @@ describe('operações em segundo plano: o painel pode fechar', () => {
     expect(stored[token]).toBeUndefined();
   });
 });
+describe('atualizar o projeto pelo worker', () => {
+  test('a leitura para atualizar só lê; atualizar nunca é um envio', async () => {
+    const token = await open();
+    expect((await message(token, {action: 'job-start', job: {id: 'job-update-0001', kind: 'send', scope: 'update'}, context: shop})).error).toBe('Operação inválida.');
+    expect((await message(token, {action: 'job-start', job: {id: 'job-update-0002', kind: 'compare', scope: 'update', full: true}, context: shop})).ok).toBe(true);
+    expect(stored[token]).toMatchObject({locked: true, access: 'read', job: 'job-update-0002'});
+    expect(runnerMessages.find(m => m.target === 'runner' && m.action === 'start')).toMatchObject({job: {id: 'job-update-0002', kind: 'compare', scope: 'update', full: true}});
+  });
+});

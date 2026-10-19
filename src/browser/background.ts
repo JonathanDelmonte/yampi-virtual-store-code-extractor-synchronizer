@@ -7,7 +7,7 @@ import type {JobRequest, JobState} from '../jobs/types';
 // job: the background operation that holds the lock. While it runs, the panel only watches it,
 // and closing or reopening the panel never releases the editor.
 type Session = {tabId: number; editorUrl: string; documentId?: string; locked: boolean; access?: 'read' | 'write'; previewOrigins?: string[]; job?: string};
-const BRIDGE_VERSION = '0.7.0';
+const BRIDGE_VERSION = '0.8.0';
 const RUNNER = 'runner.html';
 const inFlight = new Map<string, Set<Promise<unknown>>>();
 const ports = new Map<string, Set<Promise<string>>>();
@@ -212,7 +212,9 @@ async function releaseJob(token: string, jobId: string): Promise<Session | undef
 function validRequest(value: unknown): JobRequest {
   const request = value as JobRequest;
   if (!request || typeof request.id !== 'string' || !/^[\w-]{8,64}$/.test(request.id) || !['export', 'compare', 'send'].includes(request.kind)) throw new Error('Operação inválida.');
-  if (request.scope !== undefined && !['project', 'restore'].includes(request.scope)) throw new Error('Operação inválida.');
+  if (request.scope !== undefined && !['project', 'restore', 'update'].includes(request.scope)) throw new Error('Operação inválida.');
+  // An update only reads the store; the panel writes the project folder after the user applies it.
+  if (request.scope === 'update' && request.kind !== 'compare') throw new Error('Operação inválida.');
   if (request.paths !== undefined && (!Array.isArray(request.paths) || request.paths.length > 6000 || request.paths.some(path => typeof path !== 'string'))) throw new Error('Operação inválida.');
   for (const key of ['resume', 'journalId'] as const) if (request[key] !== undefined && (typeof request[key] !== 'string' || !/^[\w-]{8,64}$/.test(request[key]!))) throw new Error('Operação inválida.');
   return {id: request.id, kind: request.kind, ...(request.includePreview ? {includePreview: true} : {}), ...(request.scope ? {scope: request.scope} : {}), ...(request.journalId ? {journalId: request.journalId} : {}), ...(request.paths ? {paths: [...request.paths]} : {}), ...(request.full ? {full: true} : {}), ...(request.resume ? {resume: request.resume} : {})};

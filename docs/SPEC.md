@@ -1,6 +1,6 @@
 # Especificação — comparação e envio
 
-Contrato do que protege a loja. O README explica o uso; este arquivo diz o que o código deve garantir. `tests/core.test.ts`, `tests/resume.test.ts`, `tests/jobs.test.ts` e `scripts/e2e.mjs` verificam estas regras com o editor fictício, que reproduz a marcação do editor real.
+Contrato do que protege a loja. O README explica o uso; este arquivo diz o que o código deve garantir. `tests/core.test.ts`, `tests/resume.test.ts`, `tests/jobs.test.ts` e `scripts/e2e.mjs` verificam estas regras com o editor fictício, que reproduz a marcação do editor real. A atualização da pasta e as versões são verificadas por `tests/merge.test.ts`, `tests/update.test.ts`, `tests/versions.test.ts`, `tests/images-off.test.ts` e `scripts/update-e2e.mjs`.
 
 ## Identidade
 
@@ -31,12 +31,16 @@ Cada caminho recebe um estado a partir do original exportado (B), do projeto loc
 | texto novo, sem R, pasta existente, nome e tipo aceitos | `create` | sim: a extensão cria e preenche |
 | texto novo, sem R, pasta inexistente ou nome/tipo recusado | `new-local` | bloqueia todo envio, com o motivo |
 | texto novo, R vazio, só espaços ou componente padrão da Yampi | `update` | sim: preenche |
-| imagem nova, sem R | `upload` | sim: a extensão envia |
+| imagem nova, sem R, com **Enviar imagens novas** ligado | `upload` | sim: a extensão envia |
+| imagem nova, sem R, com a opção desligada (padrão) | `new-local`, com o motivo | não; um texto que a usa fica bloqueado |
+| texto com marcações de conflito (`<<<<<<<` … `=======` … `>>>>>>>`) | `blocked-dependency`, com o motivo | não: resolva no editor de código |
 | imagem existente alterada | `unsupported` | não: a Yampi não substitui imagens |
 | `elements/scripts/components.twig` alterado | `unsupported` | não: a Yampi gera esse arquivo |
 | fora de `.twig`, `.vue`, `.css` e `.scss` | `unsupported` | não |
 
 Um conflito em texto pode ser resolvido pelo usuário, arquivo a arquivo, com **Usar a versão do projeto**, depois de ver as três versões. O arquivo passa a `update` com a versão da loja no backup. Sem essa escolha, fica a versão da loja.
+
+Diferenças só de espaço em branco aparecem separadas, sem seleção inicial, e nunca acoplam outros arquivos.
 
 ### Leitura da loja
 
@@ -52,32 +56,85 @@ Desde a 0.7.0, a cópia e a comparação leem o conteúdo pelo servidor do próp
 - **Recuo em vez de parada.** Servidor indisponível, resposta inesperada, sessão expirada ou falha no meio devolvem o restante à leitura pelo editor, com o motivo nas etapas. Só a troca de loja interrompe.
 - **Só leitura de cópia.** Com menos de 8 arquivos elegíveis, tudo vai pelo editor. Envio, preflight, criação, conferência após recarregar e restauração continuam lendo pelo editor.
 
-Depois de um envio, a referência da comparação avança: cada texto conferido e cada imagem enviada passam a ser o original. O que já foi enviado não volta como conflito, e o registro do envio fica ligado à exportação.
+Depois de um envio, a referência da comparação avança: cada texto conferido e cada imagem enviada passam a ser o original. O que já foi enviado não volta como conflito, e o registro do envio fica ligado à exportação. Desde a 0.8.0, a referência também avança na própria pasta do projeto (veja "Atualização do projeto").
 
 ## Dependências
 
 Um arquivo enviado não pode depender de um arquivo que não existirá na loja. O analisador lê `@import`/`@use`/`@forward`, `include`/`embed`/`extends`/`import`/`from`, `get_section_file`, `assets_url`/`asset()`, imports `.vue` e componentes usados por tag. Arquivos com estado `create` ou `upload` contam como existentes.
 
 - Uma dependência que não existirá bloqueia quem a usa (`blocked-dependency`, com os dois nomes).
-- Um texto que só a loja mudou (`remote-only`) ou que está em conflito também bloqueia os arquivos alterados que o usam: eles foram escritos contra a versão do projeto. O painel diz qual arquivo mudou e onde, e mostra a mudança. A versão da loja vai para o projeto só quando o usuário pede: **Usar no projeto** grava na pasta lembrada, ou **Copiar** para colar à mão.
+- Um texto que só a loja mudou (`remote-only`) ou que está em conflito também bloqueia os arquivos alterados que o usam: eles foram escritos contra a versão do projeto. O painel diz qual arquivo mudou e onde, e mostra a mudança. A versão da loja vai para o projeto só quando o usuário pede: **Usar no projeto** grava na pasta lembrada, ou **Copiar** para colar à mão. Para trazer todas as mudanças da loja de uma vez, **Atualizar da loja** (veja "Atualização do projeto").
+- Arquivos alterados que se usam vão juntos; um envio parcial é recusado antes de gravar.
 
 ## Escrita na pasta do projeto
 
-É a única escrita da extensão fora da loja (`replaceThemeFile`), sempre por um clique do usuário num arquivo que só a loja mudou:
+A extensão grava na pasta do projeto só pela API de pastas do Chrome, e só os caminhos que `projectPath` aceita: `tema/` e, em `.yampi-sync/`, `manifest.json`, `baseline/`, `versoes/` e `referencia-pendente.json`. Ferramentas, `package.json`, `preview/`, `node_modules` e caminhos com `..` são recusados antes de chegar ao disco. O navegador grava cada arquivo num temporário e o troca ao fechar: nenhum arquivo fica pela metade.
 
-- o Chrome pede a permissão de escrita naquele clique; sem ela, nada é gravado e a cópia continua disponível;
-- só um arquivo de `tema/` que já existe é trocado: nada é criado, nem pastas, e caminhos com `..` são recusados;
-- o arquivo precisa continuar como na comparação (lido como o projeto é lido, com quebras de linha `\n`); se mudou, nada é gravado;
-- as quebras de linha e a marca de ordem de bytes do arquivo são mantidas;
-- depois, a pasta é relida e comparada de novo.
-- Arquivos alterados que se usam vão juntos; um envio parcial é recusado antes de gravar.
-- Diferenças só de espaço em branco aparecem separadas, sem seleção inicial, e nunca acoplam outros arquivos.
+- **Permissão no clique.** Atualizar a pasta, salvar uma versão, trazer arquivos de uma versão e **Usar no projeto** pedem a escrita no próprio clique; sem ela, nada é gravado. O registro de um envio na pasta só acontece se a escrita já estiver liberada (o clique em **Enviar agora** a pede): nunca há pedido fora de um clique.
+- **Como foi lido.** Todo arquivo de `tema/` que a extensão troca ou remove precisa estar como na leitura que o usuário revisou, lido como o projeto é lido, com quebras de linha `\n`. Se mudou, nada é gravado.
+- Um texto gravado sobre um arquivo existente mantém as quebras de linha `\r\n` e a marca de ordem de bytes desse arquivo.
+- **Usar no projeto** troca só um arquivo de `tema/` que já existe e que só a loja mudou. A atualização e a recuperação de versões criam e removem arquivos de `tema/` (e pastas dentro dele), sempre depois da revisão; nunca fora de `tema/`.
+- Depois de cada escrita, a pasta é relida.
+
+## Atualização do projeto
+
+**Atualizar da loja** traz para a pasta o que mudou na loja, antes de um trabalho novo, para que o próximo envio parta da loja como está. A operação em segundo plano só lê: é uma comparação com escopo `update`, que lê a loja inteira (textos e imagens) e guarda a leitura à parte da revisão do envio. O painel calcula o plano (`planUpdate`) com a referência (B), a pasta (L) e a loja lida (R). Nada é gravado até **Atualizar a pasta**.
+
+| Situação | Estado | Na pasta |
+|---|---|---|
+| L igual a R | `same` | nada |
+| L igual a B | `store` ou `removed` | recebe R, ou sai da pasta se a loja o removeu |
+| R igual a B | `mine` | nada |
+| B, L e R diferentes, em linhas diferentes | `merged` | recebe a junção |
+| B, L e R diferentes nas mesmas linhas, ou em linhas vizinhas sem linha igual entre elas | `conflict` | escolha: marcações (padrão), `mine` ou `store` |
+| removido na loja e editado na pasta | `removed-edited` | escolha: seguir a loja (padrão: sai da pasta) ou manter |
+| apagado na pasta e mudado na loja | `deleted-changed` | escolha: seguir a loja (padrão: volta) ou continuar apagado |
+| L ainda com marcações de conflito | `marked` | nada; a referência desse arquivo não avança |
+
+Nenhum padrão desfaz uma mudança feita na loja. **Manter a da pasta** num conflito é a escolha explícita daquele arquivo, com as versões à vista: depois da atualização ele fica `update` e vai no próximo envio, com a versão da loja no backup. Com marcações, o arquivo nunca é enviado (veja "Comparação"). Um arquivo ainda marcado não é juntado de novo; como a referência dele não avança, uma mudança mais nova da loja aparece como conflito depois de resolvido.
+
+A junção é por linhas, como no Git (`mergeTexts`):
+- mudanças da pasta e da loja em linhas diferentes ficam as duas, e a mesma mudança dos dois lados não é conflito;
+- linhas iguais nas bordas de um conflito ficam fora das marcações;
+- arquivos diferentes demais para a comparação detalhada viram conflito do trecho inteiro, nunca uma junção errada;
+- imagens não são juntadas: a da loja entra só onde a pasta tinha a anterior, e uma imagem mudada na pasta fica.
+
+Aplicar segue esta ordem, e uma parada em qualquer ponto não perde nada:
+
+1. cada arquivo de `tema/` que vai mudar é conferido com a leitura revisada; um diferente para tudo antes da primeira gravação;
+2. as versões são guardadas: a referência anterior, a pasta e a loja lida;
+3. `tema/` muda: primeiro as remoções, depois as gravações, para que um nome que só muda de maiúsculas não perca o arquivo novo no Windows;
+4. a referência passa a ser a loja lida (`writeReference`).
+
+Parada depois do passo 3: os arquivos que a atualização trouxe já são iguais à loja, e a comparação os vê como já aplicados.
+
+`writeReference` segue quatro passos:
+1. grava `.yampi-sync/referencia-pendente.json`, com os hashes dos dois estados;
+2. remove e grava só os originais que mudam;
+3. grava o manifesto;
+4. remove a marcação.
+
+Ao ler uma pasta com a marcação, cada original pode estar em qualquer um dos dois estados. A pasta é aceita, com o aviso de que a atualização parou no meio, e a próxima atualização termina o trabalho. Sem a marcação, um original diferente do manifesto continua recusado. O manifesto mantém a ferramenta, o tema, os caminhos ignorados e a prévia da exportação, e registra `reference`: quando, por que (`update` ou `send`) e com qual versão da extensão. As ferramentas locais (`npm run dev`, `npm run pack`) leem a referência nova normalmente; durante uma atualização interrompida, recusam a pasta até a extensão terminar.
+
+Depois de um envio, se a escrita na pasta já estiver liberada, a referência da pasta recebe o que foi conferido na loja (a mesma referência que avança no navegador), com o horário da captura mantido. Uma versão `envio` guarda os textos.
+
+## Versões
+
+Ficam na pasta do projeto, em `.yampi-sync/versoes/`, e vão com ela. Cada texto é guardado uma vez, com o nome do seu SHA-256 (`objetos/ab/<hash>`). Uma versão é um registro `<id>.json` com caminho, hash e tamanho de cada texto e o hash da lista inteira. Imagens nunca entram.
+
+- **Automáticas.** `referencia`, `antes-de-atualizar` e `loja` a cada atualização; `antes-de-restaurar` antes de trazer arquivos de uma versão; `envio` depois de um envio registrado na pasta. Uma automática igual à última da mesma origem (`pasta` ou `loja`) não se repete.
+- **Com nome.** Uma versão que o usuário nomeia (`manual`) é sempre guardada.
+- Os textos são gravados antes do registro, então um registro nunca aponta para um texto ausente. Ao ler, cada texto é conferido pelo hash; um texto alterado ou ausente impede usar a versão.
+- Registros ilegíveis ou de outra loja são ignorados e contados, nunca mostrados como histórico.
+- **Trazer de uma versão.** O que o usuário comparou precisa continuar igual na pasta. A pasta inteira vira a versão `antes-de-restaurar`, e só então os arquivos escolhidos são gravados em `tema/`. Um arquivo apagado desde então é recriado, com suas pastas dentro de `tema/`. Nada é apagado. O que foi trazido entra no próximo envio como qualquer mudança da pasta, com comparação e backup.
 
 ## Imagens
 
 A Yampi guarda imagens só direto em `assets/images`. Uma imagem nova em outra pasta, ou com nome que a Yampi trocaria, recebe um caminho lá: o próprio nome normalizado, ou as pastas unidas por `-` quando esse nome já pertence a outra imagem. Imagens que a loja já tem nunca mudam de lugar.
 
 Toda referência literal ao caminho completo antigo (`images/hero/a.jpg`, inclusive em `../images/hero/a.jpg`) passa a apontar para o novo, em todos os textos do projeto, de forma determinística: comparar de novo dá o mesmo resultado. Um texto que ainda aponta para a pasta antiga depois disso — caminho montado em tempo de execução, ou relativo a `images/` — fica bloqueado, com o motivo. O projeto local não muda: a prévia continua usando as subpastas.
+
+Desde a 0.8.0, imagens novas só entram no envio quando o usuário liga **Enviar imagens novas** na revisão, depois de um aviso: uma imagem enviada fica na loja, e a extensão não a substitui nem apaga. A opção começa desligada e volta a desligar a cada comparação. Desligada, a imagem fica `new-local`, com o motivo, e um texto que a usa fica bloqueado até a opção ser ligada. As referências continuam ajustadas do mesmo jeito, ligada ou não.
 
 ## Envio
 
