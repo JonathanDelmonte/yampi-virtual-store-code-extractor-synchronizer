@@ -195,3 +195,18 @@ describe('referência alterada sem marcação', () => {
     expect(text(entries[`tema/${head}`])).toBe(original[head]);
   });
 });
+describe('envios da própria extensão não viram conflito', () => {
+  test('a loja tem o que a extensão enviou e a pasta continuou dali: fica a da pasta, sem conflito', async () => {
+    // The reference is the old download; the store holds an earlier send of the folder's own text.
+    const sentHead = '<meta name="description" content="Enviado pela extensão">\n';
+    const later = sentHead.replace('Enviado pela extensão', 'Enviado e depois ajustado');
+    const root = await exported({[head]: later}, {}), project = await read(root);
+    const store = {...original, [head]: sentHead};
+    const without = planUpdate(project.baseline, project.local, project.localAssets, reading(store, images));
+    expect(without.rows.find(row => row.path === head)?.kind).toBe('conflict');
+    const withHistory = planUpdate(project.baseline, project.local, project.localAssets, reading(store, images), {}, {[head]: ['outro texto antigo\n', sentHead]});
+    expect(withHistory.rows.find(row => row.path === head)).toMatchObject({kind: 'mine'});
+    // A text the store has that the extension never sent is still the client's change.
+    expect(planUpdate(project.baseline, project.local, project.localAssets, reading(store, images), {}, {[head]: ['outro texto\n']}).rows.find(row => row.path === head)?.kind).toBe('conflict');
+  });
+});

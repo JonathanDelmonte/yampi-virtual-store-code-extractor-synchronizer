@@ -77,7 +77,7 @@ describe('projeto executável e retorno completo', () => {
   test('manifesto versão 3 registra ferramenta, tema, quebras de linha, ignorados e prévia; versão 2 continua legível', async () => {
     const source = clone(); source.files['templates/sem-final.twig'] = 'a\r\nb';
     const entries = unzipSync(await encodeSnapshot(source, true)), m = JSON.parse(new TextDecoder().decode(entries['.yampi-sync/manifest.json']));
-    expect(m).toMatchObject({version: 3, tool: {name: 'yampi-code-sync', version: '0.8.0'}, theme: {state: 'unknown', source: 'unavailable'}, skipped: [{path: 'logs/'}], preview: {manifest: 'preview/manifest.json', format: 2}});
+    expect(m).toMatchObject({version: 3, tool: {name: 'yampi-code-sync', version: '0.8.1'}, theme: {state: 'unknown', source: 'unavailable'}, skipped: [{path: 'logs/'}], preview: {manifest: 'preview/manifest.json', format: 2}});
     expect(m.files.find((f: {path: string}) => f.path === 'templates/home.twig')).toMatchObject({eol: 'lf', finalNewline: true});
     expect(m.files.find((f: {path: string}) => f.path === 'templates/sem-final.twig')).toMatchObject({eol: 'crlf', finalNewline: false});
     expect(m.files.find((f: {path: string}) => f.path === imagePath).eol).toBeUndefined();

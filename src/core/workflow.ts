@@ -1,4 +1,4 @@
-import {assertContext, safeFiles, safeSnapshot, imagePath, writable, validatePaths, freshFile, YAMPI_VUE_TEMPLATE, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Assets, type Adapter, type DirectReader, type ReadAdapter, type Snapshot, type Progress, type Plan, type PlanRow, type Journal} from './model';
+import {assertContext, safeFiles, safeSnapshot, imagePath, writable, validatePaths, freshFile, YAMPI_VUE_TEMPLATE, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Assets, type Files, type Adapter, type DirectReader, type ReadAdapter, type Snapshot, type Progress, type Plan, type PlanRow, type Journal} from './model';
 import {missingNewTexts, selectionIssues} from './planner';
 import {DIRECT_BATCH, DIRECT_MIN, STORE_CHANGED, directKind, directSamples, storeChanged} from './direct';
 import {COMPONENTS_FILE as COMPONENTS} from '../../local-runtime/contract.mjs';
@@ -134,6 +134,31 @@ export interface SendOptions {
   scope?: Journal['scope'];
 }
 const initialContent = (path: string) => path.endsWith('.vue') ? YAMPI_VUE_TEMPLATE : '';
+// The Yampi server itself says what each file holds: the same GET the editor makes to open one,
+// checking the session's store before and after every call. With it, the send never reloads the
+// editor (Yampi answers a reload of the editor's address with "Acesso restrito"); without it, the
+// editor is reloaded before each confirmation, as before.
+async function serverOf(adapter: Adapter): Promise<string | undefined> {
+  if (!adapter.direct) return undefined;
+  try {return await adapter.direct.open();} catch (error) {if (storeChanged(error)) throw error; return undefined;}
+}
+async function fromServer(adapter: Adapter, store: string, paths: string[]): Promise<{files: Files; assets: Assets}> {
+  const files: Files = {}, assets: Assets = {};
+  let pending = [...paths];
+  while (pending.length) {
+    const batch = pending.slice(0, DIRECT_BATCH), answer = await adapter.direct!.read(batch, store);
+    const rest = answer.rest.filter(path => batch.includes(path));
+    if (rest.length === batch.length) throw new Error('O servidor da Yampi não devolveu os arquivos pedidos.');
+    for (const path of batch) {
+      if (rest.includes(path)) continue;
+      if (typeof answer.files[path] === 'string') files[path] = answer.files[path];
+      else if (answer.assets[path]) assets[path] = answer.assets[path];
+      else throw new Error(`O servidor da Yampi não devolveu ${path}.`);
+    }
+    pending = [...rest, ...pending.slice(DIRECT_BATCH)];
+  }
+  return {files, assets};
+}
 const add = (list: string[], path: string) => {if (!list.includes(path)) list.push(path);};
 const drop = (list: string[], path: string) => {const index = list.indexOf(path); if (index >= 0) list.splice(index, 1);};
 // Changes come only after the backup, so a record that shows one was backed up. A record without
@@ -171,22 +196,26 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
   const emit = (step: string, phase: string, done: number, total: number, path = '') => hooks.progress?.({step, phase, done, total, path});
   check(hooks.signal);
   assertContext(plan.context, await adapter.context());
-  emit('prepare', 'Recarregando o editor', 0, 1);
-  await adapter.refresh();
+  const server = await serverOf(adapter), preparing = server ? 'Conferindo a loja no servidor da Yampi' : 'Recarregando o editor';
+  emit('prepare', preparing, 0, 1);
+  if (!server) await adapter.refresh();
   assertContext(plan.context, await adapter.context());
   // The editor shows the server's version right after a reload. Only a change makes it stale again.
   let fresh = true;
   const present = new Set(await adapter.inventory());
-  emit('prepare', 'Recarregando o editor', 1, 1);
+  emit('prepare', preparing, 1, 1);
+  const stored = async (path: string) => server ? (await fromServer(adapter, server, [path])).files[path] : adapter.read(path);
+  const settle = async () => {if (!server && !fresh) {await adapter.refresh(); fresh = true;}};
   let journal: Journal, snapshot: Snapshot | undefined;
   if (!resuming) {
     // Preflight before the first change: every existing file still as compared, every new path still free.
     for (const row of [...creates, ...uploads]) if (present.has(row.path)) throw new Error(`O arquivo apareceu na loja depois da comparação: ${row.path}. Compare novamente.`);
     const updates = texts.filter(r => r.status === 'update'), before: [string, string][] = [];
     emit('preflight', 'Conferindo a loja antes de salvar', 0, updates.length);
+    const onServer = server && updates.length ? (await fromServer(adapter, server, updates.map(row => row.path))).files : undefined;
     for (const [index, row] of updates.entries()) {
       check(hooks.signal);
-      const value = await adapter.read(row.path);
+      const value = onServer ? onServer[row.path] : await adapter.read(row.path);
       if (value !== row.remote) throw new Error(`Conflito após a comparação: ${row.path}. Compare novamente.`);
       before.push([row.path, value]);
       emit('preflight', 'Conferindo a loja antes de salvar', index + 1, updates.length, row.path);
@@ -231,7 +260,7 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
       }
       if (!batch.length) return;
       check(hooks.signal);
-      if (!fresh) {await adapter.refresh(); fresh = true;}
+      await settle();
       assertContext(plan.context, await adapter.context());
       const listed = new Set(await adapter.inventory());
       for (const row of batch) {
@@ -239,12 +268,15 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
         emit(step, 'Conferindo após recarregar', rows.length, rows.length, row.source || row.path);
         if (!listed.has(row.path)) throw new Error(`A Yampi não manteve o arquivo enviado: ${row.path}`);
         if (row.status === 'create') {
-          const content = await adapter.read(row.path);
+          const content = await stored(row.path);
           if (freshFile(row.path, content)) journal.before[row.path] = content;
           // Created and already filled by the interrupted run.
           else if (resuming && content === row.local) journal.before[row.path] = initialContent(row.path);
           else throw new Error(`A Yampi criou o arquivo com conteúdo inesperado: ${row.path}`);
-        } else if (!adapter.readAsset || !sameBytes(await adapter.readAsset(row.path), row.image!.local!)) throw new Error(`Imagem diferente após o envio: ${row.path}`);
+        } else {
+          const bytes = server ? (await fromServer(adapter, server, [row.path])).assets[row.path] : adapter.readAsset && await adapter.readAsset(row.path);
+          if (!bytes || !sameBytes(bytes, row.image!.local!)) throw new Error(`Imagem diferente após o envio: ${row.path}`);
+        }
         add(done, row.path); drop(issued, row.path); delete journal.pending;
         await hooks.persist(journal);
       }
@@ -260,11 +292,11 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
       check(hooks.signal);
       const expected = row.status === 'create' ? journal.before[row.path] : row.remote!;
       if (expected === undefined) throw new Error(`Conteúdo inicial desconhecido: ${row.path}. Compare novamente.`);
-      if (!fresh) {await adapter.refresh(); fresh = true;}
+      await settle();
       assertContext(plan.context, await adapter.context());
       journal.pending = row.path; await hooks.persist(journal);
       if (resuming) {
-        const current = await adapter.read(row.path);
+        const current = await stored(row.path);
         if (current !== row.local && current !== expected) throw new Error(`${row.path} mudou na loja depois que o envio começou. Compare novamente antes de continuar.`);
         if (current === row.local) {
           journal.verified.push(row.path); delete journal.pending; await hooks.persist(journal);
@@ -273,27 +305,29 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
         }
       }
       await adapter.write(row.path, expected, row.local!); fresh = false;
-      // CodeMirror can keep text the server rejected. Confirm on the platform before the next file.
-      await adapter.refresh(); fresh = true;
+      // CodeMirror can keep text the server rejected. Confirm on the platform before the next file:
+      // the server's copy, or the editor after a reload.
+      if (!server) {await adapter.refresh(); fresh = true;}
       assertContext(plan.context, await adapter.context());
-      if (await adapter.read(row.path) !== row.local) throw new Error(`Arquivo não persistiu após recarregar: ${row.path}`);
+      if (await stored(row.path) !== row.local) throw new Error(`Arquivo não persistiu na Yampi: ${row.path}`);
       journal.verified.push(row.path); delete journal.pending; await hooks.persist(journal);
       emit('save', 'Salvando e conferindo', ++saved, texts.length, row.path);
     }
     // Every text again, from the platform: a later save must not have touched an earlier file.
     check(hooks.signal);
-    if (!fresh) {await adapter.refresh(); fresh = true;}
+    await settle();
     assertContext(plan.context, await adapter.context());
     emit('final', 'Conferência final', 0, texts.length);
+    const confirmed = server && texts.length ? (await fromServer(adapter, server, texts.map(row => row.path))).files : undefined;
     for (const [index, row] of texts.entries()) {
       check(hooks.signal);
-      if (await adapter.read(row.path) !== row.local) throw new Error(`Arquivo não persistiu após recarregar: ${row.path}`);
+      if ((confirmed ? confirmed[row.path] : await adapter.read(row.path)) !== row.local) throw new Error(`Arquivo não persistiu na Yampi: ${row.path}`);
       emit('final', 'Conferência final', index + 1, texts.length, row.path);
     }
     // Yampi lists components in components.twig itself; report the ones it has not listed yet.
     const components = creates.filter(r => r.path.endsWith('.vue'));
     if (components.length) {
-      const list = await adapter.read(COMPONENTS).catch(() => undefined);
+      const list = await stored(COMPONENTS).catch(() => undefined);
       const unlisted = components.filter(r => !list?.includes('/' + r.path.replace(/\.vue$/, '.js')));
       if (unlisted.length) journal.warnings = [`A Yampi ainda não listou em ${COMPONENTS}: ${unlisted.map(r => r.path).join(', ')}. Confira em Ver prévia; se o componente não aparecer, abra-o no editor da Yampi e salve de novo.`];
     }

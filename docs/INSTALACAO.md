@@ -2,7 +2,7 @@
 
 **[Baixar extensão pronta para Chrome](https://github.com/JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer/releases/latest/download/zirtuno-sync-yampi.zip)** · [SHA-256](https://github.com/JonathanDelmonte/yampi-virtual-store-code-extractor-synchronizer/releases/latest/download/zirtuno-sync-yampi.zip.sha256)
 
-O link sempre oferece a versão marcada como mais recente. A versão deste código é **0.8.0**. Use o arquivo **zirtuno-sync-yampi.zip** em Releases; os downloads **Source code** contêm o projeto para desenvolvimento, sem a extensão compilada.
+O link sempre oferece a versão marcada como mais recente. A versão deste código é **0.8.1**. Use o arquivo **zirtuno-sync-yampi.zip** em Releases; os downloads **Source code** contêm o projeto para desenvolvimento, sem a extensão compilada.
 
 1. Extraia `zirtuno-sync-yampi.zip` em uma pasta fixa chamada `zirtuno-sync-yampi`. Não carregue o ZIP diretamente. Depois de extrair, pode apagar o ZIP e seu arquivo SHA-256; mantenha a pasta carregada no Chrome.
 2. Abra a página de extensões do Chrome (`chrome://extensions`) ou Edge (`edge://extensions`). O painel lateral depende da API `sidePanel`, disponível no Chrome 120 ou posterior. Outros navegadores não foram validados.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Zirtuno Sync Yampi",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "author": "Zirtuno",
   "minimum_chrome_version": "120",
   "description": "Edite localmente e sincronize o código da sua loja Yampi.",

@@ -428,7 +428,10 @@ function computeUpdate(): void {
   updatePlan = undefined;
   const reading = workspace?.update?.reading, base = workspace?.baseline, project = workspace?.project;
   if (!reading || !base || !project) return;
-  try {updatePlan = planUpdate(base, project.local, project.localAssets, reading, workspace!.update!.choices);}
+  // What this installation's sends left in the store: their content is the project's own change.
+  const sent: Record<string, string[]> = {};
+  for (const item of history) for (const path of item.verified) if (typeof item.after[path] === 'string') (sent[path] ||= []).push(item.after[path]);
+  try {updatePlan = planUpdate(base, project.local, project.localAssets, reading, workspace!.update!.choices, sent);}
   catch (error) {notice = {title: 'A atualização não vale mais', text: error instanceof Error ? error.message : String(error)};}
 }
 let saving: ReturnType<typeof setTimeout> | undefined;

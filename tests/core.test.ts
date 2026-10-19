@@ -211,7 +211,7 @@ describe('envio com preflight, backup e conferência', () => {
     // The editor buffer shows the new text, but the platform still has the old one after reload.
     const other = 'templates/product.twig', adapter = new FakeAdapter({[file]: 'a', [other]: 'a'}), h = hooks();
     adapter.refreshHook = () => {if (adapter.writes.includes(file)) adapter.files[file] = 'a';};
-    await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b', [other]: 'b'}), [file, other], h)).rejects.toThrow(`não persistiu após recarregar: ${file}`);
+    await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b', [other]: 'b'}), [file, other], h)).rejects.toThrow(`não persistiu na Yampi: ${file}`);
     expect(adapter.writes).toEqual([file]); expect(adapter.files[other]).toBe('a');
     expect(h.journals.at(-1)).toMatchObject({status: 'stopped', pending: file, verified: []});
   });

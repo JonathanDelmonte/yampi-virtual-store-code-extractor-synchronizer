@@ -54,7 +54,8 @@ Desde a 0.7.0, a cópia e a comparação leem o conteúdo pelo servidor do próp
 - **Igual ao editor.** O texto chega como o CodeMirror o guarda: `\r\n` e `\r` viram `\n`. JSON, que o editor reformata ao mostrar, e extensões de imagem fora de `assets/` são lidos pelo editor. Para imagens, o servidor devolve o endereço que o editor exibe; valem as regras da leitura pela prévia: `https:` ou `data:` decodificado, tipo conferido pelos bytes.
 - **Amostra antes do restante.** O primeiro arquivo de cada tipo (cada extensão de texto, e imagem) é lido pelos dois caminhos. Só os tipos idênticos seguem pelo servidor; uma diferença manda tudo para a leitura pelo editor.
 - **Recuo em vez de parada.** Servidor indisponível, resposta inesperada, sessão expirada ou falha no meio devolvem o restante à leitura pelo editor, com o motivo nas etapas. Só a troca de loja interrompe.
-- **Só leitura de cópia.** Com menos de 8 arquivos elegíveis, tudo vai pelo editor. Envio, preflight, criação, conferência após recarregar e restauração continuam lendo pelo editor.
+- **Poucos arquivos.** Com menos de 8 arquivos elegíveis, a cópia lê tudo pelo editor.
+- **Conferência do envio (desde a 0.8.1).** Com o servidor respondendo pela mesma loja, a comparação, o preflight, a conferência de cada arquivo salvo, criado ou enviado e a conferência final leem pelo servidor, e o editor não é recarregado: em 19/10/2026, recarregar o endereço do editor passou a mostrar a página "Acesso restrito" da Yampi, embora o editor abrisse pelo menu. A gravação continua pelo próprio editor, que confere o conteúdo esperado antes de salvar. Sem o servidor, o editor é recarregado como antes; se a recarga mostrar "Acesso restrito", a operação para na hora, com o motivo, e o envio pode continuar de onde parou.
 
 Depois de um envio, a referência da comparação avança: cada texto conferido e cada imagem enviada passam a ser o original. O que já foi enviado não volta como conflito, e o registro do envio fica ligado à exportação. Desde a 0.8.0, a referência também avança na própria pasta do projeto (veja "Atualização do projeto").
 
@@ -90,6 +91,8 @@ A extensão grava na pasta do projeto só pela API de pastas do Chrome, e só os
 | removido na loja e editado na pasta | `removed-edited` | escolha: seguir a loja (padrão: sai da pasta) ou manter |
 | apagado na pasta e mudado na loja | `deleted-changed` | escolha: seguir a loja (padrão: volta) ou continuar apagado |
 | L ainda com marcações de conflito | `marked` | nada; a referência desse arquivo não avança |
+
+Um texto da loja igual ao que um envio desta instalação deixou ali (registros de envio, só itens conferidos) não é mudança de outra pessoa: para esse arquivo, a referência passa a ser o texto da loja. Assim, um arquivo enviado e depois editado na pasta fica `mine`, não conflito, mesmo com a referência mais antiga que esse envio.
 
 Nenhum padrão desfaz uma mudança feita na loja. **Manter a da pasta** num conflito é a escolha explícita daquele arquivo, com as versões à vista: depois da atualização ele fica `update` e vai no próximo envio, com a versão da loja no backup. Com marcações, o arquivo nunca é enviado (veja "Comparação"). Um arquivo ainda marcado não é juntado de novo; como a referência dele não avança, uma mudança mais nova da loja aparece como conflito depois de resolvido.
 
@@ -140,7 +143,7 @@ Desde a 0.8.0, imagens novas só entram no envio quando o usuário liga **Enviar
 
 1. Somente linhas `update`, `create` e `upload` da comparação confirmada, sem duplicatas e com os arquivos acoplados juntos. Texto novo que a Yampi não permite criar bloqueia todo o envio.
 2. Confirmação explícita, com o nome da loja à vista.
-3. O editor é recarregado. Os textos existentes selecionados são relidos e precisam estar como na comparação, e os caminhos novos precisam continuar livres. Qualquer diferença interrompe antes de gravar.
+3. Os textos existentes selecionados são relidos na loja (pelo servidor da Yampi, ou pelo editor recarregado quando o servidor não responde) e precisam estar como na comparação, e os caminhos novos precisam continuar livres. Qualquer diferença interrompe antes de gravar.
 4. O registro (`prepared`) e o backup dos textos existentes são gravados no IndexedDB, e o download do backup é confirmado. Sem os dois, nada é gravado.
 5. Cada etapa termina conferida antes da seguinte, nesta ordem:
    1. criar os textos novos pelo **Adicionar arquivo**, cada um listado pelo editor antes do próximo; depois, uma recarga e a conferência de que todos existem com o conteúdo inicial da Yampi;

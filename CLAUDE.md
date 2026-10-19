@@ -4,7 +4,8 @@
 
 Uma linha por armadilha; o detalhe fica no documento indicado.
 
-- O texto do CodeMirror não prova que a Yampi gravou: só a releitura depois de recarregar a aba confirma o servidor. → `docs/SPEC.md`, "Envio".
+- O texto do CodeMirror não prova que a Yampi gravou: a confirmação lê o servidor da Yampi (ou, sem ele, o editor recarregado). → `docs/SPEC.md`, "Envio".
+- Recarregar o endereço do editor (`chrome.tabs.reload`) mostra "Acesso restrito" na Yampi desde 19/10/2026; o editor só abre pelo menu. Não recarregue quando o servidor responde. → `docs/SPEC.md`, "Leitura direta".
 - A extensão cria arquivos só pelos controles do próprio editor (Adicionar arquivo, envio de imagens), cuja marcação foi lida no módulo público e reproduzida no editor fictício; mudou a marcação real, mude os dois juntos. → `docs/SPEC.md`, "O que a Yampi permite".
 - A Yampi não cria pastas e guarda imagens só direto em `assets/images`: imagens de subpastas mudam de caminho na loja, e as referências literais são reescritas no envio. → `docs/SPEC.md`, "Imagens".
 - `elements/scripts/components.twig` é gerado pela Yampi; enviá-lo concorreria com a regeneração feita ao criar um componente. → `docs/SPEC.md`, "Comparação".

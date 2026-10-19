@@ -5,6 +5,7 @@ import {assertContext, type Adapter, type Context, type Journal, type Progress, 
 import {demonstration, type Data, type PreviewBundle} from '../core/preview';
 import {ProgressTracker, type PhaseSpec} from '../core/progress';
 import {retryReads} from '../core/retry';
+import {storeChanged} from '../core/direct';
 import {applyPlan, capture, continues} from '../core/workflow';
 import {advanceBaseline} from '../core/workspace';
 import {get, put, saveJournal, journalHistory, updateWorkspace} from '../storage';
@@ -198,9 +199,11 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     return {kind: 'export' as const, texts: Object.keys(exported.files).length, images: Object.keys(exported.assets || {}).length, pages: visual.pages.length, fileName: name, preview: summary.line, previewDetails: summary.details};
   }
   async function compare() {
-    step('prepare', 'Recarregando o editor');
-    await adapter.refresh();
-    tracker.finish('prepare');
+    // With the Yampi server answering, the reading is the server's own and the editor is not
+    // reloaded (Yampi answers a reload of the editor's address with "Acesso restrito").
+    const server = adapter.direct && await adapter.direct.open().then(() => true, error => {if (storeChanged(error)) throw error; return false;});
+    if (server) tracker.skip('prepare');
+    else {step('prepare', 'Recarregando o editor'); await adapter.refresh(); tracker.finish('prepare');}
     // An update reads the whole store: any file the store changed may have to come to the project.
     const whole = !!request.full || request.scope === 'update';
     if (request.scope === 'update') tracker.relabel('read', 'Ler a loja inteira');

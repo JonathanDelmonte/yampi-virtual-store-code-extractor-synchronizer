@@ -7,7 +7,7 @@ import type {JobRequest, JobState} from '../jobs/types';
 // job: the background operation that holds the lock. While it runs, the panel only watches it,
 // and closing or reopening the panel never releases the editor.
 type Session = {tabId: number; editorUrl: string; documentId?: string; locked: boolean; access?: 'read' | 'write'; previewOrigins?: string[]; job?: string};
-const BRIDGE_VERSION = '0.8.0';
+const BRIDGE_VERSION = '0.8.1';
 const RUNNER = 'runner.html';
 const inFlight = new Map<string, Set<Promise<unknown>>>();
 const ports = new Map<string, Set<Promise<string>>>();
@@ -104,6 +104,13 @@ async function bridge(tabId: number, cmd: Command): Promise<{ok: boolean; value?
   return results[0]?.result as {ok: boolean; value?: unknown; error?: string} | undefined;
 }
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+// Yampi answers a reload of the editor's address with its "Acesso restrito" page (seen on
+// 19/10/2026), while the same editor opens from its menu. Waiting or reloading again does not help.
+export const RESTRICTED = 'A Yampi mostrou “Acesso restrito” ao recarregar o editor. Abra o Editor de código pelo menu da Yampi e tente de novo; um envio continua de onde parou.';
+async function restricted(tabId: number): Promise<boolean> {
+  const [result] = await chrome.scripting.executeScript({target: {tabId}, func: () => /Acesso restrito/i.test(document.body?.innerText || '')}).catch(() => []);
+  return result?.result === true;
+}
 // After a reload, wait here until the editor answers: worker timers are not slowed down like
 // the timers of a hidden tab, so a send keeps its pace while the user works in another tab.
 async function refresh(tabId: number): Promise<void> {
@@ -112,6 +119,7 @@ async function refresh(tabId: number): Promise<void> {
   for (;;) {
     const reply = await bridge(tabId, {op: 'context'}).catch(error => ({ok: false, error: error instanceof Error ? error.message : String(error)}));
     if (reply?.ok) return;
+    if (await restricted(tabId)) throw new Error(RESTRICTED);
     if (Date.now() - start > 30000) throw new Error(reply?.error || 'O editor não respondeu depois de recarregar.');
     await sleep(250);
   }

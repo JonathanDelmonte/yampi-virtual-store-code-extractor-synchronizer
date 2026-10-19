@@ -152,3 +152,13 @@ Decisões:
 - Telas com layout funcional; o acabamento visual fica para uma próxima etapa, a pedido do proprietário.
 
 Ainda sem validação real: a escrita numa pasta real pelo painel lateral e a atualização numa loja real.
+
+## 19/10/2026 — "Acesso restrito" ao recarregar o editor e falsos conflitos (0.8.1)
+
+No primeiro uso real da 0.8.0, na loja Kabban, escolher a pasta e **Atualizar da loja** levaram a aba à página "Acesso restrito" da Yampi; abrindo o editor pelo menu, ele funcionava, e a operação seguia. A extensão recarregava a aba (`chrome.tabs.reload` do endereço do editor) antes de comparar e a cada arquivo enviado. A leitura direta pelo servidor da Yampi funcionou na mesma loja ("conferida com o editor em 5 tipos de arquivo").
+
+Decisão: com o servidor respondendo pela mesma loja, comparação, preflight e todas as conferências do envio leem pelo servidor, sem recarregar; a gravação continua pelo editor, que confere o conteúdo esperado antes de salvar. Sem o servidor, recarrega como antes, mas uma página "Acesso restrito" interrompe na hora, com o motivo.
+
+A mesma atualização mostrou 9 arquivos "mudados dos dois lados". A referência da pasta era o download de 08/10, anterior aos envios feitos pela extensão; um arquivo enviado e depois editado parecia conflito. A atualização passa a usar os registros de envio desta instalação: um texto da loja igual ao que a extensão enviou é mudança do próprio projeto.
+
+Ainda sem validação real: a gravação conferida pelo servidor.

@@ -224,6 +224,8 @@ try {
   await panel.locator('#apply').click();
   assert.equal(await panel.evaluate(() => document.querySelector('#confirm-panel').hidden), false);
   assert.equal(await panel.locator('#target-store').textContent(), 'Loja de testes');
+  // The send confirms everything on the Yampi server: the editor page is never reloaded (a reload now shows "Acesso restrito" on Yampi).
+  await editor.evaluate(() => {window.__noReload = true;}); const filesBefore = server.counts.file;
   const backup = driver.waitExtensionDownload(); await panel.locator('#confirm-send').click(); await (await backup).saveAs(path.join(temporary, 'backup.zip'));
   // The send runs in the extension's background document: closing the panel must not stop it.
   const editorTabId = await worker.evaluate(async () => (await chrome.tabs.query({})).find(t => t.url?.endsWith('/store/code-editor/')).id);
@@ -237,6 +239,8 @@ try {
   let finished;
   for (let i = 0; i < 1200; i++) {finished = await jobState(); if (finished && !['running', 'waiting'].includes(finished.status)) break; await new Promise(r => setTimeout(r, 100));}
   assert.equal(finished?.status, 'completed', finished?.error);
+  assert.equal(await editor.evaluate(() => window.__noReload), true, 'O envio não pode recarregar a página do editor.');
+  assert.ok(server.counts.file > filesBefore, 'O envio confere os arquivos no servidor.');
   assert.ok(finished.phases.every(phase => ['done', 'skipped'].includes(phase.status)));
   assert.equal(await worker.evaluate(id => chrome.action.getBadgeText({tabId: id}), editorTabId), '✓');
   assert.equal(await worker.evaluate(async () => Object.values(await chrome.storage.session.get(null)).find(value => value.editorUrl)?.locked), false);
@@ -249,7 +253,7 @@ try {
   panel = await driver.attach(editorTabId);
   await panel.waitForFunction(() => document.body.dataset.view === 'result');
   assert.equal(await panel.locator('#status').textContent(), 'Envio concluído');
-  console.log('E2E: arquivo novo e imagem criados pelos controles do editor; envio, backup e reload conferidos item a item.');
+  console.log('E2E: arquivo novo e imagem criados pelos controles do editor; envio e backup conferidos item a item no servidor, sem recarregar o editor.');
   assert.equal(await panel.evaluate(() => document.querySelector('#done').hidden), false);
   assert.match(await panel.locator('#done-summary').textContent(), /2 arquivos salvos, 1 deles criado pela extensão e 1 imagem enviada/);
   await settled(panel); await panel.screenshot({path: path.join(repository, '.cache/panel-done-e2e.png')});

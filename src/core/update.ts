@@ -32,13 +32,18 @@ export interface UpdateRow {
 export interface UpdatePlan {context: Context; base: Snapshot; remote: Snapshot; reference: Snapshot; rows: UpdateRow[]}
 const same = (a?: Uint8Array, b?: Uint8Array) => a === b || !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]);
 const plain = (text?: string) => text?.replace(/\r\n?/g, '\n');
-export function planUpdate(base: Snapshot, local: Files, localAssets: Assets, reading: Capture, picked: Record<string, Resolution> = {}): UpdatePlan {
+// sent: what the extension's own sends left in the store, per path (the send records). A store
+// holding one of these did not change by someone else: the change is the project's own, so the
+// reference for that file is the store's text. Without it, a reference older than those sends
+// would make every later edit of a sent file look like a conflict.
+export function planUpdate(base: Snapshot, local: Files, localAssets: Assets, reading: Capture, picked: Record<string, Resolution> = {}, sent: Record<string, string[]> = {}): UpdatePlan {
   if (reading.partial) throw new Error('A atualização precisa da leitura completa da loja. Leia a loja de novo.');
   assertContext(base.context, reading.context);
   const remote = safeSnapshot({context: reading.context, capturedAt: reading.capturedAt, files: reading.files, ...(reading.assets && Object.keys(reading.assets).length ? {assets: reading.assets} : {})});
   const baseAssets = base.assets || {}, remoteAssets = remote.assets || {}, rows: UpdateRow[] = [];
   for (const path of new Set([...Object.keys(base.files), ...Object.keys(local), ...Object.keys(remote.files)])) {
-    const b = base.files[path], l = local[path], r = remote.files[path], [pb, pl, pr] = [plain(b), plain(l), plain(r)];
+    const l = local[path], r = remote.files[path], pr = plain(r), own = pr !== undefined && pr !== plain(base.files[path]) && (sent[path] || []).some(text => plain(text) === pr);
+    const b = own ? r : base.files[path], pb = plain(b), pl = plain(l);
     const row: UpdateRow = {path, kind: 'same', ...(b !== undefined ? {base: b} : {}), ...(l !== undefined ? {local: l} : {}), ...(r !== undefined ? {store: r} : {})};
     if (pl === pr) row.kind = 'same';
     else if (l !== undefined && hasConflictMarks(l)) row.kind = 'marked';

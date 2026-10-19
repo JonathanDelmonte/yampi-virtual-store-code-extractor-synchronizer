@@ -1,5 +1,12 @@
 # Validação
 
+## Conferência pelo servidor e falsos conflitos na 0.8.1, em 19/10/2026
+
+- `tests/server-confirm.test.ts` (5 testes): com o servidor, envio com texto, criação e imagem sem nenhuma recarga; salvamento que o servidor não guardou para no arquivo, com o registro; mudança feita por outra pessoa só no servidor para antes de gravar; sem servidor, recarrega como antes; servidor de outra loja interrompe sem gravar.
+- `tests/update.test.ts`: texto da loja igual ao que a extensão enviou fica `mine`; texto que ela nunca enviou continua conflito.
+- `npm run test:e2e`: o envio completo (texto alterado, texto criado, imagem, conferência final) terminou sem recarregar a página do editor fictício e com leituras no servidor fictício.
+- Na Yampi real, observado pelo proprietário: recarregar o editor mostrou "Acesso restrito"; a leitura direta funcionou. A gravação conferida pelo servidor ainda não rodou numa loja real.
+
 ## Atualização da pasta, versões e imagens opcionais na 0.8.0, em 19/10/2026
 
 Node 24.15.0, depois de `npm ci`. `npm run check` passou com 571 testes em 39 arquivos. Tudo usa o editor fictício e projetos fictícios; nenhuma requisição alcançou a Yampi.

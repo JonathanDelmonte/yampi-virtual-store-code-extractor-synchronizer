@@ -6,6 +6,15 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
+## Versão 0.8.1
+
+Corrige o que o primeiro uso real da 0.8.0 mostrou.
+
+- **Sem "Acesso restrito".** Escolher a pasta, atualizar ou enviar recarregava a aba do editor, e a Yampi agora responde a essa recarga com a página "Acesso restrito", embora o editor abra normalmente pelo menu. A comparação, a atualização e o envio passaram a conferir tudo no servidor da Yampi (o mesmo pedido que o editor faz para abrir um arquivo), sem recarregar a aba. A gravação continua pelo próprio editor. Se o servidor não responder, a extensão recarrega como antes e, se aparecer "Acesso restrito", para na hora e explica o que fazer.
+- **Menos falsos conflitos ao atualizar.** Um arquivo que você enviou pela extensão e depois continuou editando aparecia como "mudou dos dois lados", porque a referência da pasta era anterior ao envio. Agora a atualização usa o registro dos envios: se a loja tem exatamente o que a extensão enviou, a mudança é sua, e o arquivo fica como está na pasta.
+
+**Validado só com o editor e o servidor fictícios:** o envio inteiro, com criação, imagem e conferência final, sem nenhuma recarga da página do editor. Na Yampi real, a leitura pelo servidor já funcionou na cópia e na atualização; a gravação conferida pelo servidor ainda não foi usada numa loja real.
+
 ## Versão 0.8.0
 
 A 0.8.0 faz a pasta do projeto acompanhar a loja e guarda versões do trabalho. Assim, um envio não desfaz o que o cliente mudou na Yampi, e dá para voltar atrás.
