@@ -6,6 +6,28 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
+## Versão 0.9.0
+
+A 0.9.0 resolve o que um projeto real mostrou: a pasta com a referência do download antigo, um envio feito por ZIP em outro computador e edições depois dele. "Atualizar da loja" pedia decisão em 9 arquivos, sem dizer de quem era cada lado.
+
+- **Versões conhecidas do projeto.** A extensão reconhece na loja um texto que o próprio projeto já teve, venha ele do Git, de um recibo de envio ou do histórico desta instalação. Para esse arquivo, a mudança é nossa: a referência passa a ser o texto da loja, e não há conflito, nem num arquivo criado pelo projeto. Quando a loja tem algo diferente de todas as versões conhecidas, a junção usa como base a versão mais próxima, e o conflito mostra só a mudança da outra pessoa.
+  - `npm run versoes:conhecidas`, no projeto, grava `.yampi-sync/versoes-conhecidas.json` com cada versão que o Git teve de cada texto de `tema/`. A extensão não lê o Git: lê esse arquivo.
+  - Projetos exportados antes ganham o comando com o atualizador de ferramentas, ou podem usar `node <extensão>/local-runtime/known.mjs "<pasta>"`.
+- **Recibo de envio.** Depois de um envio conferido, inclusive a partir de ZIP, **Baixar recibo do envio** guarda o que cada item deixou na loja. Coloque-o em `.yampi-sync/recibos/` e faça commit: qualquer computador com o projeto reconhece esses textos como nossos. Com a escrita na pasta liberada, a extensão grava o recibo lá sozinha.
+- **De quem é cada lado.** A atualização e a revisão do envio dizem, quando dá para saber:
+  - "A loja tem a versão enviada em DD/MM (sem mudança de outra pessoa)";
+  - "A loja mudou depois do último envio conhecido: provável mudança de outra pessoa".
+
+  Os lados se chamam sempre **Nossa (pasta do projeto)** e **Da loja (Yampi agora)**.
+- **Decisão por trecho.** Em **Comparar**, cada trecho em conflito tem **Nossa**, **Da loja**, **As duas** ou **Marcar para editar**. A escolha vale para aquele trecho mesmo depois de ler a loja de novo, se ele não mudou.
+- **Juntar só um arquivo e enviar.** Na revisão do envio, um arquivo mudado dos dois lados tem **Juntar com a loja**. A extensão junta só esse arquivo na pasta (guardando antes a versão da pasta), avança a referência só dele e compara de novo. Ele fica pronto para enviar, e os outros não são lidos para decisão nem alterados.
+- **Projetos antigos continuam funcionando.** Atualizar a pasta mantém a versão do manifesto que ela tinha. As ferramentas exportadas antes da versão 3 do manifesto aceitam só 1 e 2, e a 0.8 as deixava sem `npm run dev`, `check` e `pack`.
+- **Caminhos de imagem.** O envio move imagens de subpastas para `assets/images` e reescreve as referências. A atualização agora compara a pasta como o envio a deixaria na loja: uma diferença só nesses caminhos não é mudança de ninguém. O que vem da loja entra na pasta com os caminhos do projeto.
+- **Aviso antes de marcar.** A revisão da atualização lista os arquivos que vão receber marcações de conflito e lembra de fazer commit antes, se o projeto usa Git.
+- **Comparar sem recarregar lê tudo pelo servidor.** Na 0.8.1, uma comparação de poucos arquivos ainda lia pela aba do editor, que pode guardar um texto antigo. Agora, quando a comparação não recarrega, todos os textos vêm do servidor da Yampi, a mesma fonte que o envio confere.
+
+**Validado só com o editor e o servidor fictícios.** Os 9 critérios de aceite do pedido foram testados com projetos fictícios ([Validação](docs/VALIDACAO.md)), além do fluxo completo no painel de demonstração. A leitura do Git foi testada num repositório temporário. Ainda não rodou numa loja real.
+
 ## Versão 0.8.1
 
 Corrige o que o primeiro uso real da 0.8.0 mostrou.

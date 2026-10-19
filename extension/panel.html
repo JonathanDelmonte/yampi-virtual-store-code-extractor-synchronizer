@@ -112,6 +112,7 @@
       </div>
       <div id="update-attention" class="attention" hidden><h2 id="update-attention-title">Para decidir</h2><ul id="update-attention-list"></ul></div>
       <details id="update-files" class="help files"><summary id="update-files-summary">Ver os arquivos</summary><ul id="update-rows" class="file-list" aria-label="Arquivos da atualização"></ul></details>
+      <p id="update-marks" class="aside warning-note" hidden></p>
       <p id="update-safety" class="safe">Antes de gravar, a referência, a pasta e a loja ficam guardadas como versões em <code>.yampi-sync/versoes/</code>, só com textos. Nada é enviado à loja.</p>
       <div id="update-actions" class="action-slot"></div>
     </section>
@@ -142,7 +143,7 @@
       <p id="preview-info" class="aside" hidden></p>
       <details id="preview-more" class="help" hidden><summary>Sobre a prévia</summary><p id="preview-details" class="aside"></p></details>
       <ul id="done-warnings" class="attention-list" hidden></ul>
-      <p class="links"><button id="undo" class="link" hidden>Desfazer este envio</button></p>
+      <p class="links"><button id="undo" class="link" hidden>Desfazer este envio</button><button id="download-receipt" class="link" hidden>Baixar recibo do envio</button></p>
       <div id="result-actions" class="action-slot"></div>
     </section>
     </div>
@@ -172,11 +173,11 @@
       <div class="field"><span id="history-label">Histórico desta loja</span><div id="history-picker" class="history-picker"><button id="history" class="history-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="history-options" aria-labelledby="history-label history-value" disabled><span class="history-trigger-copy"><strong id="history-value">Nenhum envio disponível</strong><span id="history-description">O histórico aparece após o primeiro envio.</span></span><span class="history-chevron" aria-hidden="true"></span></button><div id="history-options" class="history-options" role="listbox" aria-labelledby="history-label" hidden></div></div></div>
       <p id="journal-info" class="aside">Nenhum envio nesta instalação.</p>
       <p id="journal-error" class="recovery-error" hidden></p>
-      <div class="menu-actions"><button id="download-backup" class="button" disabled>Baixar backup do envio</button><button id="download-journal" class="button" disabled>Baixar registro do envio</button><button id="restore" class="button" disabled>Comparar para restaurar</button></div>
+      <div class="menu-actions"><button id="download-backup" class="button" disabled>Baixar backup do envio</button><button id="download-journal" class="button" disabled>Baixar registro do envio</button><button id="download-receipt-menu" class="button" disabled>Baixar recibo do envio</button><button id="restore" class="button" disabled>Comparar para restaurar</button></div>
       <p>A restauração compara de novo antes de gravar e protege alterações feitas depois do envio. Nada é restaurado automaticamente.</p>
       <details class="help local-data"><summary>Gerenciar dados locais</summary><p>Remove desta extensão os originais, o projeto e os backups guardados. Os ZIPs já baixados e os arquivos da loja são preservados.</p><button id="clear" class="link danger">Apagar dados locais da extensão</button></details>
     </div>
-    <p class="about"><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer"><img src="brand/zirtuno-logo.png" alt="" width="16" height="16">Zirtuno Sync <span class="version">0.8.1</span></a><span>Ferramenta independente. Sem telemetria. Nunca exclui, renomeia nem publica.</span></p>
+    <p class="about"><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer"><img src="brand/zirtuno-logo.png" alt="" width="16" height="16">Zirtuno Sync <span class="version">0.9.0</span></a><span>Ferramenta independente. Sem telemetria. Nunca exclui, renomeia nem publica.</span></p>
   </div>
   <div id="confirm-panel" class="sheet" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
     <h2 id="confirm-title" class="sheet-title">Enviar para <span id="target-store"></span>?</h2>
@@ -209,13 +210,14 @@
     <div class="sheet-head"><h2 id="diff-title" class="mono-title"></h2><button id="close-diff" class="bar-button" aria-label="Fechar"><svg class="glyph"><use href="#i-x"/></svg></button></div>
     <div class="switch" role="tablist" aria-label="Versões comparadas">
       <span class="switch-thumb" aria-hidden="true"></span>
-      <button id="diff-tab-remote" role="tab" aria-selected="true">Loja → projeto</button>
-      <button id="diff-tab-base" role="tab" aria-selected="false">Original → projeto</button>
-      <button id="diff-tab-store" role="tab" aria-selected="false">Original → loja</button>
+      <button id="diff-tab-remote" role="tab" aria-selected="true">Loja → nossa</button>
+      <button id="diff-tab-base" role="tab" aria-selected="false">Referência → nossa</button>
+      <button id="diff-tab-store" role="tab" aria-selected="false">Referência → loja</button>
     </div>
     <p id="diff-stats" class="aside"></p>
+    <div id="diff-hunks" class="hunks" aria-label="Trechos para decidir" hidden></div>
     <div id="diff-body" class="diff-body" tabindex="0" role="region" aria-label="Linhas alteradas"></div>
-    <div class="sheet-actions"><button id="diff-write-store" class="button primary" hidden>Usar no projeto</button><button id="diff-copy-store" class="button primary" hidden>Copiar a versão da loja</button><button id="diff-use-project" class="button primary" hidden>Usar a versão do projeto</button><button id="diff-keep-store" class="button" hidden>Manter a versão da loja</button><button id="diff-choose-marks" class="button" hidden>Marcar no arquivo</button><button id="diff-choose-mine" class="button" hidden>Manter a da pasta</button><button id="diff-choose-store" class="button" hidden>Usar a da loja</button><button id="diff-restore" class="button primary" hidden>Trazer para a pasta</button></div>
+    <div class="sheet-actions"><button id="diff-write-store" class="button primary" hidden>Usar no projeto</button><button id="diff-copy-store" class="button primary" hidden>Copiar a versão da loja</button><button id="diff-use-project" class="button primary" hidden>Usar a versão do projeto</button><button id="diff-keep-store" class="button" hidden>Manter a versão da loja</button><button id="diff-choose-marks" class="button" hidden>Decidir por trecho</button><button id="diff-choose-mine" class="button" hidden>Nossa (pasta do projeto)</button><button id="diff-choose-store" class="button" hidden>Da loja (Yampi agora)</button><button id="diff-join" class="button primary" hidden>Juntar na pasta e preparar o envio</button><button id="diff-restore" class="button primary" hidden>Trazer para a pasta</button></div>
   </div>
   <div id="toast" class="toast" role="status" hidden></div>
   <span id="announcer" class="sr-only" aria-live="polite"></span>

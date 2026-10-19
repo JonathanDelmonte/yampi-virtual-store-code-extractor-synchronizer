@@ -10,6 +10,9 @@ export interface CaptureHooks extends Hooks {
   // Read only these store paths; the others are listed, not opened. A comparison needs only
   // what the project changed: a file the project leaves as exported is never sent.
   only?: Iterable<string>;
+  // The editor was not reloaded: what it shows may be older than the server. Every text the server
+  // serves as the editor shows it comes from the server (no sample, no minimum); a failure stops.
+  serverOnly?: boolean;
   // How the files are being read, for the operation's events.
   notice?: (text: string, tone: 'ok' | 'info' | 'warn') => void;
 }
@@ -52,17 +55,18 @@ export async function capture(adapter: ReadAdapter, hooks: CaptureHooks = {}): P
   let store: string | undefined, opened: string | undefined, fast = 0;
   // Any doubt leaves the files to the editor. Only a change of store stops the copy.
   const giveUp = (error: unknown, text: string) => {
+    if (hooks.serverOnly) throw new Error(`${text} (${reason(error)}). Nada foi alterado: tente de novo.`);
     if (storeChanged(error)) throw error;
     hooks.notice?.(`${text} (${reason(error)}). ${fast ? 'O restante' : 'Tudo'} será lido pelo editor, arquivo por arquivo.`, fast ? 'warn' : 'info');
     store = undefined;
     // Nothing came straight from the server: the step keeps its usual wording.
     if (!fast) {phase = 'Lendo arquivos'; label = undefined;}
   };
-  if (direct && candidates.length >= DIRECT_MIN) {
+  if (direct && (candidates.length >= DIRECT_MIN || hooks.serverOnly && candidates.length)) {
     try {store = opened = await direct.open();} catch (error) {giveUp(error, 'Leitura direta indisponível');}
   }
   const confirmed = new Set<string>();
-  for (const path of store ? directSamples(candidates) : []) {
+  for (const path of store && !hooks.serverOnly ? directSamples(candidates) : []) {
     cancelled();
     const shown = await throughEditor(path);
     keep(path, shown);
@@ -78,9 +82,10 @@ export async function capture(adapter: ReadAdapter, hooks: CaptureHooks = {}): P
     }
     confirmed.add(directKind(path)!);
   }
-  let pending = store ? candidates.filter(path => confirmed.has(directKind(path)!) && !has(path)) : [];
+  let pending = store ? candidates.filter(path => (hooks.serverOnly || confirmed.has(directKind(path)!)) && !has(path)) : [];
   if (pending.length) {
-    hooks.notice?.(`Leitura direta conferida com o editor em ${confirmed.size} ${confirmed.size === 1 ? 'tipo de arquivo' : 'tipos de arquivo'}. O restante vem do servidor da Yampi, vários de uma vez.`, 'ok');
+    if (hooks.serverOnly) hooks.notice?.('Arquivos lidos direto do servidor da Yampi, sem recarregar o editor.', 'ok');
+    else hooks.notice?.(`Leitura direta conferida com o editor em ${confirmed.size} ${confirmed.size === 1 ? 'tipo de arquivo' : 'tipos de arquivo'}. O restante vem do servidor da Yampi, vários de uma vez.`, 'ok');
     phase = 'Lendo arquivos direto da Yampi'; label = 'Ler os arquivos direto da Yampi';
   }
   while (store && pending.length) {

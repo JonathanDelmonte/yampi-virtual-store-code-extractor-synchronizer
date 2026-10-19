@@ -9,9 +9,11 @@ import {changedPaths, remoteFromCapture} from './core/compare';
 import {explainBlock} from './core/explain';
 import {formatDuration} from './core/progress';
 import {chooseBaseline, type Review, type Workspace} from './core/workspace';
-import {CHOICES, applyUpdate, folderChange, planUpdate, type Resolution, type UpdateKind, type UpdatePlan, type UpdateRow} from './core/update';
+import {CHOICES, applyJoin, applyUpdate, fileMerge, folderChange, planUpdate, storeForms, type Resolution, type UpdateKind, type UpdatePlan, type UpdateRow} from './core/update';
+import type {Hunk, HunkChoice} from './core/merge';
 import {listVersions, restoreVersion, saveVersion, versionChanges, versionFiles, type Version, type VersionChange} from './core/versions';
 import {writeReference} from './core/reference';
+import {RECEIPTS, journalKnown, makeReceipt, mergeKnown, type Known, type Origin} from './core/known';
 import type {ProjectFolder} from './core/project-folder';
 import {COMPONENTS_FILE} from '../local-runtime/contract.mjs';
 import {assertContext, sameContext, writable, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Context, type Assets, type Files, type Plan, type PlanRow, type Journal, type Snapshot} from './core/model';
@@ -286,6 +288,7 @@ function renderResult(): void {
   $('done-warnings').hidden = !send?.warnings.length;
   $('done-warnings').replaceChildren(...(send?.warnings || []).map(text => el('li', {}, el('span', {text}))));
   $('undo').hidden = !(send && state.status === 'completed');
+  $('download-receipt').hidden = !(send && send.verified);
   renderEvents(state.status !== 'completed');
 }
 // --- Actions stay beside the content of their current step -----------------------------------------
@@ -355,6 +358,7 @@ function controls(): void {
   for (const id of ['cancel-update', 'send-images', 'save-version', 'version-name', 'restore-all', 'diff-restore', 'diff-choose-marks', 'diff-choose-mine', 'diff-choose-store']) $(id).toggleAttribute('disabled', working);
   $('download-backup').toggleAttribute('disabled', busy || !journal);
   $('download-journal').toggleAttribute('disabled', busy || !journal);
+  $('download-receipt-menu').toggleAttribute('disabled', busy || !journal?.verified.length);
   if (remembered) $('reload-folder-label').textContent = `Reler “${remembered.name}”`;
   document.querySelectorAll<HTMLInputElement>('#rows input[type="checkbox"]').forEach(input => {
     input.disabled = working || !sendable(plan?.rows.find(r => r.path === input.dataset.path));
@@ -414,7 +418,8 @@ function computePlan(): void {
   try {
     const {remote, assumed} = remoteFromCapture(base, reading);
     // New images go only when the user turned them on for this send.
-    plan = makePlan(base, local, remote, assets, {overrides: current!.overrides, assumed, inventory: reading.inventory, uploads: !!current!.images});
+    // The project's own versions decide who changed the store; a restore compares only the send's record.
+    plan = makePlan(base, local, remote, assets, {overrides: current!.overrides, assumed, inventory: reading.inventory, uploads: !!current!.images, ...(scope === 'project' ? {known: knownVersions()} : {})});
   } catch (error) {notice = {title: 'A comparação não vale mais', text: error instanceof Error ? error.message : String(error)}; return;}
   const discarded = new Set(current!.discarded || []);
   for (const row of plan.rows) if (row.status === 'update' && row.whitespaceOnly && discarded.has(row.path)) row.status = 'whitespace-only';
@@ -422,16 +427,16 @@ function computePlan(): void {
   const chosen = current!.selected ? new Set(current!.selected) : undefined;
   for (const row of plan.rows) if (sendable(row) && (chosen ? chosen.has(row.path) : !row.whitespaceOnly)) selected.add(row.path);
 }
+// The project's own versions: its Git list and send receipts read with the folder, and this
+// installation's sends. A store text among them was not changed by anyone else.
+function knownVersions(): Known {return mergeKnown(workspace?.project?.known, journalKnown(history));}
 // The update under review: the reference, the folder as last read, the full reading of the store
 // and the choices made so far. Nothing is written until the user applies it.
 function computeUpdate(): void {
   updatePlan = undefined;
   const reading = workspace?.update?.reading, base = workspace?.baseline, project = workspace?.project;
   if (!reading || !base || !project) return;
-  // What this installation's sends left in the store: their content is the project's own change.
-  const sent: Record<string, string[]> = {};
-  for (const item of history) for (const path of item.verified) if (typeof item.after[path] === 'string') (sent[path] ||= []).push(item.after[path]);
-  try {updatePlan = planUpdate(base, project.local, project.localAssets, reading, workspace!.update!.choices, sent);}
+  try {updatePlan = planUpdate(base, project.local, project.localAssets, reading, {choices: workspace!.update!.choices, hunks: workspace!.update!.hunks, known: knownVersions()});}
   catch (error) {notice = {title: 'A atualização não vale mais', text: error instanceof Error ? error.message : String(error)};}
 }
 let saving: ReturnType<typeof setTimeout> | undefined;
@@ -474,7 +479,7 @@ function attention(): HTMLLIElement[] {
       items.push(attentionItem(block.text, ...look(block.storeOnly, 'Ver a mudança', path => `Ver ${path}`, 'store'), ...look(block.conflicts, 'Comparar e escolher', path => `Escolher ${path}`)));
     } else if (block?.images.length) items.push(attentionItem(block.text, linkButton('Ver', () => openDiff(row))));
     else if (row.override) items.push(attentionItem(`${row.path}: vai a versão do projeto. A da loja fica no backup.`, linkButton('Ver', () => openDiff(row)), linkButton('Manter a da loja', () => setOverride(row, false))));
-    else if (row.status === 'conflict' && !row.image && writable(row.path)) items.push(attentionItem(`${row.path} mudou na loja depois da sua cópia.`, linkButton('Comparar e escolher', () => openDiff(row))));
+    else if (row.status === 'conflict' && !row.image && writable(row.path)) items.push(attentionItem(`${row.path} mudou na loja depois da sua cópia. ${originText(row.origin)}`.trim(), linkButton('Juntar com a loja', () => openJoin(row)), linkButton('Comparar e escolher', () => openDiff(row))));
     else if (row.status === 'conflict') items.push(attentionItem(`${row.path} mudou na loja, e a extensão não pode substituí-lo.`, linkButton('Ver', () => openDiff(row))));
     else if (row.status === 'new-local' || row.status === 'blocked-dependency' || row.status === 'unsupported' && row.reason && row.path !== COMPONENTS_FILE) items.push(attentionItem(`${row.source || row.path}: ${row.reason || (row.blockedBy?.length ? `usa ${list(row.blockedBy)}, que não pode ser enviado.` : 'não pode ser enviado.')}`, linkButton('Ver', () => openDiff(row))));
     else if (row.status === 'missing-remote') items.push(attentionItem(`${row.path} foi removido da loja e não será recriado.`, linkButton('Ver', () => openDiff(row))));
@@ -596,15 +601,27 @@ $('send-images').addEventListener('change', () => {
 });
 // --- Update of the project folder -------------------------------------------------------------------
 const updateLabels: Record<UpdateKind, string> = {
-  same: 'Igual na pasta e na loja', mine: 'Mudou só na pasta: fica', store: 'Mudou na loja: vem para a pasta', removed: 'Removido na loja: sai da pasta',
-  merged: 'Mudou dos dois lados, em trechos diferentes: juntado', conflict: 'Mudou dos dois lados nas mesmas linhas', 'removed-edited': 'Removido na loja e editado na pasta',
-  'deleted-changed': 'Apagado na pasta e mudado na loja', marked: 'Ainda com marcações de conflito: fica como está'
+  same: 'Igual na pasta e na loja', mine: 'Mudou só na nossa pasta: fica', store: 'Mudou na loja: vem para a pasta', removed: 'Removido na loja: sai da pasta',
+  merged: 'Mudou dos dois lados, em trechos diferentes: juntado', conflict: 'Mudou dos dois lados nas mesmas linhas', 'removed-edited': 'Removido na loja e editado na nossa pasta',
+  'deleted-changed': 'Apagado na nossa pasta e mudado na loja', marked: 'Ainda com marcações de conflito: fica como está'
 };
 const imageLabels: Partial<Record<UpdateKind, string>> = {mine: 'Imagem da pasta: fica', store: 'Imagem da loja: vem para a prévia local', removed: 'Imagem removida na loja: sai da pasta'};
-const choiceLabels: Record<Resolution, string> = {marks: 'Marcar no arquivo', mine: 'Manter a da pasta', store: 'Usar a da loja'};
+const choiceLabels: Record<Resolution, string> = {marks: 'Decidir por trecho', mine: 'Nossa (pasta do projeto)', store: 'Da loja (Yampi agora)'};
+const day = (value: string) => new Date(value).toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'});
+// Who changed the store's side, in the user's words (P4). Nothing is said without a known version.
+function originText(origin?: Origin): string {
+  if (!origin) return '';
+  if (origin.kind === 'own') return origin.source === 'git' ? `A loja tem uma versão do próprio projeto${origin.at ? `, de ${day(origin.at)} no Git` : ''} (sem mudança de outra pessoa).` : `A loja tem a versão enviada${origin.at ? ` em ${day(origin.at)}` : ''} (sem mudança de outra pessoa).`;
+  return `A loja mudou depois do último envio conhecido${origin.since ? ` (${day(origin.since)})` : ''}: provável mudança de outra pessoa.`;
+}
 function choiceText(row: UpdateRow): string {
-  if (row.kind === 'conflict') return row.resolution === 'marks' ? `Vai com as duas versões marcadas (${plural(row.conflicts || 1, 'trecho', 'trechos')}), para você resolver no editor de código. Nada com marcações é enviado.` : row.resolution === 'mine' ? 'Fica a da pasta. No próximo envio, ela substitui a da loja, que vai para o backup.' : 'Fica a da loja. A sua continua na versão “Pasta antes de atualizar”.';
-  if (row.kind === 'removed-edited') return row.resolution === 'store' ? 'Sai da pasta, como na loja. A sua continua na versão “Pasta antes de atualizar”.' : 'Fica na pasta. Se você enviar, ele volta para a loja.';
+  if (row.kind === 'conflict') {
+    if (row.resolution === 'mine') return 'Fica a nossa. No próximo envio, ela substitui a da loja, que vai para o backup.';
+    if (row.resolution === 'store') return 'Fica a da loja. A nossa continua na versão “Pasta antes de atualizar”.';
+    const total = row.hunks?.length || 0, open = row.conflicts || 0;
+    return open ? `${plural(open, 'trecho', 'trechos')} de ${total} sem decisão: ${open === 1 ? 'vai marcado' : 'vão marcados'} no arquivo para resolver no editor de código. Nada com marcações é enviado.` : `${plural(total, 'trecho decidido', 'trechos decididos')}: vai a junção escolhida.`;
+  }
+  if (row.kind === 'removed-edited') return row.resolution === 'store' ? 'Sai da pasta, como na loja. A nossa continua na versão “Pasta antes de atualizar”.' : 'Fica na pasta. Se você enviar, ele volta para a loja.';
   return row.resolution === 'store' ? 'Volta para a pasta com a versão da loja.' : 'Continua apagado na pasta. Nada muda na loja.';
 }
 function setChoice(row: UpdateRow, choice: Resolution): void {
@@ -616,6 +633,17 @@ function setChoice(row: UpdateRow, choice: Resolution): void {
   if (diffUpdate && next) openUpdateDiff(next);
   void updateWorkspace(target, value => {if (value.update) value.update.choices = {...value.update.choices, [row.path]: choice};}).catch(() => {});
 }
+// A choice for one stretch of an update conflict; kept with the update, by the stretch's content.
+function setUpdateHunk(row: UpdateRow, id: string, choice: HunkChoice): void {
+  const update = workspace?.update, target = updatePlan?.context;
+  if (!update || !target) return;
+  const forFile = {...update.hunks?.[row.path], [id]: choice};
+  update.hunks = {...update.hunks, [row.path]: forFile}; update.choices = {...update.choices, [row.path]: 'marks'};
+  computeUpdate(); render();
+  const next = updatePlan?.rows.find(item => item.path === row.path);
+  if (next) openUpdateDiff(next);
+  void updateWorkspace(target, value => {if (value.update) {value.update.hunks = {...value.update.hunks, [row.path]: forFile}; value.update.choices = {...value.update.choices, [row.path]: 'marks'};}}).catch(() => {});
+}
 function renderUpdate(): void {
   if (!updatePlan) return;
   const rows = updatePlan.rows, texts = rows.filter(row => !row.image);
@@ -625,23 +653,44 @@ function renderUpdate(): void {
   const items: HTMLLIElement[] = [];
   for (const row of rows) {
     const options = CHOICES[row.kind];
-    if (options) items.push(attentionItem(`${row.path}: ${updateLabels[row.kind].toLowerCase()}. ${choiceText(row)}`, linkButton('Comparar', () => openUpdateDiff(row)), ...options.filter(option => option !== row.resolution).map(option => linkButton(choiceLabels[option], () => setChoice(row, option)))));
+    if (options) items.push(attentionItem(`${row.path}: ${updateLabels[row.kind].toLowerCase()}. ${originText(row.origin)} ${choiceText(row)}`.replace(/\s+/g, ' '), linkButton(row.hunks?.length ? 'Comparar e decidir por trecho' : 'Comparar', () => openUpdateDiff(row)), ...options.filter(option => option !== row.resolution && !(option === 'marks' && row.kind === 'conflict')).map(option => linkButton(choiceLabels[option], () => setChoice(row, option))), ...(row.kind === 'conflict' && row.resolution !== 'marks' ? [linkButton(choiceLabels.marks, () => setChoice(row, 'marks'))] : [])));
     else if (row.kind === 'marked') items.push(attentionItem(`${row.path} ainda tem marcações de conflito. A atualização não mexe nele: resolva no editor de código.`, linkButton('Ver', () => openUpdateDiff(row))));
   }
   $('update-attention-list').replaceChildren(...items);
   $('update-attention').hidden = !items.length;
+  // Before marks go into files with work not yet committed (P7).
+  const marked = rows.filter(row => folderChange(row) && row.kind === 'conflict' && row.resolution === 'marks' && row.conflicts).map(row => row.path);
+  $('update-marks').hidden = !marked.length;
+  $('update-marks').textContent = `Vão receber marcações de conflito: ${list(marked)}. Se o projeto usa Git, faça commit antes: assim o diff mostra exatamente o que veio da loja. A pasta como está agora fica guardada na versão “Pasta antes de atualizar” (.yampi-sync/versoes/).`;
   const changing = rows.filter(row => row.kind !== 'same');
   $('update-files-summary').textContent = `Ver os arquivos (${changing.length})`;
   $('update-rows').replaceChildren(...changing.slice(0, 400).map(row => {
-    const name = row.path.split('/').pop()!, folder = row.path.slice(0, -name.length);
+    const name = row.path.split('/').pop()!, folder = row.path.slice(0, -name.length), note = originText(row.origin);
     const view = linkButton('Diferenças', () => openUpdateDiff(row)); view.classList.add('row-action');
     return el('li', {class: 'file-row plain'},
-      el('div', {class: 'file-main'}, el('span', {class: 'file-name', text: name}), el('span', {class: 'file-folder', text: folder}), el('span', {class: `row-status u-${row.kind}`, text: (row.image ? imageLabels[row.kind] : undefined) ?? updateLabels[row.kind]})),
+      el('div', {class: 'file-main'}, el('span', {class: 'file-name', text: name}), el('span', {class: 'file-folder', text: folder}), el('span', {class: `row-status u-${row.kind}`, text: (row.image ? imageLabels[row.kind] : undefined) ?? updateLabels[row.kind]}), note ? el('small', {class: 'row-detail', text: note}) : false),
       row.image ? false : view);
   }));
 }
+// The stretches of a merge, each with its four choices; the chosen one is pressed.
+const hunkLabels: Record<HunkChoice, string> = {mine: 'Nossa', theirs: 'Da loja', both: 'As duas', marks: 'Marcar para editar'};
+function renderHunks(hunks: Hunk[], choices: Record<string, HunkChoice>, choose: (id: string, choice: HunkChoice) => void): void {
+  $('diff-hunks').hidden = !hunks.length;
+  $('diff-hunks').replaceChildren(...hunks.map((hunk, index) => {
+    const current = choices[hunk.id] ?? 'marks';
+    const side = (label: string, lines: string[]) => el('div', {class: 'hunk-side'}, el('span', {text: label}), el('pre', {text: lines.join('\n') || '(nada)'}));
+    return el('div', {class: 'hunk'},
+      el('p', {class: 'hunk-title', text: `Trecho ${index + 1} de ${hunks.length}`}),
+      side('Nossa (pasta do projeto)', hunk.mine), side('Da loja (Yampi agora)', hunk.theirs),
+      el('p', {class: 'links'}, ...(['mine', 'theirs', 'both', 'marks'] as const).map(choice => {
+        const button = linkButton(hunkLabels[choice], () => choose(hunk.id, choice));
+        button.setAttribute('aria-pressed', String(current === choice)); if (current === choice) button.classList.add('chosen');
+        return button;
+      })));
+  }));
+}
 // --- Versions of the project ------------------------------------------------------------------------
-const kindLabels: Record<Version['kind'], string> = {referencia: 'Loja antes de uma atualização', 'antes-de-atualizar': 'Pasta antes de atualizar', loja: 'Loja numa atualização', envio: 'Loja depois de um envio', 'antes-de-restaurar': 'Pasta antes de trazer uma versão', manual: 'Salva por você'};
+const kindLabels: Record<Version['kind'], string> = {referencia: 'Loja antes de uma atualização', 'antes-de-atualizar': 'Pasta antes de atualizar', loja: 'Loja numa atualização', envio: 'Loja depois de um envio', 'antes-de-restaurar': 'Pasta antes de trazer uma versão', 'antes-de-juntar': 'Pasta antes de juntar um arquivo com a loja', manual: 'Salva por você'};
 const changeLabels: Record<VersionChange['change'], string> = {changed: 'Mudou desde então', 'missing-now': 'Apagado desde então', 'added-since': 'Criado depois: fica como está'};
 async function openVersion(access: ProjectFolder, version: Version): Promise<void> {
   const saved = await versionFiles(access, version);
@@ -719,12 +768,16 @@ function closeSheet(id: string): void {
   }
   if (sheets.every(sheet => $(sheet).hidden)) $('sheet-scrim').hidden = true;
 }
-const clearDiff = () => {diffRow = undefined; diffUpdate = undefined; diffVersion = undefined;};
+// diffJoin: a conflict of the send review being merged with the store, for that file only (P5).
+let diffJoin: PlanRow | undefined;
+const clearDiff = () => {diffRow = undefined; diffUpdate = undefined; diffVersion = undefined; diffJoin = undefined;};
 const closeAll = () => {for (const id of sheets) closeSheet(id); clearDiff();};
-const DIFF_ACTIONS = ['diff-write-store', 'diff-copy-store', 'diff-use-project', 'diff-keep-store', 'diff-choose-marks', 'diff-choose-mine', 'diff-choose-store', 'diff-restore'];
+const DIFF_ACTIONS = ['diff-write-store', 'diff-copy-store', 'diff-use-project', 'diff-keep-store', 'diff-choose-marks', 'diff-choose-mine', 'diff-choose-store', 'diff-restore', 'diff-join'];
 function diffActions(visible: string[]): void {for (const id of DIFF_ACTIONS) $(id).hidden = !visible.includes(id);}
 const diffSwitch = () => $('diff').querySelector<HTMLElement>('.switch')!;
-// A row of the update under review: the same three views (reference, folder, store), and its choices.
+const OURS = 'Nossa (pasta do projeto)', THEIRS = 'Da loja (Yampi agora)';
+// A row of the update under review: the same three views (reference, folder, store), its choices,
+// and its stretches when both sides changed the same lines.
 function openUpdateDiff(row: UpdateRow): void {
   clearDiff(); diffUpdate = row;
   $('diff-title').textContent = row.path;
@@ -742,6 +795,23 @@ function openVersionDiff(path: string): void {
   diffActions(diffVersion.saved !== undefined ? ['diff-restore'] : []);
   showDiffTab('remote');
   openSheet('diff');
+}
+// The merge of one conflicting file of the send review with the store, as chosen so far.
+function joinMerge(row: PlanRow) {return fileMerge(row.base, row.local!, row.remote!, review()?.hunks?.[row.path] || {});}
+function openJoin(row: PlanRow): void {
+  clearDiff(); diffJoin = row;
+  $('diff-title').textContent = row.path;
+  diffSwitch().hidden = false;
+  diffActions(projectFolder() ? ['diff-join'] : []);
+  showDiffTab('remote');
+  openSheet('diff');
+}
+function setJoinHunk(row: PlanRow, id: string, choice: HunkChoice): void {
+  const current = review(); if (!current) return;
+  current.hunks = {...current.hunks, [row.path]: {...current.hunks?.[row.path], [id]: choice}};
+  const hunks = current.hunks;
+  persistReview(value => {value.hunks = hunks;});
+  showDiffTab(diffTab);
 }
 function openDiff(row: PlanRow, tab?: typeof diffTab): void {
   clearDiff(); diffActions([]); diffSwitch().hidden = false;
@@ -764,6 +834,8 @@ function showDiffTab(tab: typeof diffTab): void {
   const tabs = {remote: 'diff-tab-remote', base: 'diff-tab-base', store: 'diff-tab-store'} as const;
   for (const [key, id] of Object.entries(tabs)) $(id).setAttribute('aria-selected', String(key === tab));
   ($('diff').querySelector('.switch') as HTMLElement).style.setProperty('--index', String(Object.keys(tabs).indexOf(tab)));
+  $('diff-hunks').hidden = true;
+  const origin = (value?: Origin) => {const text = originText(value); if (text) $('diff-stats').textContent = `${text} ${$('diff-stats').textContent}`;};
   if (diffVersion) {renderDiff($('diff-body'), $('diff-stats'), diffVersion.saved, diffVersion.current, {before: 'Versão', after: 'Pasta agora'}); return;}
   if (diffUpdate) {
     const update = diffUpdate;
@@ -772,9 +844,22 @@ function showDiffTab(tab: typeof diffTab): void {
       $('diff-body').replaceChildren(el('p', {class: 'diff-empty', text: 'Imagens servem à prévia local: não entram nas versões e só vão para a loja se você ligar o envio de imagens.'}));
       return;
     }
-    const views = {remote: [update.store, update.local, 'Loja', 'Pasta'], base: [update.base, update.local, 'Referência', 'Pasta'], store: [update.base, update.store, 'Referência', 'Loja']} as const;
+    const ours = update.compared ?? update.local;
+    const views = {remote: [update.store, ours, THEIRS, OURS], base: [update.base, ours, 'Referência', OURS], store: [update.base, update.store, 'Referência', THEIRS]} as const;
     const [from, to, a, b] = views[tab];
     renderDiff($('diff-body'), $('diff-stats'), from, to, {before: a, after: b});
+    origin(update.origin);
+    if (update.kind === 'conflict' && update.hunks?.length) renderHunks(update.hunks, workspace?.update?.hunks?.[update.path] || {}, (id, choice) => setUpdateHunk(update, id, choice));
+    return;
+  }
+  if (diffJoin) {
+    const row = diffJoin, views = {remote: [row.remote, row.local, THEIRS, OURS], base: [row.base, row.local, 'Referência', OURS], store: [row.base, row.remote, 'Referência', THEIRS]} as const;
+    const [from, to, a, b] = views[tab];
+    renderDiff($('diff-body'), $('diff-stats'), from, to, {before: a, after: b});
+    origin(row.origin);
+    const merge = joinMerge(row);
+    renderHunks(merge.hunks, review()?.hunks?.[row.path] || {}, (id, choice) => setJoinHunk(row, id, choice));
+    $('diff-join').textContent = merge.conflicts ? `Juntar na pasta (${plural(merge.conflicts, 'trecho marcado', 'trechos marcados')})` : 'Juntar na pasta e preparar o envio';
     return;
   }
   const row = diffRow; if (!row) return;
@@ -789,9 +874,10 @@ function showDiffTab(tab: typeof diffTab): void {
     $('diff-body').replaceChildren(el('p', {class: 'diff-empty', text: 'Segure Alt ao clicar em “Comparar de novo” para reler todos os arquivos da loja.'}));
     return;
   }
-  const pairs = {remote: [row.remote, row.local, 'Loja', 'Projeto'], base: [row.base, row.local, 'Original', 'Projeto'], store: [row.base, row.remote, 'Original', 'Loja']} as const;
+  const pairs = {remote: [row.remote, row.local, THEIRS, OURS], base: [row.base, row.local, 'Referência', OURS], store: [row.base, row.remote, 'Referência', THEIRS]} as const;
   const [before, after, a, b] = pairs[tab];
   renderDiff($('diff-body'), $('diff-stats'), before, after, {before: a, after: b});
+  origin(row.origin);
 }
 $('diff-tab-remote').addEventListener('click', () => showDiffTab('remote'));
 $('diff-tab-base').addEventListener('click', () => showDiffTab('base'));
@@ -799,6 +885,24 @@ $('diff-tab-store').addEventListener('click', () => showDiffTab('store'));
 $('close-diff').addEventListener('click', () => {closeSheet('diff'); clearDiff();});
 for (const option of ['marks', 'mine', 'store'] as const) $(`diff-choose-${option}`).addEventListener('click', () => {if (diffUpdate) setChoice(diffUpdate, option);});
 $('diff-restore').addEventListener('click', () => {const path = diffVersion?.path; if (path) {closeSheet('diff'); clearDiff(); restorePaths([path]);}});
+// Merges only this file into the folder (the folder as it was goes into a version first), moves
+// the reference of only this path, then compares again: the file is ready to send, alone or with
+// the others the user keeps selected. Nothing else is read for a decision or changed.
+$('diff-join').addEventListener('click', () => {
+  const row = diffJoin, folder = projectFolder(), project = workspace?.project, base = workspace?.baseline;
+  if (!row || !folder || !project || !base || row.local === undefined || row.remote === undefined) return;
+  const allowed = permitted(folder, true, 'readwrite'), merge = joinMerge(row), remote = row.remote, path = row.path;
+  const storeImages = Object.fromEntries((plan?.rows || []).filter(item => item.image?.remote).map(item => [item.path, item.image!.remote!]));
+  closeAll();
+  void run(`Juntando ${path} com a loja`, async () => {
+    if (!await allowed) throw new Error('O Chrome não liberou a escrita na pasta do projeto. Nada foi gravado.');
+    const {toFolder} = storeForms(project.local, project.localAssets, base.assets, storeImages);
+    await applyJoin(await openProject(folder), await readProjectFromFolder(folder), path, project.local[path], toFolder(merge.text), remote);
+    workspace = await updateWorkspace(base.context, value => {if (value.baseline) value.baseline = {...value.baseline, files: {...value.baseline.files, [path]: remote}};});
+    await readFolder(folder);
+    toast(merge.conflicts ? `${path} foi juntado na pasta com ${plural(merge.conflicts, 'trecho marcado', 'trechos marcados')}: resolva no editor de código e compare de novo.` : `${path} foi juntado na pasta. Revise e envie: só vão os arquivos marcados.`, 8000);
+  });
+});
 // Explicit, per file, with both versions on screen; the store's version stays in the backup.
 $('diff-use-project').addEventListener('click', () => {if (diffRow) {setOverride(diffRow, true); toast('A versão do projeto será enviada. A da loja fica no backup.');}});
 $('diff-keep-store').addEventListener('click', () => {if (diffRow) {setOverride(diffRow, false); toast('A versão da loja será mantida.');}});
@@ -909,11 +1013,12 @@ async function adoptProject(project: Project | {local: Files; localAssets: Asset
   const chosen = 'baseline' in project ? chooseBaseline(workspace, project.baseline) : undefined;
   workspace = await updateWorkspace(target, value => {
     if (chosen) {value.baseline = chosen.baseline; value.lineage = chosen.lineage;}
-    value.project = {local: project.local, localAssets: project.localAssets, name: source.name, kind: source.kind, loadedAt: new Date().toISOString()};
+    value.project = {local: project.local, localAssets: project.localAssets, name: source.name, kind: source.kind, loadedAt: new Date().toISOString(), ...('known' in project && project.known ? {known: project.known} : {})};
     value.review = {overrides: []}; delete value.restore; delete value.update;
   });
   if (chosen?.advanced) toast('Os arquivos já enviados não voltam como conflito.');
   interruptedReference = 'interrupted' in project && !!project.interrupted;
+  if ('notes' in project && project.notes?.length) toast(project.notes.join(' '), 8000);
   if (interruptedReference) toast('A última atualização da pasta parou no meio. Use Atualizar da loja para concluir.', 8000);
   restoreJournal = undefined; computePlan(); computeUpdate(); route = 'send';
   if (connected && compareAfter) await compare(full);
@@ -936,6 +1041,8 @@ async function recordSendInFolder(): Promise<void> {
     const access = await openProject(folder);
     await writeReference(access, fresh.baseline, base, fresh.manifest, 'send');
     await saveVersion(access, {kind: 'envio', origin: 'loja', label: 'Loja depois do envio', context: base.context, files: base.files, journals: lineage.journals});
+    // The receipts of the sends travel with the folder: another computer recognizes them as the project's own.
+    for (const item of history.filter(entry => lineage.journals.includes(entry.id) && entry.verified.length)) await access.write(`${RECEIPTS}/recibo-${item.id}.json`, new TextEncoder().encode(JSON.stringify(makeReceipt(item), null, 2) + '\n'));
     toast('Envio registrado também na pasta do projeto.', 4000);
   } catch (error) {
     notice = {title: 'O envio está na loja, mas a pasta não registrou', text: `${error instanceof Error ? error.message : String(error)} Use Atualizar da loja para alinhar a pasta.`};
@@ -1165,6 +1272,18 @@ $('download-backup').addEventListener('click', () => {
     await save(stored.bytes, `backup-${stamp()}.zip`); toast('Backup baixado.');
   });
 });
+// The receipt of a send: what each confirmed item left in the store. In the project folder (and in
+// its repository), it lets any computer recognize those texts as the project's own.
+async function downloadReceipt(entry: Journal | undefined): Promise<void> {
+  if (!entry?.verified.length) throw new Error('Este envio não tem itens conferidos para registrar.');
+  await save(new TextEncoder().encode(JSON.stringify(makeReceipt(entry), null, 2) + '\n'), `recibo-envio-${entry.startedAt.slice(0, 10)}-${entry.id.slice(0, 8)}.json`, 'application/json');
+  toast('Recibo baixado. Coloque-o em .yampi-sync/recibos/ na pasta do projeto e faça commit, para que todos partam da mesma referência.', 9000);
+}
+$('download-receipt').addEventListener('click', () => {
+  const id = job?.result?.kind === 'send' ? job.result.journalId : undefined;
+  void run('Baixando o recibo', () => downloadReceipt(history.find(item => item.id === id)));
+});
+$('download-receipt-menu').addEventListener('click', () => {closeSheet('menu-sheet'); void run('Baixando o recibo', () => downloadReceipt(journal));});
 $('download-journal').addEventListener('click', () => {
   closeSheet('menu-sheet');
   void run('Baixando o registro', async () => {

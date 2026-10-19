@@ -447,3 +447,12 @@ body[data-input="keyboard"] * { transition-duration: 0s !important; }
 #version-detail .mono-title { margin-top: 2px; }
 .notice[data-tone="ok"] { background: color-mix(in srgb, var(--ok) 10%, transparent); }
 .notice[data-tone="ok"] strong { color: var(--ok); }
+.warning-note { padding-left: 10px; border-left: 2px solid var(--warn); color: var(--ink-2); }
+.hunks { display: grid; gap: 10px; margin: 6px 0 10px; }
+.hunk { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--rule); }
+.hunk-title { margin: 0; font-size: 13px; font-weight: 680; }
+.hunk-side { display: grid; gap: 2px; }
+.hunk-side span { color: var(--muted); font-size: 12px; }
+.hunk pre { max-height: 160px; margin: 0; padding: 6px 8px; overflow: auto; border-radius: 8px; background: var(--sunken); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hunk .links { margin: 2px 0 0; }
+.link.chosen { text-decoration-color: var(--ink); text-decoration-thickness: 2px; font-weight: 800; }

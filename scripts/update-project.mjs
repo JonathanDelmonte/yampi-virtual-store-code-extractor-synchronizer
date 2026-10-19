@@ -7,7 +7,7 @@ import {readProject,safeRead,digest} from '../local-runtime/engine.mjs';
 import {loadPreview} from '../local-runtime/preview.mjs';
 import {isOverrides,emptyOverrides} from '../local-runtime/contract.mjs';
 const repository=path.resolve(import.meta.dirname,'..'),runtime=path.join(repository,'local-runtime');
-export const tools=['engine.mjs','dev.mjs','pack.mjs','platform.mjs','platform-browser.mjs','twig.mjs','preview.mjs','integrity.mjs','contract.mjs','dependencies.mjs','parity.mjs'];
+export const tools=['engine.mjs','dev.mjs','pack.mjs','platform.mjs','platform-browser.mjs','twig.mjs','preview.mjs','integrity.mjs','contract.mjs','dependencies.mjs','parity.mjs','known.mjs'];
 const RETIRED=['twig'];
 const json=v=>JSON.stringify(v,null,2)+'\n';
 async function destination(root,relative) {

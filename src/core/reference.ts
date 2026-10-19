@@ -8,19 +8,22 @@ import {BASELINE, MANIFEST, PENDING, type ProjectFolder} from './project-folder'
 export interface PendingReference {format: 'zirtuno-sync-referencia'; version: 1; startedAt: string; current: FileHash[]; next: Manifest}
 const encoder = new TextEncoder();
 const bytesOf = (snapshot: Snapshot, path: string) => snapshot.assets?.[path] ?? encoder.encode(snapshot.files[path]);
-async function hashes(snapshot: Snapshot): Promise<FileHash[]> {
+// eol: line-ending facts, part of the manifest only from version 3.
+async function hashes(snapshot: Snapshot, eol = true): Promise<FileHash[]> {
   const out: FileHash[] = [];
   for (const path of [...Object.keys(snapshot.files), ...Object.keys(snapshot.assets || {})].sort()) {
     const image = !!snapshot.assets?.[path], bytes = bytesOf(snapshot, path);
-    out.push({path, sha256: await hashBytes(bytes), bytes: bytes.length, kind: image ? 'image' : 'text', ...(image ? {} : lineEnding(snapshot.files[path]))});
+    out.push({path, sha256: await hashBytes(bytes), bytes: bytes.length, kind: image ? 'image' : 'text', ...(image || !eol ? {} : lineEnding(snapshot.files[path]))});
   }
   return out;
 }
 // The download's metadata (tool, theme, skipped paths, preview) stays; files, capture time and
-// the record of the move are the new reference's.
+// the record of the move are the new reference's. The manifest keeps the version the folder had:
+// tools exported before version 3 accept only 1 and 2, and an update must never break the
+// project's preview, check or pack. They ignore the fields they do not know, like `reference`.
 export async function referenceManifest(next: Snapshot, previous: Manifest, reason: 'update' | 'send'): Promise<Manifest> {
-  const source = safeSnapshot(next);
-  return {format: 'yampi-theme-sync', version: 3, ...(previous.tool ? {tool: previous.tool} : {}), ...(previous.theme ? {theme: previous.theme} : {}), context: source.context, capturedAt: source.capturedAt, files: await hashes(source), ...(previous.skipped ? {skipped: previous.skipped} : {}), ...(previous.preview ? {preview: previous.preview} : {}), reference: {updatedAt: new Date().toISOString(), reason, tool: TOOL_VERSION}};
+  const source = safeSnapshot(next), version = previous.version;
+  return {format: 'yampi-theme-sync', version, ...(previous.tool ? {tool: previous.tool} : {}), ...(previous.theme ? {theme: previous.theme} : {}), context: source.context, capturedAt: source.capturedAt, files: await hashes(source, version >= 3), ...(previous.skipped ? {skipped: previous.skipped} : {}), ...(previous.preview ? {preview: previous.preview} : {}), reference: {updatedAt: new Date().toISOString(), reason, tool: TOOL_VERSION}};
 }
 // Rewrites only what changes. Order: the marker (with the hashes of both states), the files that
 // leave the reference, the files that change, the manifest, and the marker's removal. Cut at any

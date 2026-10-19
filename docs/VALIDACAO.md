@@ -1,5 +1,30 @@
 # Validação
 
+## Versões conhecidas, recibo, trechos e junção na 0.9.0, em 19/10/2026
+
+Pedido: um uso real da 0.8.0 com a referência do download de D0, um envio por ZIP em D7 feito em outra instalação, edições depois dele e possíveis mudanças do dono da loja. A atualização mostrava 9 arquivos "mudados dos dois lados". `npm run check` passou com 591 testes em 42 arquivos, só com dados fictícios.
+
+- **Critérios de aceite** (`tests/known.test.ts`):
+  1. envio de outra instalação, listado pelo Git: `mine`;
+  2. terceiro em outro trecho: `merged`, e só a mudança dele entra na pasta;
+  3. terceiro nas mesmas linhas: conflito com a origem "depois do último envio conhecido";
+  4. arquivo criado pelo projeto: `mine` na atualização e `update` na revisão do envio, nunca conflito do arquivo inteiro;
+  5. junção de um arquivo: a pasta recebe a junção, a referência avança só dele, e só ele é gravado na loja;
+  6. manifesto versão 2 continua versão 2, sem campos que as ferramentas antigas não conhecem;
+  7. a escolha de um trecho sobrevive a uma nova leitura e cai quando o trecho muda;
+  8. junção com trecho marcado fica bloqueada para envio;
+  9. diferença só nos caminhos de imagem: "Já está na loja" no envio e `same` na atualização.
+- **Recibo e lista:** o recibo traz só itens conferidos e recusa texto alterado; recibo de outra loja e lista ilegível ficam de fora, com aviso. `npm run versoes:conhecidas` listou num repositório Git temporário cada versão de cada texto, com `\r\n` normalizado.
+- **SHA-256 síncrono** (`tests/sha256.test.ts`): igual ao do Node nos tamanhos de borda.
+- **Comparação sem recarregar** (`tests/server-confirm.test.ts`): lê o servidor mesmo para um arquivo e para se o servidor falhar. No `npm run test:e2e`, a restauração voltou a mostrar o conflito de uma mudança feita depois do envio. A 0.8.1 lia esse arquivo pela aba sem recarregar e não o via.
+- **Painel de demonstração** (`npm run test:update`):
+  - escolha por trecho "Da loja" e volta para "Marcar para editar";
+  - aviso com a lista de arquivos que vão receber marcações;
+  - recibo gravado na pasta e baixado depois do envio;
+  - "Juntar com a loja" num arquivo mudado dos dois lados em trechos diferentes: a pasta recebeu as duas mudanças, e a revisão ficou com 1 item pronto.
+
+Sem validação real: a lista do Git num projeto real, os recibos entre computadores e a junção de um arquivo numa loja real.
+
 ## Conferência pelo servidor e falsos conflitos na 0.8.1, em 19/10/2026
 
 - `tests/server-confirm.test.ts` (5 testes): com o servidor, envio com texto, criação e imagem sem nenhuma recarga; salvamento que o servidor não guardou para no arquivo, com o registro; mudança feita por outra pessoa só no servidor para antes de gravar; sem servidor, recarrega como antes; servidor de outra loja interrompe sem gravar.

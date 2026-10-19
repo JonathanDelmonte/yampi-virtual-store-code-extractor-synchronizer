@@ -17,12 +17,14 @@ export const BASELINE = '.yampi-sync/baseline';
 // rewrite stopped midway and which two states each reference file may be in.
 export const PENDING = '.yampi-sync/referencia-pendente.json';
 export const VERSIONS = '.yampi-sync/versoes';
+// Receipts of sends, kept with the project so any computer recognizes those texts as its own.
+const RECEIPT = /^\.yampi-sync\/recibos\/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.json$/;
 const RECORD = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/;
 export function projectPath(path: string): string {
   const inside = (prefix: string) => path.startsWith(prefix + '/') ? path.slice(prefix.length + 1) : undefined;
   const theme = inside('tema') ?? inside(BASELINE);
   if (theme !== undefined) {validatePath(theme); return path;}
-  if (path === MANIFEST || path === PENDING) return path;
+  if (path === MANIFEST || path === PENDING || RECEIPT.test(path)) return path;
   const record = inside(VERSIONS);
   if (record !== undefined && record.split('/').length <= 3 && record.split('/').every(part => RECORD.test(part) && !/^\.+$/.test(part))) return path;
   throw new Error(`Caminho fora do que a extensão grava no projeto: ${path}`);

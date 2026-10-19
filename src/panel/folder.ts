@@ -72,6 +72,11 @@ export async function folderEntries(root: Folder, signal?: AbortSignal): Promise
   // A reference rewrite that stopped midway: the reader accepts either state per file.
   const pending = await child(meta, PENDING.split('/').pop()!, 'file') as FileSystemFileHandle | undefined;
   if (pending) found.push({path: PENDING, file: await pending.getFile()});
+  // The project's own versions: the list made from its Git history and the send receipts.
+  const known = await child(meta, 'versoes-conhecidas.json', 'file') as FileSystemFileHandle | undefined;
+  if (known) found.push({path: '.yampi-sync/versoes-conhecidas.json', file: await known.getFile()});
+  const receipts = await child(meta, 'recibos', 'directory') as Folder | undefined;
+  if (receipts) await collect(receipts, '.yampi-sync/recibos/', found, signal);
   const baseline = await child(meta, 'baseline', 'directory') as Folder | undefined;
   if (baseline) await collect(baseline, '.yampi-sync/baseline/', found, signal);
   return {name, entries: found.map(entry)};

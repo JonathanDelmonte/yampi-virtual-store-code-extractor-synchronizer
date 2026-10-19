@@ -1,3 +1,4 @@
+import type {Origin} from './known';
 export type Files = Record<string, string>;
 export type Assets = Record<string, Uint8Array>;
 export interface Context {
@@ -32,7 +33,8 @@ export type Status = 'update' | 'create' | 'upload' | 'unchanged' | 'remote-only
 // source: local path of an image the store keeps elsewhere. rewritten: image references adjusted in a text.
 // override: a conflict the user chose to resolve with the project version. reason: why a row cannot be sent.
 // assumed: the store's version was not read, because the project leaves the file as exported.
-export interface PlanRow {path: string; status: Status; base?: string; local?: string; remote?: string; image?: {base?: Uint8Array; local?: Uint8Array; remote?: Uint8Array}; whitespaceOnly?: boolean; blockedBy?: string[]; dependsOn?: string[]; source?: string; rewritten?: number; override?: boolean; reason?: string; assumed?: boolean}
+// origin: who changed the store's side, as far as the project's known versions tell.
+export interface PlanRow {path: string; status: Status; base?: string; local?: string; remote?: string; image?: {base?: Uint8Array; local?: Uint8Array; remote?: Uint8Array}; whitespaceOnly?: boolean; blockedBy?: string[]; dependsOn?: string[]; source?: string; rewritten?: number; override?: boolean; reason?: string; assumed?: boolean; origin?: Origin}
 export interface Plan {context: Context; rows: PlanRow[]; createdAt: string; warnings?: {path: string; message: string}[]}
 export interface Adapter {
   context(): Promise<Context>;

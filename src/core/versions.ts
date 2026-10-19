@@ -5,7 +5,7 @@ import {VERSIONS, encodeLike, readText, type ProjectFolder} from './project-fold
 // named by its SHA-256 (objetos/ab/abcd…); a version is a small record listing path → hash, so a
 // new version only takes the space of the texts that changed. Images are left out on purpose: they
 // serve the local preview, and bringing a text back never needs them.
-export type VersionKind = 'referencia' | 'antes-de-atualizar' | 'loja' | 'envio' | 'antes-de-restaurar' | 'manual';
+export type VersionKind = 'referencia' | 'antes-de-atualizar' | 'loja' | 'envio' | 'antes-de-restaurar' | 'antes-de-juntar' | 'manual';
 // pasta: the texts of tema/ (work that may not be in the store). loja: what the store had, read
 // from it or confirmed after a send.
 export type VersionOrigin = 'pasta' | 'loja';
@@ -18,7 +18,7 @@ export interface Version {
   capturedAt?: string; journals?: string[];
 }
 export interface NewVersion {kind: VersionKind; origin: VersionOrigin; label: string; context: Context; files: Files; capturedAt?: string; journals?: string[]}
-const KINDS = new Set<VersionKind>(['referencia', 'antes-de-atualizar', 'loja', 'envio', 'antes-de-restaurar', 'manual']);
+const KINDS = new Set<VersionKind>(['referencia', 'antes-de-atualizar', 'loja', 'envio', 'antes-de-restaurar', 'antes-de-juntar', 'manual']);
 const HASH = /^[a-f0-9]{64}$/, RECORD = /^\.yampi-sync\/versoes\/([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
 export const objectPath = (hash: string) => `${VERSIONS}/objetos/${hash.slice(0, 2)}/${hash}`;
 const encoder = new TextEncoder(), exact = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});

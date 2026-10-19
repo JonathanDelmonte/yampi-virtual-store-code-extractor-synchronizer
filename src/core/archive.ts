@@ -4,11 +4,14 @@ import {MAX_FILES, MAX_TOTAL_BYTES, MAX_FILE_BYTES, ROOTS, safeFiles, safeSnapsh
 import {previewEntries, demonstration, TOOL_VERSION, type PreviewBundle} from './preview';
 import {localKit} from './local-kit';
 import {PENDING} from './project-folder';
+import {KNOWN_FILE, RECEIPTS, mergeKnown, parseKnownFile, parseReceipt, receiptFor, receiptKnown, type Known} from './known';
 import type {PendingReference} from './reference';
 const metaPath = '.yampi-sync/manifest.json';
 // manifest: what describes the reference (for a later rewrite). interrupted: a rewrite of the
 // reference stopped midway; each reference file was accepted in either of its two states.
-export interface Project {baseline: Snapshot; local: Files; localAssets: Assets; manifest?: Manifest; interrupted?: boolean}
+// known: versions the project itself had (versoes-conhecidas.json and send receipts). notes: files
+// of those that were left out, and why.
+export interface Project {baseline: Snapshot; local: Files; localAssets: Assets; manifest?: Manifest; interrupted?: boolean; known?: Known; notes?: string[]}
 export const SKIPPED = [{path: 'logs/', reason: 'Logs do editor não são exportados nem enviados: não fazem parte do tema. Consulte-os no editor da Yampi.'}];
 // The theme identity comes from the published storefront when captured; the
 // editor does not expose whether it edits a draft, so the state stays unknown.
@@ -111,7 +114,18 @@ async function decodeEntries(input: Record<string, Uint8Array>): Promise<Project
   const baseline = safeSnapshot({context, capturedAt: m.capturedAt, files: safeFiles(bases), ...(Object.keys(assets).length ? {assets} : {})});
   const edited = readThemeEntries(Object.entries(archive).filter(([p]) => p.startsWith('tema/')).map(([p, v]) => [p.slice(5), v]));
   safeSnapshot({...baseline, files: edited.files, assets: edited.assets});
-  return {baseline, local: edited.files, localAssets: edited.assets, manifest: m, ...(pending ? {interrupted: true} : {})};
+  // The project's own versions, never trusted blindly: a bad list or receipt is named and left out.
+  let known: Known = {};
+  const notes: string[] = [], why = (error: unknown) => error instanceof Error ? error.message : String(error);
+  if (archive[KNOWN_FILE]) {try {known = mergeKnown(known, parseKnownFile(JSON.parse(text(archive[KNOWN_FILE]))));} catch (error) {notes.push(`${KNOWN_FILE} ficou de fora: ${why(error)}`);}}
+  for (const path of Object.keys(archive).filter(p => p.startsWith(RECEIPTS + '/') && p.endsWith('.json')).sort()) {
+    try {
+      const receipt = parseReceipt(JSON.parse(text(archive[path])));
+      if (!receiptFor(receipt, context)) {notes.push(`${path} é de outra loja e ficou de fora.`); continue;}
+      known = mergeKnown(known, receiptKnown(receipt));
+    } catch (error) {notes.push(`${path} ficou de fora: ${why(error)}`);}
+  }
+  return {baseline, local: edited.files, localAssets: edited.assets, manifest: m, ...(pending ? {interrupted: true} : {}), ...(Object.keys(known).length ? {known} : {}), ...(notes.length ? {notes} : {})};
 }
 function validManifest(value: unknown): Manifest {
   const m = value as Manifest;
@@ -142,7 +156,7 @@ export async function decodeProject(data: Uint8Array): Promise<Project> {return 
 // chosen folder and a way to read it, so only the files that matter are ever read.
 export interface ProjectEntry {path: string; size: number; read(): Promise<Uint8Array>}
 export function isProjectFile(path: string, project: boolean): boolean {
-  return project ? path.startsWith('tema/') || path.startsWith('.yampi-sync/baseline/') || path === metaPath || path === PENDING : ROOTS.has(path.split('/')[0]);
+  return project ? path.startsWith('tema/') || path.startsWith('.yampi-sync/baseline/') || path === metaPath || path === PENDING || path === KNOWN_FILE || path.startsWith(RECEIPTS + '/') && path.endsWith('.json') : ROOTS.has(path.split('/')[0]);
 }
 export async function readProjectEntries(source: ProjectEntry[], onProgress?: (done: number, total: number) => void): Promise<Project | {local: Files; localAssets: Assets}> {
   const project = source.some(f => f.path === metaPath);
@@ -152,6 +166,8 @@ export async function readProjectEntries(source: ProjectEntry[], onProgress?: (d
   for (const {path, size} of relevant) {
     if (!project && !ROOTS.has(path.split('/')[0])) throw new Error(`Selecione a raiz do projeto exportado ou a pasta tema. Arquivo fora do tema: ${path}`);
     safeArchivePath(path);
+    // The list of known versions may carry their texts: its own limit, apart from the theme's.
+    if (path === KNOWN_FILE) {if (size > MAX_TOTAL_BYTES) throw new Error(`${KNOWN_FILE} é grande demais.`); continue;}
     if (size > MAX_FILE_BYTES || (total += size) > (project ? MAX_TOTAL_BYTES * 2 + MAX_FILE_BYTES : MAX_TOTAL_BYTES) || ++count > MAX_FILES * 2 + 1) throw new Error('A pasta ultrapassa os limites de importação.');
   }
   onProgress?.(0, relevant.length);

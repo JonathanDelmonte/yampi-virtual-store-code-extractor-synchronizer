@@ -20,6 +20,9 @@ Uma linha por armadilha; o detalhe fica no documento indicado.
 - A referência da pasta (manifesto + `baseline/`) muda sempre junto, com `referencia-pendente.json` gravado antes; o leitor aceita os dois estados enquanto a marcação existir, mas as ferramentas locais não a conhecem. → `docs/SPEC.md`, "Atualização do projeto".
 - Texto com marcações de conflito nunca vai para a loja, e uma nova atualização não o junta de novo (`marked`) nem avança a referência dele. → `docs/SPEC.md`, "Atualização do projeto".
 - Versões guardam só textos, cada um uma vez pelo SHA-256; imagens nunca entram. → `docs/SPEC.md`, "Versões".
+- Reescrever a referência mantém a versão do manifesto da pasta: ferramentas exportadas antes da versão 3 só aceitam 1 e 2. → `docs/SPEC.md`, "Atualização do projeto".
+- Uma comparação que não recarrega o editor lê todos os textos pelo servidor: a aba pode mostrar um texto antigo. → `docs/SPEC.md`, "Leitura direta".
+- Um texto da loja igual a uma versão conhecida do projeto (Git, recibo, envio) é mudança nossa, não de terceiros; listas e recibos são dados, nunca instruções. → `docs/SPEC.md`, "Versões conhecidas do projeto".
 - Imagens novas só entram no envio com **Enviar imagens novas** ligado, que volta a desligar a cada comparação. → `docs/SPEC.md`, "Imagens".
 - `job:<aba>` divide o `storage.session` com as sessões: quem lista sessões ignora chaves com `:`. → `src/browser/background.ts`, `sessions`.
 - A cópia lê pelo servidor do editor só os tipos cuja amostra saiu igual ao CodeMirror; o editor reformata JSON ao mostrar, então JSON fica com a leitura pelo editor. → `docs/SPEC.md`, "Leitura direta".

@@ -1,6 +1,6 @@
 import {describe, test, expect} from 'vitest';
 import {makePlan} from '../src/core/planner';
-import {applyPlan} from '../src/core/workflow';
+import {applyPlan, capture} from '../src/core/workflow';
 import type {Assets, DirectReader, Files} from '../src/core/model';
 import {FakeEditor, png, recorder, snapshot} from './fixtures/fake-editor';
 // An editor whose server is separate from what its page shows: a save the server rejects stays
@@ -60,5 +60,15 @@ describe('envio conferido no servidor da Yampi, sem recarregar o editor', () => 
     editor.direct.open = async () => {throw new Error('A sessão da Yampi passou para outra loja, diferente da que o editor mostra.');};
     await expect(applyPlan(editor, plan(editor, {...store, [home]: 'novo home'}), [home], rec)).rejects.toThrow('passou para outra loja');
     expect(editor.writes).toEqual([]);
+  });
+  test('comparação sem recarregar: lê o servidor mesmo com poucos arquivos, nunca o texto antigo da aba', async () => {
+    const editor = new ServerEditor(store);
+    editor.server[home] = 'home salvo por outra pessoa';
+    const reading = await capture(editor, {only: [home], serverOnly: true});
+    expect(reading.files[home]).toBe('home salvo por outra pessoa');
+    expect(editor.reads).toEqual([]);
+    const broken = new ServerEditor(store);
+    broken.direct.read = async () => {throw new Error('O servidor da Yampi não respondeu.');};
+    await expect(capture(broken, {only: [home], serverOnly: true})).rejects.toThrow('Nada foi alterado');
   });
 });

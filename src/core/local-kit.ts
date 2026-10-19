@@ -11,10 +11,11 @@ import pack from '../../local-runtime/pack.mjs?raw';
 import platform from '../../local-runtime/platform.mjs?raw';
 import browserPlatform from '../../local-runtime/platform-browser.mjs?raw';
 import twig from '../../local-runtime/twig.mjs?raw';
+import knownRuntime from '../../local-runtime/known.mjs?raw';
 import pkg from '../../local-runtime/package.json?raw';
 import lock from '../../local-runtime/package-lock.json?raw';
 const json = (value: unknown) => JSON.stringify(value, null, 2) + '\n';
-export const TOOL_FILES: Record<string, string> = {'engine.mjs': engine, 'dev.mjs': dev, 'pack.mjs': pack, 'platform.mjs': platform, 'platform-browser.mjs': browserPlatform, 'twig.mjs': twig, 'preview.mjs': previewRuntime, 'integrity.mjs': integrityRuntime, 'contract.mjs': contractRuntime, 'dependencies.mjs': dependenciesRuntime, 'parity.mjs': parityRuntime};
+export const TOOL_FILES: Record<string, string> = {'engine.mjs': engine, 'dev.mjs': dev, 'pack.mjs': pack, 'platform.mjs': platform, 'platform-browser.mjs': browserPlatform, 'twig.mjs': twig, 'preview.mjs': previewRuntime, 'integrity.mjs': integrityRuntime, 'contract.mjs': contractRuntime, 'dependencies.mjs': dependenciesRuntime, 'parity.mjs': parityRuntime, 'known.mjs': knownRuntime};
 // Sections map generated from the exported inventory and the captured aliases.
 // Rule-based resolution still applies; this file documents and allows overrides.
 function sectionMap(paths: string[], preview?: PreviewBundle): Record<string, string> {
@@ -41,6 +42,8 @@ tema/
 .yampi-sync/manifest.json
 .yampi-sync/referencia-pendente.json
 .yampi-sync/versoes/
+.yampi-sync/versoes-conhecidas.json
+.yampi-sync/recibos/
 preview/
 # Sobreposições locais da prévia; podem conter dados da loja.
 local.data.json
@@ -89,6 +92,8 @@ Antes de um trabalho novo, use **Atualizar da loja** na extensão, com esta past
 Depois de cada atualização e de cada envio, a referência (\`.yampi-sync/manifest.json\` e \`.yampi-sync/baseline/\`) passa a ser a loja como a extensão a conhece por último. Assim, o próximo envio nunca desfaz o que o cliente mudou na loja.
 
 Antes de mudar a pasta, a extensão guarda versões em \`.yampi-sync/versoes/\`: a referência, a pasta e a loja, só com textos. Imagens não entram. Em **Versões**, abra uma versão para ver o que mudou desde então e trazer um arquivo, ou todos, de volta para \`tema/\`. A pasta de antes também fica guardada. Você pode salvar uma versão com nome a qualquer momento.
+
+Se o projeto usa Git, rode \`npm run versoes:conhecidas\` antes de atualizar: ele grava em \`.yampi-sync/versoes-conhecidas.json\` cada versão que o Git teve de cada texto de \`tema/\`. Um texto da loja igual a uma delas é mudança do próprio projeto, não de outra pessoa, mesmo que o envio tenha sido feito em outro computador. Depois de cada envio, baixe o **recibo do envio** na extensão e guarde-o em \`.yampi-sync/recibos/\`, com commit, para que todos partam da mesma referência.
 
 ## Limitações do retorno
 

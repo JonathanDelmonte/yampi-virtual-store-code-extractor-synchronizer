@@ -162,3 +162,20 @@ Decisão: com o servidor respondendo pela mesma loja, comparação, preflight e 
 A mesma atualização mostrou 9 arquivos "mudados dos dois lados". A referência da pasta era o download de 08/10, anterior aos envios feitos pela extensão; um arquivo enviado e depois editado parecia conflito. A atualização passa a usar os registros de envio desta instalação: um texto da loja igual ao que a extensão enviou é mudança do próprio projeto.
 
 Ainda sem validação real: a gravação conferida pelo servidor.
+
+## 19/10/2026 — Referência atrasada: versões conhecidas, recibo, trechos e junção (0.9.0)
+
+Pedido do proprietário, a partir de um uso real da 0.8.0 num projeto com duas pessoas e Git. A pasta tinha a referência do download de D0, num manifesto versão 2. O redesign foi enviado em D7 a partir de um ZIP, em outra instalação, e depois vieram outras edições. A atualização mostrou 9 conflitos:
+- 5 em arquivos criados pelo projeto, sem referência;
+- 4 em arquivos com trabalho não commitado.
+
+A comparação de uma exportação nova com o Git mostrou 3 versões antigas do projeto, 4 diferenças só nos caminhos de imagem reescritos pelo envio, 2 mudanças reais de terceiros e o `components.twig` regenerado.
+
+Decisões:
+
+- A extensão não lê o Git. O projeto gera `.yampi-sync/versoes-conhecidas.json` (`npm run versoes:conhecidas`), e os envios deixam recibos para guardar no projeto. Um texto da loja igual a uma versão conhecida é mudança nossa; diferente de todas, a base da junção é a versão conhecida mais próxima, e o conflito mostra só a mudança do terceiro. Sem versão conhecida, a extensão não afirma de quem é a mudança.
+- Decisão por trecho, com identidade pelo conteúdo, e junção de um arquivo só na revisão do envio, gravada na pasta antes de enviar. Assim, a comparação seguinte não reenvia a versão antiga da pasta.
+- O manifesto mantém a versão que a pasta tinha.
+- A comparação sem recarregar lê todos os textos pelo servidor. O e2e da restauração mostrou que a 0.8.1 lia pela aba um texto antigo quando havia poucos arquivos.
+
+Ainda sem validação real.

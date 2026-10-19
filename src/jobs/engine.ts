@@ -207,7 +207,7 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     // An update reads the whole store: any file the store changed may have to come to the project.
     const whole = !!request.full || request.scope === 'update';
     if (request.scope === 'update') tracker.relabel('read', 'Ler a loja inteira');
-    const observed = await capture(adapter, {signal: control.signal, progress, notice, ...(whole ? {} : {only: request.paths || []})});
+    const observed = await capture(adapter, {signal: control.signal, progress, notice, ...(server ? {serverOnly: true} : {}), ...(whole ? {} : {only: request.paths || []})});
     await updateWorkspace(expected, workspace => {
       // Kept apart from the send's review: the folder changes only when the user applies it.
       if (request.scope === 'update') {workspace.update = {reading: observed, choices: {}}; return;}

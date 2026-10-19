@@ -55,6 +55,7 @@ Desde a 0.7.0, a cópia e a comparação leem o conteúdo pelo servidor do próp
 - **Amostra antes do restante.** O primeiro arquivo de cada tipo (cada extensão de texto, e imagem) é lido pelos dois caminhos. Só os tipos idênticos seguem pelo servidor; uma diferença manda tudo para a leitura pelo editor.
 - **Recuo em vez de parada.** Servidor indisponível, resposta inesperada, sessão expirada ou falha no meio devolvem o restante à leitura pelo editor, com o motivo nas etapas. Só a troca de loja interrompe.
 - **Poucos arquivos.** Com menos de 8 arquivos elegíveis, a cópia lê tudo pelo editor.
+- **Comparação sem recarregar (desde a 0.9.0).** Quando o servidor responde, a comparação lê pelo servidor todos os textos que ele entrega como o editor mostra, sem amostra e sem mínimo de arquivos: a aba aberta pode guardar um texto antigo. Se o servidor falhar no meio, a comparação para, sem cair para a leitura pelo editor.
 - **Conferência do envio (desde a 0.8.1).** Com o servidor respondendo pela mesma loja, a comparação, o preflight, a conferência de cada arquivo salvo, criado ou enviado e a conferência final leem pelo servidor, e o editor não é recarregado: em 19/10/2026, recarregar o endereço do editor passou a mostrar a página "Acesso restrito" da Yampi, embora o editor abrisse pelo menu. A gravação continua pelo próprio editor, que confere o conteúdo esperado antes de salvar. Sem o servidor, o editor é recarregado como antes; se a recarga mostrar "Acesso restrito", a operação para na hora, com o motivo, e o envio pode continuar de onde parou.
 
 Depois de um envio, a referência da comparação avança: cada texto conferido e cada imagem enviada passam a ser o original. O que já foi enviado não volta como conflito, e o registro do envio fica ligado à exportação. Desde a 0.8.0, a referência também avança na própria pasta do projeto (veja "Atualização do projeto").
@@ -117,9 +118,51 @@ Parada depois do passo 3: os arquivos que a atualização trouxe já são iguais
 3. grava o manifesto;
 4. remove a marcação.
 
-Ao ler uma pasta com a marcação, cada original pode estar em qualquer um dos dois estados. A pasta é aceita, com o aviso de que a atualização parou no meio, e a próxima atualização termina o trabalho. Sem a marcação, um original diferente do manifesto continua recusado. O manifesto mantém a ferramenta, o tema, os caminhos ignorados e a prévia da exportação, e registra `reference`: quando, por que (`update` ou `send`) e com qual versão da extensão. As ferramentas locais (`npm run dev`, `npm run pack`) leem a referência nova normalmente; durante uma atualização interrompida, recusam a pasta até a extensão terminar.
+Ao ler uma pasta com a marcação, cada original pode estar em qualquer um dos dois estados. A pasta é aceita, com o aviso de que a atualização parou no meio, e a próxima atualização termina o trabalho. Sem a marcação, um original diferente do manifesto continua recusado. O manifesto mantém a versão que a pasta tinha (as ferramentas exportadas antes da versão 3 aceitam só 1 e 2; para elas, sem os dados de quebra de linha), a ferramenta, o tema, os caminhos ignorados e a prévia da exportação, e registra `reference`: quando, por que (`update` ou `send`) e com qual versão da extensão. As ferramentas locais (`npm run dev`, `npm run pack`) leem a referência nova normalmente; durante uma atualização interrompida, recusam a pasta até a extensão terminar.
 
 Depois de um envio, se a escrita na pasta já estiver liberada, a referência da pasta recebe o que foi conferido na loja (a mesma referência que avança no navegador), com o horário da captura mantido. Uma versão `envio` guarda os textos.
+
+## Versões conhecidas do projeto
+
+Desde a 0.9.0, a comparação usa as versões que o próprio projeto já teve, por caminho, quando a referência da pasta é mais antiga que elas. São três fontes, todas lidas como dado e nunca como instrução:
+
+- `.yampi-sync/versoes-conhecidas.json`, gravado por `npm run versoes:conhecidas` (`local-runtime/known.mjs`), com o SHA-256 e o texto de cada versão que o Git teve de cada texto de `tema/`. A extensão não lê o Git.
+- os recibos de envio em `.yampi-sync/recibos/`;
+- os registros de envio desta instalação, só itens conferidos.
+
+Uma lista ou um recibo ilegível, alterado (texto que não confere com o hash) ou de outra loja fica de fora, com aviso.
+
+Para um arquivo que mudou na loja desde a referência:
+
+| A loja tem | Referência usada | Origem mostrada |
+|---|---|---|
+| um texto igual a uma versão conhecida (também com os caminhos de imagem desfeitos) | o texto da loja: a mudança é nossa | "A loja tem a versão enviada em DD/MM (sem mudança de outra pessoa)" |
+| um texto diferente de todas, havendo versões com texto | a versão conhecida mais próxima do texto da loja | "A loja mudou depois do último envio conhecido: provável mudança de outra pessoa" |
+| um texto diferente de todas, sem texto conhecido | a referência da pasta | a mesma frase acima |
+| um texto, sem nenhuma versão conhecida desse caminho | a referência da pasta | nada: a extensão não sabe |
+
+Isso vale na atualização e na revisão do envio (exceto na restauração, que só compara o registro do envio). Um arquivo criado pelo projeto e enviado antes, ausente da referência, fica `mine`, e não conflito do arquivo inteiro.
+
+## Recibo de envio
+
+Ao fim de um envio com itens conferidos, inclusive a partir de ZIP, **Baixar recibo do envio** gera `{format: 'zirtuno-sync-recibo', version: 1, context, sentAt, journalId, files: {caminho: {sha256, text}}}`. Ele contém só os textos conferidos, como ficaram na loja. Também se baixa pelo menu, a partir do histórico. Com a escrita na pasta liberada, o registro do envio na pasta também grava `.yampi-sync/recibos/recibo-<registro>.json`. Um recibo é uma versão conhecida do projeto, com a data do envio.
+
+## Decisão por trecho e junção de um arquivo
+
+Num conflito, `mergeTexts` separa os trechos que os dois lados mudaram. Cada trecho tem uma identidade calculada do seu conteúdo (os dois lados), e a escolha — `mine`, `theirs`, `both` ou `marks` — fica guardada por arquivo e por trecho. Numa nova leitura da loja, a escolha vale enquanto o trecho for o mesmo; um trecho que mudou volta a pedir decisão. Trecho sem escolha vai marcado.
+
+**Juntar com a loja**, na revisão do envio, vale só para o arquivo em conflito:
+1. a junção usa a referência do arquivo (com as versões conhecidas) e as escolhas por trecho;
+2. o texto da pasta precisa estar como na comparação, e a pasta inteira vira a versão `antes-de-juntar`;
+3. o resultado vai para `tema/`, com os caminhos de imagem do projeto;
+4. a referência daquele caminho passa a ser o texto da loja usado, na pasta e no navegador;
+5. a comparação é refeita.
+
+O arquivo fica `update`, ou bloqueado se ainda tiver marcações. Nada mais é lido para decisão nem alterado. O envio continua relendo antes de gravar: se a loja mudou desde a junção, ele para, e a junção é refeita na próxima comparação.
+
+## Caminhos de imagem na atualização
+
+A atualização compara a pasta como o envio a deixa na loja: imagens novas movidas para `assets/images`, referências reescritas. Uma diferença só nesses caminhos é `same`. O texto da loja (e a junção) entra na pasta com os caminhos do projeto, desfazendo a mesma troca, para a prévia local continuar achando as imagens.
 
 ## Versões
 

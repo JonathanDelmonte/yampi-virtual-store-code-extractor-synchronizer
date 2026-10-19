@@ -53,7 +53,13 @@ try {
         const writer = await (await dir.getFileHandle(name, {create: true})).createWritable();
         await writer.write(Uint8Array.from(atob(base64), c => c.charCodeAt(0))); await writer.close();
       }
-    }, files)
+    }, files),
+    // One text of the folder, as the developer's editor would save it.
+    edit: (file, text) => page.evaluate(async ([file, text]) => {
+      const parts = ('loja-de-testes/' + file).split('/'), name = parts.pop(); let dir = await navigator.storage.getDirectory();
+      for (const part of parts) dir = await dir.getDirectoryHandle(part);
+      const writer = await (await dir.getFileHandle(name)).createWritable(); await writer.write(text); await writer.close();
+    }, [file, text])
   };
   await page.goto(origin + '/demo.html?demo=1');
   await page.waitForFunction(() => document.body.dataset.view === 'export' && !document.querySelector('#export').disabled);
@@ -91,7 +97,7 @@ try {
   assert.equal(await page.locator('#count-store').textContent(), '3', 'Estilos, arquivo removido e arquivo novo vêm da loja.');
   assert.equal(await page.locator('#count-merged').textContent(), '1');
   assert.equal(await page.locator('#count-decide').textContent(), '1');
-  assert.match(await page.locator('#update-attention-list').textContent(), /elements\/head\.twig: mudou dos dois lados nas mesmas linhas\. Vai com as duas versões marcadas/);
+  assert.match(await page.locator('#update-attention-list').textContent(), /elements\/head\.twig: mudou dos dois lados nas mesmas linhas\. 1 trecho de 1 sem decisão: vai marcado no arquivo/);
   assert.match(await page.locator('#status').textContent(), /1 arquivo para decidir antes de atualizar/);
   await fits('revisão da atualização'); await shot('atualizacao-revisao');
   // Comparing shows the three versions; choosing changes only the plan, never the folder yet.
@@ -99,9 +105,18 @@ try {
   assert.equal(await page.locator('#diff').isVisible(), true);
   assert.equal(await page.locator('#diff-choose-store').isVisible(), true);
   await page.locator('#diff-choose-mine').click();
-  assert.match(await page.locator('#update-attention-list').textContent(), /Fica a da pasta\. No próximo envio, ela substitui a da loja/);
+  assert.match(await page.locator('#update-attention-list').textContent(), /Fica a nossa\. No próximo envio, ela substitui a da loja/);
   await page.locator('#diff-choose-marks').click();
+  // Per stretch: the store's lines for this one, then back to marking it (P4).
+  assert.equal(await page.locator('#diff-hunks .hunk').count(), 1);
+  assert.match(await page.locator('#diff-hunks').textContent(), /Nossa \(pasta do projeto\).*Descrição da pasta.*Da loja \(Yampi agora\).*Descrição do cliente/s);
+  await page.locator('#diff-hunks button', {hasText: 'Da loja'}).click();
+  assert.match(await page.locator('#update-attention-list').textContent(), /1 trecho decidido: vai a junção escolhida\./);
+  assert.equal(await page.locator('#update-marks').isVisible(), false);
+  await page.locator('#diff-hunks button', {hasText: 'Marcar para editar'}).click();
   await page.locator('#close-diff').click();
+  // Before marks go into a file: the list, the commit advice and where the folder stays kept (P7).
+  assert.match(await page.locator('#update-marks').textContent(), /Vão receber marcações de conflito: elements\/head\.twig\. Se o projeto usa Git, faça commit antes/);
   assert.equal(decode(Buffer.from(project['tema/' + head], 'base64')), (await folder.read())['tema/' + head], 'Nada é gravado antes de aplicar.');
   await page.locator('#apply-update').click();
   await page.waitForFunction(() => document.body.dataset.view === 'pick' && document.querySelector('#notice strong')?.textContent === 'Pasta atualizada com a loja');
@@ -109,7 +124,7 @@ try {
   await shot('atualizacao-concluida');
   const after = await folder.read();
   assert.match(after['tema/' + long], /<!-- pasta -->/); assert.match(after['tema/' + long], /<!-- loja -->/);
-  assert.match(after['tema/' + head], /^<<<<<<< pasta \(sua versão\)\n<meta name="description" content="Descrição da pasta">\n=======\n<meta name="description" content="Descrição do cliente">\n>>>>>>> loja \(Yampi\)\n$/);
+  assert.match(after['tema/' + head], /^<<<<<<< nossa \(pasta do projeto\)\n<meta name="description" content="Descrição da pasta">\n=======\n<meta name="description" content="Descrição do cliente">\n>>>>>>> da loja \(Yampi agora\)\n$/);
   assert.equal(after['tema/' + scss], store[scss]);
   assert.equal(after['tema/' + promo], store[promo]);
   assert.equal(after['tema/' + header], undefined);
@@ -165,6 +180,29 @@ try {
   // Each save reloads the fictitious editor (and its counters): check what the store kept instead.
   const storeAfter = await page.evaluate(() => JSON.parse(sessionStorage.getItem('fixture-files')));
   assert.equal(storeAfter[long], restored['tema/' + long]); assert.equal(storeAfter[head], mine[head]);
+  // The receipt of that send: in the folder, and to download for a project used elsewhere (P1).
+  assert.ok(Object.keys(sent).some(file => /^\.yampi-sync\/recibos\/recibo-.+\.json$/.test(file)), 'O recibo do envio fica na pasta.');
+  const receiptDownload = page.waitForEvent('download'); await page.locator('#download-receipt').click();
+  const receipt = JSON.parse(await readFile(await (await receiptDownload).path(), 'utf8'));
+  assert.equal(receipt.format, 'zirtuno-sync-recibo'); assert.deepEqual(Object.keys(receipt.files).sort(), [head, long].sort());
+  // Later, the client changes one stretch of the long template and the developer another: merge only that file (P5).
+  await page.locator('#finish').click();
+  const storeLater = await page.evaluate(() => JSON.parse(sessionStorage.getItem('fixture-files')));
+  storeLater[long] = storeLater[long].replace('<p>Linha 1501 ·', '<p>Linha 1501 (cliente) ·');
+  await page.evaluate(files => sessionStorage.setItem('fixture-files', JSON.stringify(files)), storeLater);
+  const folderLater = sent['tema/' + long].replace('<p>Linha 101 ·', '<p>Linha 101 (pasta) ·');
+  await folder.edit('tema/' + long, folderLater);
+  await page.getByRole('tab', {name: 'Importar projeto'}).click();
+  await page.locator('#reload-folder').click();
+  await page.waitForFunction(() => document.body.dataset.view === 'review' && document.querySelector('#attention-list')?.textContent.includes('Juntar com a loja'));
+  await page.locator('#attention-list button', {hasText: 'Juntar com a loja'}).click();
+  await page.locator('#diff-join').waitFor();
+  assert.equal(await page.locator('#diff-join').textContent(), 'Juntar na pasta e preparar o envio');
+  await page.locator('#diff-join').click();
+  await page.waitForFunction(() => document.querySelector('#toast')?.textContent?.includes('foi juntado na pasta'));
+  await page.waitForFunction(() => document.body.dataset.view === 'review' && document.querySelector('#apply-label')?.textContent === 'Enviar 1 item para Loja de testes');
+  const joined = (await folder.read())['tema/' + long];
+  assert.match(joined, /Linha 101 \(pasta\)/); assert.match(joined, /Linha 1501 \(cliente\)/);
   assert.deepEqual(foreign, []); assert.deepEqual(errors, []);
   await writeFile(path.join(evidence, 'report.json'), JSON.stringify({fictionalOnly: true, merged: true, conflictMarked: true, storeOnlyApplied: true, removedFollowed: true, referenceRewritten: true, versions: 6, imagesInVersions: 0, storeWritesBeforeSend: 0, sendRecordedInFolder: true, errors}, null, 2) + '\n');
   console.log('Atualização aprovada: junção linha a linha, conflito marcado, arquivos removidos e novos da loja, referência reescrita na pasta, versões só de texto, recuperação e versão nomeada sem gravar na loja; o envio seguinte ficou registrado na pasta.');

@@ -6,6 +6,8 @@ import {unzipSync} from 'fflate';
 import {encodeSnapshot, readProjectEntries, type Project} from '../src/core/archive';
 import {folderEntries, openProject} from '../src/panel/folder';
 import {applyUpdate, planUpdate, type Resolution} from '../src/core/update';
+import {journalKnown} from '../src/core/known';
+import type {Journal} from '../src/core/model';
 import {listVersions, versionFiles} from '../src/core/versions';
 import {makePlan, MARKED} from '../src/core/planner';
 import {MARKS, hasConflictMarks} from '../src/core/merge';
@@ -58,7 +60,7 @@ async function exported(local: Record<string, string | undefined> = edits, local
 }
 async function read(root: MemoryDir): Promise<Project> {return await readProjectEntries((await folderEntries(asFolder(root))).entries) as Project;}
 async function update(root: MemoryDir, choices: Record<string, Resolution> = {}) {
-  const project = await read(root), plan = planUpdate(project.baseline, project.local, project.localAssets, reading(), choices);
+  const project = await read(root), plan = planUpdate(project.baseline, project.local, project.localAssets, reading(), {choices});
   return {project, plan, result: await applyUpdate(await openProject(asFolder(root)), plan, project)};
 }
 let temporary: string | undefined;
@@ -204,9 +206,10 @@ describe('envios da própria extensão não viram conflito', () => {
     const store = {...original, [head]: sentHead};
     const without = planUpdate(project.baseline, project.local, project.localAssets, reading(store, images));
     expect(without.rows.find(row => row.path === head)?.kind).toBe('conflict');
-    const withHistory = planUpdate(project.baseline, project.local, project.localAssets, reading(store, images), {}, {[head]: ['outro texto antigo\n', sentHead]});
+    const sent = (text: string): Journal => ({version: 1, id: 'envio-ficticio', context, startedAt: '2026-10-07T10:00:00.000Z', status: 'completed', selected: [head], verified: [head], before: {}, after: {[head]: text}});
+    const withHistory = planUpdate(project.baseline, project.local, project.localAssets, reading(store, images), {known: journalKnown([sent('outro texto antigo'), sent(sentHead)])});
     expect(withHistory.rows.find(row => row.path === head)).toMatchObject({kind: 'mine'});
     // A text the store has that the extension never sent is still the client's change.
-    expect(planUpdate(project.baseline, project.local, project.localAssets, reading(store, images), {}, {[head]: ['outro texto\n']}).rows.find(row => row.path === head)?.kind).toBe('conflict');
+    expect(planUpdate(project.baseline, project.local, project.localAssets, reading(store, images), {known: journalKnown([sent('outro texto')])}).rows.find(row => row.path === head)?.kind).toBe('conflict');
   });
 });

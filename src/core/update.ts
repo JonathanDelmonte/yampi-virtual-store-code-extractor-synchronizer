@@ -1,6 +1,8 @@
 import {assertContext, safeSnapshot, type Assets, type Context, type Files, type Manifest, type Snapshot} from './model';
 import type {Project} from './archive';
-import {hasConflictMarks, mergeTexts} from './merge';
+import {hasConflictMarks, hunksOf, mergeParts, renderMerge, type Hunk, type HunkChoice} from './merge';
+import {knownBase, type Known, type Origin} from './known';
+import {imageMoves, rewriteImageReferences} from './planner';
 import {encodeLike, type ProjectFolder} from './project-folder';
 import {writeReference} from './reference';
 import {listVersions, saveVersion, type NewVersion, type Version} from './versions';
@@ -12,9 +14,10 @@ import type {Capture} from './workflow';
 // marked: the folder's file still has conflict marks from an earlier update. It is left alone, and its
 // reference does not move, so a newer change of the store still shows as a conflict once resolved.
 export type UpdateKind = 'same' | 'mine' | 'store' | 'removed' | 'merged' | 'conflict' | 'removed-edited' | 'deleted-changed' | 'marked';
-// marks: both versions in the file, between conflict marks, to finish in the code editor (nothing
-// with marks is ever sent). mine: the folder's version stays, and replaces the store's on the next
-// send. store: the store's version replaces the folder's.
+// marks: the merge, stretch by stretch as the user chose; a stretch without a choice keeps both
+// versions between conflict marks, to finish in the code editor (nothing with marks is ever sent).
+// mine: the folder's version stays, and replaces the store's on the next send. store: the store's
+// version replaces the folder's.
 export type Resolution = 'marks' | 'mine' | 'store';
 // Where the update cannot decide alone; the first choice is the default. No default undoes a
 // change made in the store: a conflict keeps both versions in the file, and a file the store
@@ -22,38 +25,60 @@ export type Resolution = 'marks' | 'mine' | 'store';
 export const CHOICES: Partial<Record<UpdateKind, Resolution[]>> = {conflict: ['marks', 'mine', 'store'], 'removed-edited': ['store', 'mine'], 'deleted-changed': ['store', 'mine']};
 export interface UpdateRow {
   path: string; kind: UpdateKind;
+  // base: the reference the file is compared with (a known version of the project when one applies).
   base?: string; local?: string; store?: string;
+  // compared: the folder's text as the send leaves it in the store (image paths moved), when it differs.
+  // incoming: the store's text as the folder keeps it (the project's image paths), when it differs.
+  compared?: string; incoming?: string;
   image?: {local?: Uint8Array; store?: Uint8Array};
-  merged?: string; conflicts?: number;
+  merged?: string; conflicts?: number; hunks?: Hunk[];
   resolution?: Resolution;
+  // Who changed the store's side, as far as the project's known versions tell.
+  origin?: Origin;
 }
 // remote: the store as read. reference: what the reference becomes, the store as read except for
 // files left marked, which keep theirs.
 export interface UpdatePlan {context: Context; base: Snapshot; remote: Snapshot; reference: Snapshot; rows: UpdateRow[]}
+// choices: per file. hunks: per file, per stretch. known: the project's own versions.
+export interface UpdateOptions {choices?: Record<string, Resolution>; hunks?: Record<string, Record<string, HunkChoice>>; known?: Known}
 const same = (a?: Uint8Array, b?: Uint8Array) => a === b || !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]);
 const plain = (text?: string) => text?.replace(/\r\n?/g, '\n');
-// sent: what the extension's own sends left in the store, per path (the send records). A store
-// holding one of these did not change by someone else: the change is the project's own, so the
-// reference for that file is the store's text. Without it, a reference older than those sends
-// would make every later edit of a sent file look like a conflict.
-export function planUpdate(base: Snapshot, local: Files, localAssets: Assets, reading: Capture, picked: Record<string, Resolution> = {}, sent: Record<string, string[]> = {}): UpdatePlan {
+// The project's texts as the send leaves them in the store (new images moved to assets/images, the
+// references that follow them rewritten), and the way back, for a store text written in the folder.
+// A difference only in those paths is not a change of anyone (P8).
+export function storeForms(local: Files, localAssets: Assets = {}, baseAssets: Assets = {}, remoteAssets: Assets = {}): {forward: Files; toFolder: (text: string) => string} {
+  const moves = imageMoves(localAssets, baseAssets, remoteAssets), back = new Map([...moves].map(([from, to]) => [to, from]));
+  return {forward: rewriteImageReferences(local, moves).files, toFolder: text => back.size ? rewriteImageReferences({text}, back).files.text : text};
+}
+// One file, three versions: the stretch-by-stretch merge, in the store's form.
+export function fileMerge(base: string | undefined, compared: string, store: string, choices: Record<string, HunkChoice> = {}): {text: string; conflicts: number; hunks: Hunk[]} {
+  const merge = mergeParts(base ?? '', compared, store);
+  return {...renderMerge(merge, choices), hunks: hunksOf(merge)};
+}
+export function planUpdate(base: Snapshot, local: Files, localAssets: Assets, reading: Capture, options: UpdateOptions = {}): UpdatePlan {
   if (reading.partial) throw new Error('A atualização precisa da leitura completa da loja. Leia a loja de novo.');
   assertContext(base.context, reading.context);
   const remote = safeSnapshot({context: reading.context, capturedAt: reading.capturedAt, files: reading.files, ...(reading.assets && Object.keys(reading.assets).length ? {assets: reading.assets} : {})});
   const baseAssets = base.assets || {}, remoteAssets = remote.assets || {}, rows: UpdateRow[] = [];
+  const {forward, toFolder} = storeForms(local, localAssets, baseAssets, remoteAssets), picked = options.choices || {};
   for (const path of new Set([...Object.keys(base.files), ...Object.keys(local), ...Object.keys(remote.files)])) {
-    const l = local[path], r = remote.files[path], pr = plain(r), own = pr !== undefined && pr !== plain(base.files[path]) && (sent[path] || []).some(text => plain(text) === pr);
-    const b = own ? r : base.files[path], pb = plain(b), pl = plain(l);
-    const row: UpdateRow = {path, kind: 'same', ...(b !== undefined ? {base: b} : {}), ...(l !== undefined ? {local: l} : {}), ...(r !== undefined ? {store: r} : {})};
+    const l = local[path], lf = forward[path], r = remote.files[path], incoming = r === undefined ? undefined : toFolder(r);
+    // A store text the project itself had: the change is the project's own (P1-P3).
+    const {base: b, origin} = knownBase(options.known, path, base.files[path], r, incoming !== undefined && incoming !== r ? [incoming] : []);
+    const [pb, pl, pr] = [plain(b), plain(lf), plain(r)];
+    const row: UpdateRow = {path, kind: 'same', ...(b !== undefined ? {base: b} : {}), ...(l !== undefined ? {local: l} : {}), ...(r !== undefined ? {store: r} : {}), ...(lf !== undefined && lf !== l ? {compared: lf} : {}), ...(incoming !== undefined && incoming !== r ? {incoming} : {}), ...(origin ? {origin} : {})};
     if (pl === pr) row.kind = 'same';
     else if (l !== undefined && hasConflictMarks(l)) row.kind = 'marked';
     else if (pl === pb) row.kind = r === undefined ? 'removed' : 'store';
     else if (pr === pb) row.kind = 'mine';
     else if (r === undefined) row.kind = 'removed-edited';
     else if (l === undefined) row.kind = 'deleted-changed';
-    else {const merge = mergeTexts(b ?? '', l, r); row.merged = merge.text; row.conflicts = merge.conflicts; row.kind = merge.conflicts ? 'conflict' : 'merged';}
-    const options = CHOICES[row.kind];
-    if (options) row.resolution = options.includes(picked[path]) ? picked[path] : options[0];
+    else {
+      const merge = fileMerge(b, lf!, r, options.hunks?.[path]);
+      Object.assign(row, {merged: toFolder(merge.text), conflicts: merge.conflicts, ...(merge.hunks.length ? {hunks: merge.hunks} : {}), kind: merge.hunks.length ? 'conflict' : 'merged'});
+    }
+    const choices = CHOICES[row.kind];
+    if (choices) row.resolution = choices.includes(picked[path]) ? picked[path] : choices[0];
     rows.push(row);
   }
   // Images serve the local preview: the store's comes in where the folder kept the old one, and an
@@ -71,12 +96,13 @@ export function planUpdate(base: Snapshot, local: Files, localAssets: Assets, re
 export type FolderChange = {write: string | Uint8Array} | {remove: true} | undefined;
 export function folderChange(row: UpdateRow): FolderChange {
   if (row.image) return row.kind === 'store' ? {write: row.image.store!} : row.kind === 'removed' ? {remove: true} : undefined;
-  if (row.kind === 'store') return {write: row.store!};
+  const incoming = row.incoming ?? row.store!;
+  if (row.kind === 'store') return {write: incoming};
   if (row.kind === 'removed') return {remove: true};
   if (row.kind === 'merged') return {write: row.merged!};
-  if (row.kind === 'conflict') return row.resolution === 'marks' ? {write: row.merged!} : row.resolution === 'store' ? {write: row.store!} : undefined;
+  if (row.kind === 'conflict') return row.resolution === 'marks' ? {write: row.merged!} : row.resolution === 'store' ? {write: incoming} : undefined;
   if (row.kind === 'removed-edited') return row.resolution === 'store' ? {remove: true} : undefined;
-  if (row.kind === 'deleted-changed') return row.resolution === 'store' ? {write: row.store!} : undefined;
+  if (row.kind === 'deleted-changed') return row.resolution === 'store' ? {write: incoming} : undefined;
   return undefined;
 }
 export interface UpdateResult {written: string[]; removed: string[]; marked: string[]; versions: Version[]; manifest: Manifest}
@@ -110,9 +136,20 @@ export async function applyUpdate(folder: ProjectFolder, plan: UpdatePlan, proje
     const path = `tema/${row.path}`;
     await folder.write(path, typeof change.write === 'string' ? encodeLike(change.write, await folder.read(path)) : change.write);
     written.push(row.path);
-    if (row.kind === 'conflict' && row.resolution === 'marks') marked.push(row.path);
+    if (row.kind === 'conflict' && row.resolution === 'marks' && row.conflicts) marked.push(row.path);
     progress?.(++done, changes.length);
   }
   const manifest = await writeReference(folder, project.baseline, plan.reference, project.manifest, 'update');
   return {written, removed, marked, versions, manifest};
+}
+// Merges one file into the folder, for a send of chosen files (P5): only that file is read, written
+// and moved forward. The folder's text must still be as compared; the folder as it is goes into a
+// version first; the reference of that path becomes the store's text the merge used.
+export async function applyJoin(folder: ProjectFolder, project: Project, path: string, expected: string, text: string, store: string): Promise<Version> {
+  if (!project.manifest) throw new Error('A pasta não tem o manifesto da exportação (.yampi-sync/manifest.json).');
+  if (project.local[path] !== expected) throw new Error(`tema/${path} mudou depois da comparação. Nada foi gravado: compare de novo.`);
+  const {version} = await saveVersion(folder, {kind: 'antes-de-juntar', origin: 'pasta', label: `Antes de juntar ${path} com a loja`, context: project.baseline.context, files: project.local});
+  await folder.write(`tema/${path}`, encodeLike(text, await folder.read(`tema/${path}`)));
+  await writeReference(folder, project.baseline, {...project.baseline, files: {...project.baseline.files, [path]: store}}, project.manifest, 'update');
+  return version;
 }

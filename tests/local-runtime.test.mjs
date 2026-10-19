@@ -105,7 +105,7 @@ describe('ambiente local portátil', () => {
     }
     expect(blocks.every(block => block.comments.length > 0 && block.rules.length > 0)).toBe(true);
     expect(kit['.gitignore']).toContain('# Em um repositório PRIVADO'); expect(kit['README.md']).toContain('Como editar local.data.json');
-    expect(Object.keys(kit).filter(p => p.startsWith('.yampi-sync/tools/')).sort()).toEqual(['contract.mjs', 'dependencies.mjs', 'dev.mjs', 'engine.mjs', 'integrity.mjs', 'pack.mjs', 'parity.mjs', 'platform-browser.mjs', 'platform.mjs', 'preview.mjs', 'twig.mjs'].map(n => '.yampi-sync/tools/' + n));
+    expect(Object.keys(kit).filter(p => p.startsWith('.yampi-sync/tools/')).sort()).toEqual(['contract.mjs', 'dependencies.mjs', 'dev.mjs', 'engine.mjs', 'integrity.mjs', 'known.mjs', 'pack.mjs', 'parity.mjs', 'platform-browser.mjs', 'platform.mjs', 'preview.mjs', 'twig.mjs'].map(n => '.yampi-sync/tools/' + n));
   });
   test('compila Sass, parciais e imports relativos; $assets aponta para os ícones da plataforma', () => {
     expect(compileStyles({'assets/styles/main.scss': '@use "colors"; body { color: colors.$brand; }', 'assets/styles/_colors.scss': '$brand: #123456;'}, ['assets/styles/main.scss'])).toContain('#123456');

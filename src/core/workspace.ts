@@ -1,16 +1,20 @@
 import {sameContext, type Assets, type Context, type Files, type Journal, type Plan, type Snapshot} from './model';
 import type {Capture} from './workflow';
 import type {Resolution} from './update';
+import type {Known} from './known';
+import type {HunkChoice} from './merge';
 // What the panel keeps between openings, per store: the reference export, the project loaded
 // from the computer, the last reading of the store and the user's choices. Closing the panel,
 // switching tabs or restarting the browser never sends the user back to the first step.
 // images: new images go with this send. Off by default and again after every comparison: the user
 // turns it on, after a warning, for the send at hand.
-export interface Review {reading?: Capture; overrides: string[]; selected?: string[]; discarded?: string[]; images?: boolean}
+// hunks: per file, per stretch, the choices of a merge with the store made for this send.
+export interface Review {reading?: Capture; overrides: string[]; selected?: string[]; discarded?: string[]; images?: boolean; hunks?: Record<string, Record<string, HunkChoice>>}
 // An update of the project folder from the store: the full reading of the store and the user's
 // choice for each file the update cannot decide alone.
-export interface Update {reading?: Capture; choices: Record<string, Resolution>}
-export interface ProjectSource {local: Files; localAssets: Assets; name: string; kind: 'folder' | 'zip' | 'demo'; loadedAt: string}
+export interface Update {reading?: Capture; choices: Record<string, Resolution>; hunks?: Record<string, Record<string, HunkChoice>>}
+// known: the project's own versions read with it (Git list and send receipts).
+export interface ProjectSource {local: Files; localAssets: Assets; name: string; kind: 'folder' | 'zip' | 'demo'; loadedAt: string; known?: Known}
 // journals: the sends that moved the reference forward since the export.
 export interface Lineage {exportedAt: string; journals: string[]; advancedAt?: string}
 export interface Workspace {

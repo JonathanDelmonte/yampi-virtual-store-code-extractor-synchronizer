@@ -2,10 +2,12 @@ import {assertContext, safeSnapshot, validatePaths, writable, sameIgnoringWhites
 import {dependencyReport, resolvedReferences} from '../../local-runtime/dependencies.mjs';
 import {COMPONENTS_FILE} from '../../local-runtime/contract.mjs';
 import {hasConflictMarks} from './merge';
+import {knownBase, type Known} from './known';
 // assumed: store paths whose content was not read (taken as exported). inventory: every path the
 // store lists, which decides existing folders and dependencies when the remote snapshot is partial.
 // uploads: new images go to the store; off, they stay in the project and texts using them wait.
-export interface PlanOptions {overrides?: Iterable<string>; assumed?: Iterable<string>; inventory?: Iterable<string>; uploads?: boolean}
+// known: the project's own versions; a store text among them is the project's own change.
+export interface PlanOptions {overrides?: Iterable<string>; assumed?: Iterable<string>; inventory?: Iterable<string>; uploads?: boolean; known?: Known}
 export const IMAGES_OFF = 'Imagem nova, fora do envio: ligue “Enviar imagens novas” na revisão ou envie pela Yampi.';
 export const MARKED = 'Ainda tem marcações de conflito de uma atualização (<<<<<<< e >>>>>>>). Resolva no editor de código e compare de novo.';
 const equalBytes = (a?: Uint8Array, b?: Uint8Array) => !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i]);
@@ -61,6 +63,7 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
   const baseAssets = base.assets || {}, remoteAssets = remote.assets || {};
   const moves = imageMoves(localAssets, baseAssets, remoteAssets);
   const {files: texts, rewritten, leftovers} = rewriteImageReferences(local, moves);
+  const back = new Map([...moves].map(([from, to]) => [to, from]));
   const storeAssets: Assets = Object.create(null), source = new Map<string, string>();
   for (const [path, bytes] of Object.entries(localAssets)) {const target = moves.get(path) || path; storeAssets[target] = bytes; if (target !== path) source.set(target, path);}
   // Yampi cannot create folders: a new file needs a folder that already holds something.
@@ -88,7 +91,11 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
       else {status = 'unsupported'; reason = 'A Yampi não substitui uma imagem existente. Salve a nova versão com outro nome no projeto.';}
       return {path, status, image: {base: b, local: l, remote: r}, ...(source.has(path) ? {source: source.get(path)} : {}), ...(reason ? {reason} : {}), ...(assumed.has(path) ? {assumed: true} : {})};
     }
-    const b = base.files[path], l = texts[path], r = remote.files[path];
+    const l = texts[path], r = remote.files[path];
+    // A store text the project itself had (Git list, receipts, sends) is its own change: that text
+    // is the reference. The project keeps image paths in folders; the store, flattened ones.
+    const variant = r !== undefined && back.size ? rewriteImageReferences({r}, back).files.r : undefined;
+    const {base: b, origin} = l !== undefined && r !== undefined && l !== r ? knownBase(options.known, path, base.files[path], r, variant !== undefined && variant !== r ? [variant] : []) : {base: base.files[path], origin: undefined};
     let status: PlanRow['status'], reason: string | undefined, override = false;
     const resolve = (): PlanRow['status'] => writable(path) && overrides.has(path) ? (override = true, 'update') : 'conflict';
     if (l === undefined) status = 'missing-local';
@@ -107,7 +114,7 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
     if (path === COMPONENTS_FILE && (status === 'update' || status === 'conflict')) {status = 'unsupported'; reason = 'A Yampi gera este arquivo sozinha, com os componentes que existem na loja. A extensão não o envia.';}
     if (l !== undefined && (status === 'update' || status === 'create') && hasConflictMarks(l)) {status = 'blocked-dependency'; reason = MARKED;}
     if (leftovers[path] && (status === 'update' || status === 'create')) {status = 'blocked-dependency'; reason =`Usa imagens que vão direto para assets/images por um caminho que a extensão não consegue ajustar (${leftovers[path].join(', ')}). Escreva no código o caminho completo, como 'images/pasta/arquivo.jpg'.`;}
-    return {path, status, base: b, local: l, remote: r, ...(rewritten[path] ? {rewritten: rewritten[path]} : {}), ...(override ? {override} : {}), ...(reason ? {reason} : {}), ...(assumed.has(path) ? {assumed: true} : {})};
+    return {path, status, base: b, local: l, remote: r, ...(rewritten[path] ? {rewritten: rewritten[path]} : {}), ...(override ? {override} : {}), ...(reason ? {reason} : {}), ...(assumed.has(path) ? {assumed: true} : {}), ...(origin ? {origin} : {})};
   });
   for (const row of rows) if (row.status === 'update' && sameIgnoringWhitespace(row.local!, row.remote!)) row.whitespaceOnly = true;
   // A sent file must not depend on a file that will not exist in the store.

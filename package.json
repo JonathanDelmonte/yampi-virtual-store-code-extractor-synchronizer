@@ -1,6 +1,6 @@
 {
   "name": "zirtuno-sync-yampi",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "author": {"name": "Zirtuno", "url": "https://www.instagram.com/zirtuno/"},
   "private": true,
   "type": "module",
