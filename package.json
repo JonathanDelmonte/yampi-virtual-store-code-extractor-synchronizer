@@ -1,6 +1,6 @@
 {
   "name": "zirtuno-sync-yampi",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "author": {"name": "Zirtuno", "url": "https://www.instagram.com/zirtuno/"},
   "private": true,
   "type": "module",
@@ -19,7 +19,8 @@
     "audit:performance": "npm run build && node scripts/performance-audit.mjs current",
     "check": "npm run typecheck && npm test && npm run build",
     "package": "npm run check && node scripts/package.mjs",
-    "test:panel": "npm run build && node scripts/panel-e2e.mjs"
+    "test:panel": "npm run build && node scripts/panel-e2e.mjs",
+    "test:direct": "npm run build && node scripts/direct-e2e.mjs"
   },
   "devDependencies": {
     "@codemirror/state": "^6.5.2",

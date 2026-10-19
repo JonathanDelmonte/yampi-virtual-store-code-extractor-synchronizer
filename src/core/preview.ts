@@ -20,7 +20,7 @@ export interface PreviewBundle {
 }
 export interface PreviewLimits {pages: number; resources: number; resourceBytes: number; totalBytes: number; jsonBytes: number; apiRequests: number; apiBytes: number; timeoutMs: number}
 export const PREVIEW_LIMITS: PreviewLimits = {pages: 8, resources: 200, resourceBytes: 2 * 1024 * 1024, totalBytes: 12 * 1024 * 1024, jsonBytes: 2 * 1024 * 1024, apiRequests: 40, apiBytes: 4 * 1024 * 1024, timeoutMs: 15000};
-export const TOOL_VERSION = '0.6.0';
+export const TOOL_VERSION = '0.7.0';
 export function previewLimits(input: Partial<PreviewLimits> = {}): PreviewLimits {
   const output = {...PREVIEW_LIMITS, ...input};
   for (const key of Object.keys(PREVIEW_LIMITS) as (keyof PreviewLimits)[]) if (!Number.isInteger(output[key]) || output[key] < 1 || output[key] > PREVIEW_LIMITS[key]) throw new Error('Limite de prévia inválido: ' + key);

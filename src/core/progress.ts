@@ -13,6 +13,12 @@ export class ProgressTracker {
   // Completed work over time, for the estimate. Old samples leave the window, so a slow
   // start (the first reload of a cold editor) stops weighing on the estimate.
   private samples: {at: number; units: number}[] = [];
+  // The bar never moves back. A phase may learn its size late (the store's file list, the
+  // storefront's images), and the larger total would make the work done look smaller: the bar
+  // then keeps its place, and the width still ahead stands for the work still ahead.
+  private shown = 0;
+  private shownUnits = 0;
+  private anchor = {fraction: 0, units: 0, total: -1};
   constructor(specs: PhaseSpec[], private readonly now: () => number = Date.now) {
     this.phases = specs.map(spec => ({id: spec.id, label: spec.label, weight: spec.weight, done: 0, total: spec.total ?? 0, status: 'pending'}));
     this.started = now();
@@ -35,6 +41,9 @@ export class ProgressTracker {
     phase.total = Math.max(0, total);
     phase.done = Math.min(phase.done, phase.total);
   }
+  // The wording can follow how the work is being done (straight from the server, or through the editor).
+  relabel(id: string, label: string): void {this.phase(id).label = label;}
+  status(id: string): PhaseStatus | undefined {return this.phases.find(p => p.id === id)?.status;}
   start(id: string, total?: number): void {
     const phase = this.phase(id);
     if (total !== undefined) this.total(id, total);
@@ -57,9 +66,13 @@ export class ProgressTracker {
   }
   snapshot(): ProgressSnapshot {
     const total = this.phases.reduce((sum, p) => sum + p.total * p.weight, 0), done = this.units();
+    if (total !== this.anchor.total) this.anchor = {fraction: this.shown, units: Math.min(this.shownUnits, done), total};
+    const ahead = total - this.anchor.units;
+    const fraction = ahead > 0 ? this.anchor.fraction + (1 - this.anchor.fraction) * Math.max(0, done - this.anchor.units) / ahead : total && done >= total ? 1 : this.anchor.fraction;
+    this.shown = Math.min(1, Math.max(this.shown, fraction)); this.shownUnits = done;
     return {
       phases: this.phases.map(({weight: _weight, ...state}) => state),
-      fraction: total ? Math.min(1, done / total) : 0,
+      fraction: this.shown,
       elapsedMs: this.now() - this.started,
       etaMs: this.estimate(total - done)
     };

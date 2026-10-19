@@ -170,5 +170,14 @@ $('external-change').addEventListener('click', () => {
   if (current === path) open(path);
 });
 $('switch-shop').addEventListener('click', () => {$('shop-name').textContent = 'Outra loja de testes';});
+// What the fictitious editor's server answers, for tests that stand in for the Yampi server on the
+// routes the real editor reads. The session's store follows the header, so "Trocar loja fictícia"
+// also switches it. Images answer with the address the editor shows.
+Object.assign(window, {fictitiousServer: (route: string, path?: string) => {
+  const name = $('shop-name').textContent!.trim(), alias = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  if (route === 'merchant') return {name, url: root.querySelector<HTMLAnchorElement>('header a')!.href, alias, can_edit: true};
+  if (route === 'identity') return {alias};
+  return path === undefined ? null : path in files ? files[path] : assetSources[path] ?? null;
+}});
 $('reset').addEventListener('click', () => {sessionStorage.removeItem('fixture-files'); sessionStorage.removeItem('fixture-assets'); location.reload();});
 $('publish').addEventListener('click', () => {sessionStorage.setItem('fixture-publications', String(++publications)); $('test-info').textContent = `Publicações: ${publications}`;});

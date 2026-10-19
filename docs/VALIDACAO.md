@@ -1,5 +1,17 @@
 # Validação
 
+## Leitura direta e barra de progresso na 0.7.0, em 18/10/2026
+
+Node 24.15.0. `npm run check` passou com 278 testes em 18 arquivos. Tudo usa o editor fictício e um servidor fictício que responde nas rotas que o módulo público do editor lê; nenhuma requisição alcançou a Yampi.
+
+- **Servidor** (`tests/direct.test.ts`): somente `GET` com cookies do navegador, sem cache e com `preview=true`; loja identificada por nome e link de prévia; outra loja na sessão para tudo, antes, durante ou no fim; resposta sem os campos só desativa a leitura direta; `\r\n` e `\r` viram `\n`; imagem só por `https:` ou `data:`, sem credenciais no endereço e com o tipo conferido; servidor ocupado repetido, sessão expirada e arquivo ausente com o motivo; no máximo 6 pedidos simultâneos; resposta grande dividida entre chamadas.
+- **Cópia** (`tests/direct.test.ts`): um arquivo de cada tipo pelos dois caminhos e o restante em lotes de até 24; JSON pelo editor; diferença na amostra, servidor indisponível ou falha no meio levam à leitura pelo editor e a cópia sai completa; poucos arquivos e comparação parcial não usam o servidor; cancelamento não entrega nada.
+- **Barra** (`tests/progress.test.ts`, `tests/jobs.test.ts`): a barra nunca volta quando uma etapa descobre o tamanho depois (lista de arquivos, imagens da vitrine); depois de listar 40 arquivos ela fica abaixo de 5%, não em 18%; **Listar os arquivos** aparece em andamento; a etapa de leitura troca de rótulo conforme o caminho.
+- **Chromium** (`npm run test:e2e`): o servidor fictício devolve os textos com `\r\n`. O download leu 5 arquivos pelo editor e 10 pelo servidor, no máximo 5 simultâneos, sem pedido recusado; o ZIP saiu igual, sem `\r`, e as etapas mostraram "Leitura direta conferida com o editor". Envio, restauração e isolamento de loja continuaram aprovados.
+- **Tempo** (`npm run test:direct`): 121 arquivos fictícios, 450 ms para abrir cada um no editor e 120 ms por pedido ao servidor. Pelo editor, 95,7 s; com a leitura direta, 9,8 s (4 arquivos pelo editor, 121 pedidos, até 6 simultâneos). Os arquivos do tema no ZIP foram idênticos byte a byte. Relatório local em `.cache/direct-benchmark.json`.
+
+Sem validação real: o endereço, as respostas e a identificação foram lidos no módulo público do editor (`web-component-550f3324.mjs`) em 18/10/2026, sem executá-lo; o módulo não integra o repositório.
+
 ## Revisão da interface, em 18/10/2026
 
 Node 24.15.0. `npm run check` passou com 258 testes em 17 arquivos. A revisão recupera as abas no topo, o estado de conexão por escrito, as ações junto do conteúdo e as orientações de download e envio, mantendo o motor da 0.6.0. Histórico, backups e recuperação ficam somente no menu **⋯**.

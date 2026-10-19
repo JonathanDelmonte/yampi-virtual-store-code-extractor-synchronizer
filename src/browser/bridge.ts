@@ -2,8 +2,10 @@ import {sanitizeRaw} from '../core/preview';
 import type {EditorView} from '@codemirror/view';
 import {editorView, readDocument} from './editor-document';
 import {assertContext, validatePath, validatePaths, validateImage, imagePath, writable, creatableName, uploadablePath, imageType, dataUrlBytes, MAX_FILE_BYTES, type Context} from '../core/model';
-export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write' | 'create' | 'upload' | 'links'; context?: Context; path?: string; expected?: string; content?: string}
-export const version = '0.6.0';
+import {openSession, readFiles, YAMPI_SERVER, type Server} from './server-read';
+// directOpen/directRead: copies straight from the editor's own server (see server-read.ts).
+export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write' | 'create' | 'upload' | 'links' | 'directOpen' | 'directRead'; context?: Context; path?: string; paths?: string[]; store?: string; expected?: string; content?: string}
+export const version = '0.7.0';
 type Reply = {ok: true; value: unknown} | {ok: false; error: string};
 const clean = (e: Element | null) => e?.textContent?.trim() || '';
 type EditorRoot = ShadowRoot | HTMLElement;
@@ -219,6 +221,12 @@ async function downloadImage(url: URL): Promise<Uint8Array> {
   for (const chunk of chunks) {bytes.set(chunk, offset); offset += chunk.length;}
   return bytes;
 }
+// Only the real editor talks to the Yampi server; the fictitious one reaches it only when a test
+// answers in its place.
+function yampiServer(): Server {
+  if (location.origin !== 'https://app.yampi.com.br') throw new Error('Leitura direta disponível só no editor da Yampi.');
+  return {base: YAMPI_SERVER, fetch: (url, init) => fetch(url, init)};
+}
 async function readImage(path: string, context: Context): Promise<string> {
   const source = visibleImage().src;
   const url = new URL(source, location.href);
@@ -354,6 +362,14 @@ export async function command(input: Command): Promise<Reply> {
       return {ok: true, value: {themeConfig: sanitizeRaw({themeConfig: config}, 'editor').raw.themeConfig}};
     }
     if (input.op === 'inventory') return {ok: true, value: await completeInventory(context)};
+    if (input.op === 'directOpen') return {ok: true, value: {store: await openSession(yampiServer(), context)}};
+    if (input.op === 'directRead') {
+      if (!Array.isArray(input.paths) || !input.paths.length || input.paths.length > 64 || typeof input.store !== 'string') throw new Error('Comando inválido.');
+      validatePaths(input.paths);
+      const value = await readFiles(yampiServer(), input.paths, input.store, downloadImage, location.href);
+      guard(context); // The editor still shows the same store.
+      return {ok: true, value};
+    }
     if (!input.path) throw new Error('Arquivo não informado.');
     // The full tree is listed first, so the absence check sees every folder.
     if (input.op === 'create') {await completeInventory(context); await createFile(input.path, context); return {ok: true, value: {created: true}};}

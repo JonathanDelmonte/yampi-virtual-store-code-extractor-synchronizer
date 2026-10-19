@@ -7,7 +7,7 @@ import type {JobRequest, JobState} from '../jobs/types';
 // job: the background operation that holds the lock. While it runs, the panel only watches it,
 // and closing or reopening the panel never releases the editor.
 type Session = {tabId: number; editorUrl: string; documentId?: string; locked: boolean; access?: 'read' | 'write'; previewOrigins?: string[]; job?: string};
-const BRIDGE_VERSION = '0.6.0';
+const BRIDGE_VERSION = '0.7.0';
 const RUNNER = 'runner.html';
 const inFlight = new Map<string, Set<Promise<unknown>>>();
 const ports = new Map<string, Set<Promise<string>>>();
@@ -121,7 +121,7 @@ async function execute(token: string, session: Session, message: {action?: strin
   const previewRequest = message.preview;
   const previewAction = ['preview-allow', 'preview-fetch'].includes(message.action || '');
   const cmd = previewAction ? {op: 'context' as const, context: validateContext(previewRequest?.context)} : message.command as Command;
-  if (!cmd || !['context', 'inventory', 'read', 'readAsset', 'visual', 'write', 'create', 'upload', 'links'].includes(cmd.op)) throw new Error('Comando não permitido.');
+  if (!cmd || !['context', 'inventory', 'read', 'readAsset', 'visual', 'write', 'create', 'upload', 'links', 'directOpen', 'directRead'].includes(cmd.op)) throw new Error('Comando não permitido.');
   if (previewAction && session.access !== 'read') throw new Error('Captura visual exige uma operação de leitura.');
   if (['write', 'create', 'upload'].includes(cmd.op) && session.access !== 'write') throw new Error('Esta operação permite apenas copiar. Gravação bloqueada.');
   const reply = await bridge(session.tabId, cmd);

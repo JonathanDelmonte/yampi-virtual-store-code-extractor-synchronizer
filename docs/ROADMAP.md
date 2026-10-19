@@ -8,12 +8,13 @@
 2. Exportar uma loja autorizada com a 0.4.0, conferir inventário, hashes, `preview/report.json > contract` e `.cache/yampi-check.json`. Confirmar em Chromium as seções, fontes, ícones e imagens das páginas capturadas.
 3. Usar uma loja de teste ou um tema em rascunho expressamente escolhido pelo usuário para validar salvar, histórico de versões, recarregamento e restauração. Nunca publicar automaticamente.
 4. Testar falha de conexão, interrupção durante save e troca de tema; fortalecer a identificação oficial de loja/tema se a interface fornecer esse dado.
+5. Baixar uma loja autorizada com a 0.7.0: conferir nas etapas "Leitura direta conferida com o editor" e comparar os hashes do manifesto com uma cópia lida só pelo editor.
 
 ## Pendências da análise da 0.3.4
 
 - **Plataforma a confirmar:** precedência entre `window.data.config` e `themeConfig.sections`; formato das URLs do thumbor; demais rotas da API pública (`flags`, `placeholders/*`, `count`, recomendações) e seus formatos; regras do minificador além das normalizadas; se a plataforma carrega o CSS da biblioteca Splide; regeneração de `elements/scripts/components.twig` ao criar componentes; URL de produção gerada por `assets_url`/`asset()`.
 - **Rascunho:** capturar o contexto pela prévia do editor ("Ver prévia"), para associar o rascunho exportado sem depender da vitrine publicada.
-- **Editor:** ler pelo mesmo endpoint de leitura do editor, somente com GET, registrando identificador remoto e versão por arquivo; fechar as abas abertas pela extensão e restaurar as do usuário. Ambos exigem validação no editor real.
+- **Editor:** a leitura pelo mesmo endereço do editor, somente com GET, foi feita para a cópia na 0.7.0 e aguarda validação numa loja real. Faltam registrar identificador remoto e versão por arquivo e fechar as abas abertas pela extensão, restaurando as do usuário. Ambos exigem validação no editor real.
 - **Logs:** exportar `logs/` como somente leitura em `.yampi-sync/logs/`, nunca enviado de volta. Hoje o manifesto registra a pasta como ignorada.
 
 ## Arquivos novos e imagens do tema

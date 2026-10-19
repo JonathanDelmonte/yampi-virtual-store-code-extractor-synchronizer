@@ -10,9 +10,12 @@ import {nativePanelDriver} from './side-panel-test.mjs';
 import {build} from 'esbuild';
 import {pathToFileURL} from 'node:url';
 import {extensionFiles} from './distribution.mjs';
+import {fictitiousServer, SERVER_ORIGIN} from './fictitious-server.mjs';
 const repository = path.resolve(import.meta.dirname, '..');
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'yampi-e2e-ficticio-'));
 let browser, localServer, panel,localOrigin;
+// The Yampi server answered by the fictitious editor's state, with Windows line endings and a little latency.
+const server = fictitiousServer({latency: 20});
 // Screenshots show the resting screen: entry fades finish first; endless pulses are left running.
 const settled = page => page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))));
 async function command(cmd, args, cwd) {
@@ -50,6 +53,7 @@ try {
     if (url.origin === 'https://app.yampi.com.br' && /^\/store\/code-editor\/?$/.test(url.pathname)) return route.fulfill({contentType: 'text/html', body: html});
     if (url.origin === 'https://app.yampi.com.br' && ['/store/code-editor/fixture.js', '/store/fixture.js'].includes(url.pathname)) return route.fulfill({contentType: 'text/javascript', body: fixtureJs});
     if (url.origin === localOrigin) return route.continue();
+    if (url.origin === SERVER_ORIGIN) return server.handle(route);
     return route.abort();
   });
   const editor = await browser.newPage(); await editor.goto('https://app.yampi.com.br/');
@@ -118,9 +122,19 @@ try {
   assert.equal(Object.keys(entries).filter(p => p.startsWith('tema/')).length, 10);
   assert.ok(new TextDecoder().decode(entries['tema/templates/long.twig']).includes('Linha 2000'));
   assert.ok(entries['tema/assets/images/example.png'].length > 0);
+  // The editor shows every text with \n; the server's \r\n must not reach the copy.
+  const exportedTexts = Object.entries(entries).filter(([p]) => p.startsWith('tema/') && !p.endsWith('.png'));
+  assert.ok(exportedTexts.length === 9 && exportedTexts.every(([, bytes]) => !new TextDecoder().decode(bytes).includes('\r')));
   assert.equal(await editor.evaluate(() => window.fictitiousUnchanged()), true);
   assert.deepEqual(await editor.evaluate(() => window.fictitiousOperations), {dispatch: 0, save: 0, forbidden: 0, add: 0});
-  assert.ok((await worker.evaluate(() => globalThis.testRequests)).every(op => ['context', 'inventory', 'read', 'readAsset', 'lock:read'].includes(op)));
+  const exportOps = await worker.evaluate(() => globalThis.testRequests);
+  assert.ok(exportOps.every(op => ['context', 'inventory', 'read', 'readAsset', 'directOpen', 'directRead', 'lock:read'].includes(op)), exportOps.join(', '));
+  // One file of each kind through the editor and the server, to compare; the rest only from the server.
+  const editorReads = exportOps.filter(op => ['read', 'readAsset'].includes(op)).length;
+  assert.ok(editorReads >= 3 && editorReads < 10 && server.counts.file === 10 && server.counts.merchant === 2 && server.counts.identity >= 4 && server.counts.refused === 0, JSON.stringify({editorReads, ...server.counts}));
+  assert.ok(server.peak() <= 6, `Pedidos simultâneos: ${server.peak()}`);
+  assert.match(await panel.locator('#event-list').textContent(), /Leitura direta conferida com o editor em [0-9]+ tipos de arquivo/);
+  console.log(`E2E: leitura direta conferida com o editor: ${editorReads} arquivos pelo editor, ${server.counts.file} pedidos ao servidor fictício, no máximo ${server.peak()} simultâneos; quebras CRLF do servidor chegaram como LF.`);
   assert.ok(await editor.evaluate(() => !!document.querySelector('yampi-code-editor').shadowRoot.querySelector('.cm-content').cmView), 'O fluxo principal deve usar a associação antiga do CodeMirror.');
   console.log('E2E: confirmação exigida; cópia sem edições, saves ou controles destrutivos no CodeMirror 6.36.2.');
   console.log('E2E: Shadow DOM, títulos alterados e controles externos ignorados.');

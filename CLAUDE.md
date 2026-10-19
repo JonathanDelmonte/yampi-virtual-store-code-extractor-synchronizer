@@ -17,4 +17,6 @@ Uma linha por armadilha; o detalhe fica no documento indicado.
 - Downloads do worker não aparecem para o CDP; o e2e os espera por `chrome.downloads.search`. → `scripts/side-panel-test.mjs`, `waitExtensionDownload`.
 - A única escrita fora da loja troca um arquivo existente de `tema/` que ainda está como na comparação, por clique do usuário; não crie arquivos nem pastas no projeto. → `docs/SPEC.md`, "Escrita na pasta do projeto".
 - `job:<aba>` divide o `storage.session` com as sessões: quem lista sessões ignora chaves com `:`. → `src/browser/background.ts`, `sessions`.
+- A cópia lê pelo servidor do editor só os tipos cuja amostra saiu igual ao CodeMirror; o editor reformata JSON ao mostrar, então JSON fica com a leitura pelo editor. → `docs/SPEC.md`, "Leitura direta".
+- Trocar de loja em outra aba pode mudar a loja da sessão sem mudar o cabeçalho do editor aberto; o próprio editor detecta isso por `merchant-identity` (lido no módulo público, não validado numa loja real). → `docs/SPEC.md`, "Leitura direta".
 - Com **Efeitos de transparência** desligado no Windows, `prefers-reduced-transparency` vale `reduce` e as barras ficam foscas, sem refração: emule o valor para conferir o vidro. → `docs/INTERFACE.md`, "Material".

@@ -122,6 +122,26 @@ describe('operações em segundo plano', () => {
     const result = await runJob({id: 'x', kind: 'compare', paths: [home]}, context, h, control());
     expect(result.status).toBe('failed'); expect(editor.reads).toEqual([]); expect(editor.refreshes).toBe(0);
   });
+  test('download: a barra só avança, listar não vale 18% e o modo de leitura aparece nas etapas', async () => {
+    const files: Record<string, string> = Object.fromEntries(Array.from({length: 40}, (_, i) => [`sections/home/s${i}.twig`, `seção ${i}`]));
+    const editor = Object.assign(new FakeEditor(files), {direct: {
+      open: async () => 'loja-ficticia',
+      read: async (paths: string[]) => ({files: Object.fromEntries(paths.map(path => [path, files[path]])), assets: {}, rest: []})
+    }});
+    const {host: h, reports, downloads} = host(editor);
+    const final = await runJob({id: 'export-1', kind: 'export'}, context, h, control());
+    expect(final.status).toBe('completed'); expect(downloads).toHaveLength(1);
+    const fractions = reports.map(r => r.fraction);
+    expect(fractions.every((value, i) => i === 0 || value >= fractions[i - 1])).toBe(true);
+    // Before the first read, only the listing counts: about 2 of 51 units, never 18%.
+    const listed = reports.filter(r => r.phases.find(p => p.id === 'read')!.done === 0);
+    expect(listed.length).toBeGreaterThan(0);
+    expect(Math.max(...listed.map(r => r.fraction))).toBeLessThan(0.05);
+    expect(reports.some(r => r.phases.find(p => p.id === 'inventory')!.status === 'active')).toBe(true);
+    expect(reports.some(r => r.phases.find(p => p.id === 'read')!.label === 'Ler os arquivos direto da Yampi')).toBe(true);
+    expect(final.events.some(e => e.tone === 'ok' && e.text.startsWith('Leitura direta conferida com o editor em 1 tipo de arquivo'))).toBe(true);
+    expect(editor.reads).toEqual(['sections/home/s0.twig']);
+  });
 });
 describe('referência da pasta do projeto', () => {
   test('a pasta exportada usa a referência avançada pelos envios da mesma exportação', () => {

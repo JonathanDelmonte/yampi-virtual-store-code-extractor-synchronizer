@@ -61,6 +61,33 @@ describe('progresso ponderado e tempo restante', () => {
     for (let i = 0; i < 9; i++) {now += 1000; tracker.advance('save');}
     expect(tracker.snapshot().etaMs).toBe(90 * 1000);
   });
+  test('a barra nunca volta quando uma etapa descobre o próprio tamanho depois', () => {
+    // The export's steps: the file list arrives after "Listar", the storefront's images after "Capturar".
+    const tracker = new ProgressTracker([{id: 'inventory', label: 'Listar', weight: 2, total: 1}, {id: 'read', label: 'Ler', weight: 1}, {id: 'preview', label: 'Vitrine', weight: 0.6}, {id: 'zip', label: 'ZIP', weight: 6, total: 1}]);
+    const seen: number[] = [], look = () => {seen.push(tracker.snapshot().fraction);};
+    tracker.set('inventory', 1); look();
+    tracker.total('read', 264); look();
+    for (let i = 1; i <= 264; i++) {tracker.set('read', i); if (i % 20 === 0) look();}
+    tracker.start('preview', 80); look();
+    for (let i = 1; i <= 80; i++) {tracker.set('preview', i); look();}
+    tracker.finish('preview'); tracker.start('zip'); look();
+    tracker.complete(); look();
+    expect(seen.every((value, i) => i === 0 || value >= seen[i - 1])).toBe(true);
+    expect(seen.at(-1)).toBe(1);
+    // The rest of the bar stands for the rest of the work: it keeps moving, never stalls.
+    expect(seen[2]).toBeGreaterThan(seen[1]);
+  });
+  test('o tamanho conhecido junto com a lista evita os 18% falsos', () => {
+    const phases = [{id: 'inventory', label: 'Listar', weight: 2, total: 1}, {id: 'read', label: 'Ler', weight: 1}, {id: 'zip', label: 'ZIP', weight: 6, total: 1}, {id: 'download', label: 'Baixar', weight: 3, total: 1}];
+    const late = new ProgressTracker(phases), early = new ProgressTracker(phases);
+    late.set('inventory', 1);
+    expect(late.snapshot().fraction).toBeCloseTo(2 / 11, 3);
+    early.set('inventory', 1); early.total('read', 264);
+    expect(early.snapshot().fraction).toBeCloseTo(2 / 275, 3);
+    early.relabel('read', 'Ler direto da Yampi');
+    expect(early.snapshot().phases[1].label).toBe('Ler direto da Yampi');
+    expect(early.status('read')).toBe('pending'); expect(early.status('nada')).toBeUndefined();
+  });
   test('etapa sem itens aparece como pulada e o fim completa tudo', () => {
     const tracker = new ProgressTracker([{id: 'create', label: 'Criando', weight: 3}, {id: 'save', label: 'Salvando', weight: 1, total: 2}]);
     tracker.skip('create'); tracker.set('save', 1); tracker.complete();

@@ -42,6 +42,16 @@ Um conflito em texto pode ser resolvido pelo usuário, arquivo a arquivo, com **
 
 A comparação abre na loja só os caminhos que o projeto mudou e os textos que eles usam: textos diferentes do original, crus ou depois do ajuste das referências de imagem; imagens com bytes diferentes, com os dois nomes possíveis de uma imagem que muda de pasta; e os textos incluídos, importados ou usados como componente por esses textos, porque um texto que só a loja mudou continua bloqueando quem o usa. Os demais caminhos são listados, não abertos, e entram como iguais ao original (`assumed`): o projeto não os mudou, então nunca são enviados, e a listagem ainda mostra o que a loja tem a mais ou a menos. Alt+clique em **Comparar de novo** lê o tema inteiro.
 
+### Leitura direta
+
+Desde a 0.7.0, a cópia e a comparação leem o conteúdo pelo servidor do próprio editor, a partir da página do editor: `GET https://bart.yampi.com.br/v1/merchant/file/get?path_file=<caminho>&preview=true`, o mesmo pedido que o editor faz ao abrir um arquivo (módulo público do editor, lido em 18/10/2026), com os cookies que o navegador envia a esse servidor. A extensão não lê, guarda nem envia cookie ou token. A árvore do editor continua dizendo quais arquivos existem. São até 6 pedidos de cada vez e até 24 caminhos por chamada. `tests/direct.test.ts`, `scripts/e2e.mjs` e `scripts/direct-e2e.mjs` verificam as regras com um servidor fictício.
+
+- **Mesma loja.** Antes de começar, nome e link de prévia informados pelo servidor (`/merchant/theme/data-merchant-theme`) têm de ser os do cabeçalho. A loja da sessão (`/merchant/theme/merchant-identity`, a consulta que o editor faz ao voltar à aba) é conferida antes e depois de cada chamada e no fim. Se mudar, a cópia para sem entregar nada: o editor também passaria a abrir os arquivos da outra loja.
+- **Igual ao editor.** O texto chega como o CodeMirror o guarda: `\r\n` e `\r` viram `\n`. JSON, que o editor reformata ao mostrar, e extensões de imagem fora de `assets/` são lidos pelo editor. Para imagens, o servidor devolve o endereço que o editor exibe; valem as regras da leitura pela prévia: `https:` ou `data:` decodificado, tipo conferido pelos bytes.
+- **Amostra antes do restante.** O primeiro arquivo de cada tipo (cada extensão de texto, e imagem) é lido pelos dois caminhos. Só os tipos idênticos seguem pelo servidor; uma diferença manda tudo para a leitura pelo editor.
+- **Recuo em vez de parada.** Servidor indisponível, resposta inesperada, sessão expirada ou falha no meio devolvem o restante à leitura pelo editor, com o motivo nas etapas. Só a troca de loja interrompe.
+- **Só leitura de cópia.** Com menos de 8 arquivos elegíveis, tudo vai pelo editor. Envio, preflight, criação, conferência após recarregar e restauração continuam lendo pelo editor.
+
 Depois de um envio, a referência da comparação avança: cada texto conferido e cada imagem enviada passam a ser o original. O que já foi enviado não volta como conflito, e o registro do envio fica ligado à exportação.
 
 ## Dependências

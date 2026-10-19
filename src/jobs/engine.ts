@@ -85,16 +85,20 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
   const event = (text: string, tone: JobEvent['tone'], path?: string) => {state.events = [{at: Date.now(), text, tone, ...(path ? {path} : {})}, ...state.events].slice(0, 60);};
   const phaseDone = new Map<string, number>();
   const progress = (p: Progress) => {
-    if (!p.step) return;
-    const phase = tracker.snapshot().phases.find(item => item.id === p.step);
-    if (!phase) return;
-    if (phase.status !== 'active') tracker.start(p.step, p.total); else tracker.total(p.step, p.total);
+    const status = p.step && tracker.status(p.step);
+    if (!p.step || !status) return;
+    // A step that starts is shown at once: listing a large tree can take a while.
+    const starting = status !== 'active';
+    if (starting) tracker.start(p.step, p.total); else tracker.total(p.step, p.total);
     const advanced = p.done > (phaseDone.get(p.step) ?? 0);
     tracker.set(p.step, p.done); phaseDone.set(p.step, p.done);
+    // The next step's size enters the bar in the same report that closes this one.
+    if (p.next && tracker.status(p.next.step)) tracker.total(p.next.step, p.next.total);
+    if (p.label) tracker.relabel(p.step, p.label);
     state.detail = p.phase;
     if (p.path) state.path = p.path; else delete state.path;
     if (advanced && p.path && DONE_TEXT[p.step]) event(DONE_TEXT[p.step], 'ok', p.path);
-    report(HEAVY.has(p.step) || p.done === p.total);
+    report(starting || HEAVY.has(p.step) || p.done === p.total);
   };
   const raw = host.adapter ? host.adapter(host.rpc) : new BrowserAdapter(host.rpc);
   const adapter = retryReads(raw, {wait: host.wait, signal: control.signal, onRetry: (error, attempt) => {
@@ -102,6 +106,8 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     report(true);
   }});
   const step = (id: string, detail: string) => {tracker.start(id); state.detail = detail; delete state.path; report(true);};
+  // How the copy reads the files: straight from the Yampi server or through the editor.
+  const notice = (text: string, tone: JobEvent['tone']) => {event(text, tone); report(true);};
   let journal: Journal | undefined, input: SendInput | undefined;
   report(true);
   try {
@@ -147,7 +153,7 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     return {kind: 'send' as const, journalId: value.id, verified: value.verified.length, created: value.created?.length || 0, uploaded: value.uploaded?.length || 0, total: value.selected.length, warnings: value.warnings || []};
   }
   async function exportTheme() {
-    const snapshot = await capture(adapter, {signal: control.signal, progress});
+    const snapshot = await capture(adapter, {signal: control.signal, progress, notice});
     let visual: PreviewBundle;
     if (request.includePreview && host.preview) {
       step('preview', 'Capturando contexto visual público…');
@@ -195,7 +201,7 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     step('prepare', 'Recarregando o editor');
     await adapter.refresh();
     tracker.finish('prepare');
-    const observed = await capture(adapter, {signal: control.signal, progress, ...(request.full ? {} : {only: request.paths || []})});
+    const observed = await capture(adapter, {signal: control.signal, progress, notice, ...(request.full ? {} : {only: request.paths || []})});
     await updateWorkspace(expected, workspace => {
       const review = {reading: observed, overrides: []};
       if (request.scope === 'restore') workspace.restore = {...review, journalId: request.journalId!};

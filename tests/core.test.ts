@@ -268,7 +268,7 @@ describe('captura da árvore inteira', () => {
   });
   test('alteração na árvore durante captura impede exportação incompleta', async () => {
     const adapter = new FakeAdapter({[file]: 'a'});
-    await expect(capture(adapter, {progress: () => {adapter.files['templates/new.twig'] = 'x';}})).rejects.toThrow('árvore');
+    await expect(capture(adapter, {progress: p => {if (p.step === 'read') adapter.files['templates/new.twig'] = 'x';}})).rejects.toThrow('árvore');
   });
   test('cancelamento não entrega snapshot parcial', async () => {
     const adapter = new FakeAdapter({[file]: 'a'}), controller = new AbortController(); controller.abort();

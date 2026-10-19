@@ -123,3 +123,11 @@ A pedido do proprietário, o bloco **Backups e recuperação** saiu das duas aba
 ## 18/10/2026 — ZIP como ação e cabeçalho da loja
 
 O proprietário aprovou a proposta **Importar por ZIP**, com bloco próprio e botão direto, e pediu a atualização da pasta instalada. O ZIP deixa de ser um acordeão igual aos tutoriais. No cabeçalho, um ícone de conexão substitui o ponto e fica separado do texto por 12 px. Nome e estado ocupam uma linha; quando não cabem, o fim do texto fica transparente antes das reticências, e o tooltip mantém o conteúdo completo. A medição acompanha texto, carregamento das fontes e largura do painel. Os testes visuais usam nomes e estados fictícios, incluindo nomes sem espaços e redimensionamento.
+
+## 18/10/2026 — Download direto do servidor e barra que só avança (0.7.0)
+
+Pedido do proprietário ao baixar um tema real de 264 arquivos: a barra saltou para 18% e voltou a zero, e a leitura levava cerca de 0,8 s por arquivo (uns 3 minutos e meio). Perguntou se havia um método mais rápido e profissional.
+
+O salto vinha dos pesos: listar valia 2 de 11 unidades enquanto o número de arquivos era desconhecido, e a leitura somava 264 logo depois. A lentidão vinha de abrir cada arquivo na tela e esperar 320 ms de estabilidade. A Yampi não tem API pública de temas, mas o módulo público do editor mostra que ele abre um arquivo com um `GET` ao próprio servidor, autenticado só pelos cookies, e indexa o tema inteiro em lotes de 10. A 0.7.0 usa o mesmo pedido a partir da página do editor, confere uma amostra de cada tipo com o CodeMirror e a loja da sessão a cada lote, e recua para a leitura pelo editor em qualquer dúvida.
+
+Ainda sem validação real. No primeiro download, conferir nas etapas a mensagem da leitura direta e comparar os hashes do manifesto com uma cópia lida pelo editor.

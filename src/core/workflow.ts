@@ -1,50 +1,126 @@
-import {assertContext, safeFiles, safeSnapshot, imagePath, writable, validatePaths, freshFile, YAMPI_VUE_TEMPLATE, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Assets, type Adapter, type ReadAdapter, type Snapshot, type Progress, type Plan, type PlanRow, type Journal} from './model';
+import {assertContext, safeFiles, safeSnapshot, imagePath, writable, validatePaths, freshFile, YAMPI_VUE_TEMPLATE, MAX_TOTAL_BYTES, MAX_FILE_BYTES, type Assets, type Adapter, type DirectReader, type ReadAdapter, type Snapshot, type Progress, type Plan, type PlanRow, type Journal} from './model';
 import {missingNewTexts, selectionIssues} from './planner';
+import {DIRECT_BATCH, DIRECT_MIN, STORE_CHANGED, directKind, directSamples, storeChanged} from './direct';
 import {COMPONENTS_FILE as COMPONENTS} from '../../local-runtime/contract.mjs';
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 type Hooks = {signal?: AbortSignal; progress?: (p: Progress) => void};
 function check(signal?: AbortSignal) {if (signal?.aborted) throw new Error('Cancelado. Os arquivos já salvos não foram desfeitos.');}
+const reason = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/\.$/, '');
 export interface CaptureHooks extends Hooks {
   // Read only these store paths; the others are listed, not opened. A comparison needs only
   // what the project changed: a file the project leaves as exported is never sent.
   only?: Iterable<string>;
+  // How the files are being read, for the operation's events.
+  notice?: (text: string, tone: 'ok' | 'info' | 'warn') => void;
 }
 export type Capture = Snapshot & {inventory: string[]; partial?: boolean};
+// The editor's tree lists the files. Each one is then read through the editor, as a person
+// opening it would, or, when the adapter offers it, straight from the Yampi server: first one
+// file of each kind both ways, and only the kinds that came back identical go on that way.
 export async function capture(adapter: ReadAdapter, hooks: CaptureHooks = {}): Promise<Capture> {
   const cancelled = () => {if (hooks.signal?.aborted) throw new Error('Cópia cancelada. Nenhum arquivo da loja foi alterado.');};
   cancelled();
   const context = await adapter.context();
+  const listing = 'Listando os arquivos da loja';
+  hooks.progress?.({done: 0, total: 1, path: '', phase: listing, step: 'inventory'});
   const inventory = (await adapter.inventory()).sort();
   validatePaths(inventory);
   if (!inventory.length) throw new Error('Nenhum arquivo encontrado no editor.');
-  hooks.progress?.({done: 1, total: 1, path: '', phase: 'Listando os arquivos da loja', step: 'inventory'});
   const wanted = hooks.only ? new Set(hooks.only) : undefined;
   const paths = wanted ? inventory.filter(path => wanted.has(path)) : inventory;
-  const entries: [string, string][] = [];
-  const assets: Assets = Object.create(null);
-  let total = 0;
-  for (const [index, path] of paths.entries()) {
+  hooks.progress?.({done: 1, total: 1, path: '', phase: listing, step: 'inventory', next: {step: 'read', total: paths.length}});
+  const texts = new Map<string, string>(), images = new Map<string, Uint8Array>();
+  let total = 0, phase = 'Lendo arquivos', label: string | undefined;
+  const has = (path: string) => texts.has(path) || images.has(path);
+  const keep = (path: string, value: string | Uint8Array) => {
+    if (typeof value === 'string') {
+      const size = new TextEncoder().encode(value).length;
+      if (size > MAX_FILE_BYTES) throw new Error(`Arquivo grande demais: ${path}`);
+      texts.set(path, value); total += size;
+    } else {images.set(path, value); total += value.length;}
+    if (total > MAX_TOTAL_BYTES) throw new Error('O tema ultrapassa o limite de 32 MiB.');
+    hooks.progress?.({done: texts.size + images.size, total: paths.length, path, phase, step: 'read', ...(label ? {label} : {})});
+    label = undefined;
+  };
+  const throughEditor = async (path: string): Promise<string | Uint8Array> => {
+    if (!imagePath(path)) return adapter.read(path);
+    if (!adapter.readAsset) throw new Error(`O adaptador não consegue exportar a imagem: ${path}`);
+    return adapter.readAsset(path);
+  };
+  const direct = adapter.direct, candidates = paths.filter(path => directKind(path));
+  // store: while the direct reading goes on. opened: the session's store it started with.
+  let store: string | undefined, opened: string | undefined, fast = 0;
+  // Any doubt leaves the files to the editor. Only a change of store stops the copy.
+  const giveUp = (error: unknown, text: string) => {
+    if (storeChanged(error)) throw error;
+    hooks.notice?.(`${text} (${reason(error)}). ${fast ? 'O restante' : 'Tudo'} será lido pelo editor, arquivo por arquivo.`, fast ? 'warn' : 'info');
+    store = undefined;
+    // Nothing came straight from the server: the step keeps its usual wording.
+    if (!fast) {phase = 'Lendo arquivos'; label = undefined;}
+  };
+  if (direct && candidates.length >= DIRECT_MIN) {
+    try {store = opened = await direct.open();} catch (error) {giveUp(error, 'Leitura direta indisponível');}
+  }
+  const confirmed = new Set<string>();
+  for (const path of store ? directSamples(candidates) : []) {
+    cancelled();
+    const shown = await throughEditor(path);
+    keep(path, shown);
+    let served: string | Uint8Array | undefined;
+    try {
+      const answer = await direct!.read([path], store!);
+      served = imagePath(path) ? answer.assets[path] : answer.files[path];
+    } catch (error) {giveUp(error, 'Leitura direta indisponível'); break;}
+    const same = typeof shown === 'string' ? served === shown : served instanceof Uint8Array && sameBytes(served, shown);
+    if (!same) {
+      hooks.notice?.(`O servidor da Yampi devolveu ${path} diferente do que o editor mostra. Tudo será lido pelo editor, arquivo por arquivo.`, 'warn');
+      store = undefined; break;
+    }
+    confirmed.add(directKind(path)!);
+  }
+  let pending = store ? candidates.filter(path => confirmed.has(directKind(path)!) && !has(path)) : [];
+  if (pending.length) {
+    hooks.notice?.(`Leitura direta conferida com o editor em ${confirmed.size} ${confirmed.size === 1 ? 'tipo de arquivo' : 'tipos de arquivo'}. O restante vem do servidor da Yampi, vários de uma vez.`, 'ok');
+    phase = 'Lendo arquivos direto da Yampi'; label = 'Ler os arquivos direto da Yampi';
+  }
+  while (store && pending.length) {
+    cancelled();
+    const batch = pending.slice(0, DIRECT_BATCH);
+    let answer: Awaited<ReturnType<DirectReader['read']>>;
+    try {answer = await direct!.read(batch, store);} catch (error) {giveUp(error, 'Leitura direta interrompida'); break;}
+    const rest = new Set(answer.rest.filter(path => batch.includes(path)));
+    for (const path of batch) {
+      if (rest.has(path)) continue;
+      const value = imagePath(path) ? answer.assets[path] : answer.files[path];
+      if (value === undefined) throw new Error(`O servidor da Yampi não devolveu ${path}. Nenhum arquivo da loja foi alterado; baixe de novo.`);
+      keep(path, value); fast++;
+    }
+    if (rest.size === batch.length) break;
+    pending = [...rest, ...pending.slice(DIRECT_BATCH)];
+  }
+  // Through the editor, file by file: everything without the direct reading, or what it left.
+  const remaining = paths.filter(path => !has(path));
+  if (fast && remaining.length) {phase = 'Lendo arquivos pelo editor'; label = 'Ler os arquivos pelo editor';}
+  for (const [index, path] of remaining.entries()) {
     cancelled();
     // The editor bridge checks the store on every command; this also covers other adapters.
     if (index % 25 === 0) assertContext(context, await adapter.context());
-    if (imagePath(path)) {
-      if (!adapter.readAsset) throw new Error(`O adaptador não consegue exportar a imagem: ${path}`);
-      const bytes = await adapter.readAsset(path);
-      total += bytes.length; assets[path] = bytes;
-    } else {
-      const content = await adapter.read(path);
-      const size = new TextEncoder().encode(content).length;
-      if (size > MAX_FILE_BYTES) throw new Error(`Arquivo grande demais: ${path}`);
-      total += size; entries.push([path, content]);
-    }
-    if (total > MAX_TOTAL_BYTES) throw new Error('O tema ultrapassa o limite de 32 MiB.');
-    hooks.progress?.({done: index + 1, total: paths.length, path, phase: 'Lendo arquivos', step: 'read'});
+    keep(path, await throughEditor(path));
   }
   cancelled();
   assertContext(context, await adapter.context());
   const end = (await adapter.inventory()).sort();
   if (JSON.stringify(inventory) !== JSON.stringify(end)) throw new Error('A árvore de arquivos mudou durante a leitura. Exporte novamente.');
-  const snapshot = safeSnapshot({context, capturedAt: new Date().toISOString(), files: safeFiles(entries), ...(Object.keys(assets).length ? {assets} : {})});
+  // The session's store once more, when files came straight from it: still the one it started
+  // with. A server that does not answer now changes nothing: each call already checked it.
+  if (fast) {
+    let now: string | undefined;
+    try {now = await direct!.open();} catch (error) {if (storeChanged(error)) throw error;}
+    if (now !== undefined && now !== opened) throw new Error(`${STORE_CHANGED} durante a cópia. Nada foi alterado: recarregue o editor da loja certa e baixe de novo.`);
+  }
+  const files = safeFiles(paths.filter(path => texts.has(path)).map(path => [path, texts.get(path)!]));
+  const assets: Assets = Object.fromEntries(paths.filter(path => images.has(path)).map(path => [path, images.get(path)!]));
+  const snapshot = safeSnapshot({context, capturedAt: new Date().toISOString(), files, ...(images.size ? {assets} : {})});
   return {...snapshot, inventory, ...(wanted ? {partial: true} : {})};
 }
 export interface SendHooks extends Hooks {

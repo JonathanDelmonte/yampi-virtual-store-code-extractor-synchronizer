@@ -1,4 +1,4 @@
-import type {Adapter, Context} from '../core/model';
+import type {Adapter, Assets, Context, DirectReader, Files} from '../core/model';
 import type {Data} from '../core/preview';
 import type {Command} from './bridge';
 export type RPC = (request: {action?: string; access?: 'read' | 'write'; command?: Command; preview?: {url?: string; origins?: string[]; context: Context}}) => Promise<unknown>;
@@ -18,6 +18,16 @@ export class BrowserAdapter implements Adapter {
     const encoded = await this.rpc({command: {op: 'readAsset', context: this.expected, path}}) as string;
     return Uint8Array.from(atob(encoded), c => c.charCodeAt(0));
   }
+  // The editor page asks the Yampi server itself, several files at a time (bridge directRead).
+  direct: DirectReader = {
+    open: async () => (await this.rpc({command: {op: 'directOpen', context: this.expected}}) as {store: string}).store,
+    read: async (paths, store) => {
+      const value = await this.rpc({command: {op: 'directRead', context: this.expected, paths, store}}) as {files: Files; images: Record<string, string>; rest: string[]};
+      const assets: Assets = {};
+      for (const [path, encoded] of Object.entries(value.images)) assets[path] = Uint8Array.from(atob(encoded), c => c.charCodeAt(0));
+      return {files: value.files, assets, rest: value.rest};
+    }
+  };
   // The send reloads the editor after every change, so the file opened here is the server's
   // version; the bridge still compares it with the expected content right before saving.
   async write(path: string, expected: string, content: string): Promise<void> {

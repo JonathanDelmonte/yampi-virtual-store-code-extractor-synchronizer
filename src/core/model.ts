@@ -42,10 +42,22 @@ export interface Adapter {
   // Through the editor's own controls: a text in an existing folder, an image in assets/images.
   create?(path: string): Promise<void>;
   upload?(path: string, bytes: Uint8Array): Promise<void>;
+  // Copies only. Sends keep reading through the editor, after each reload.
+  direct?: DirectReader;
 }
-export type ReadAdapter = Pick<Adapter, 'context' | 'inventory' | 'read' | 'readAsset'>;
+// The fast path for copying: the same GET the Yampi editor makes to open a file, sent by the
+// editor page itself, several at once. The editor stays the reference: see `capture`.
+export interface DirectReader {
+  // The store of the browser's Yampi session, checked against the store the editor shows.
+  open(): Promise<string>;
+  // Texts as the editor shows them, and image bytes. rest: paths left for the next call.
+  read(paths: string[], store: string): Promise<{files: Files; assets: Assets; rest: string[]}>;
+}
+export type ReadAdapter = Pick<Adapter, 'context' | 'inventory' | 'read' | 'readAsset' | 'direct'>;
 // step: a stable id for the phase (the label in phase can change with the wording).
-export interface Progress {done: number; total: number; path: string; phase: string; step?: string}
+// next: the size of the following step, known now (the file list sets the number of reads), so
+// the bar measures the whole job from the start. label: new wording for the step.
+export interface Progress {done: number; total: number; path: string; phase: string; step?: string; next?: {step: string; total: number}; label?: string}
 export interface Journal {
   version: 1; id: string; context: Context; startedAt: string;
   status: 'prepared' | 'running' | 'completed' | 'stopped';

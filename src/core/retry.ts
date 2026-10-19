@@ -47,6 +47,7 @@ export function retryReads(adapter: Adapter, options: RetryOptions): Adapter {
     inventory: () => retry(() => adapter.inventory(), options),
     read: path => retry(() => adapter.read(path), options),
     readAsset: adapter.readAsset && (path => retry(() => adapter.readAsset!(path), options)),
+    direct: adapter.direct && {open: () => retry(() => adapter.direct!.open(), options), read: (paths, store) => retry(() => adapter.direct!.read(paths, store), options)},
     refresh: () => retry(() => adapter.refresh(), options),
     write: (path, expected, content) => adapter.write(path, expected, content),
     create: adapter.create && (path => adapter.create!(path)),

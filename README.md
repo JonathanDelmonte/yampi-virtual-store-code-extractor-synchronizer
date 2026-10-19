@@ -6,6 +6,18 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
+## Versão 0.7.0
+
+A 0.7.0 acelera o download do tema e corrige a barra de progresso.
+
+- **Download direto do servidor da Yampi.** Até a 0.6, a extensão abria cada arquivo no editor e esperava a tela estabilizar: cerca de 0,8 s por arquivo, uns 3 minutos e meio para 264 arquivos. Agora a página do editor pede os arquivos ao servidor da Yampi pelo mesmo endereço que ela usa para abrir um arquivo (somente `GET`, no rascunho), seis de cada vez, com os cookies que o navegador já envia: a extensão não lê, guarda nem envia senha, cookie ou token.
+- **Conferido com o editor.** Antes do restante, o primeiro arquivo de cada tipo (Twig, SCSS, Vue, imagem…) é lido pelos dois caminhos e precisa sair idêntico ao que o editor mostra. Só esses tipos seguem pelo servidor. JSON, que o editor reformata ao mostrar, e qualquer diferença ficam com a leitura pelo editor, arquivo por arquivo. Servidor indisponível ou resposta inesperada também levam de volta à leitura pelo editor, sem interromper o download. As etapas dizem qual caminho foi usado e por quê.
+- **A loja certa.** Nome e link **Ver prévia** do cabeçalho são conferidos com o servidor, e a loja da sessão do navegador é conferida antes e depois de cada lote e no fim, como o próprio editor faz ao voltar para a aba. Se ela mudar (outra aba trocou de loja), o download para e nada é entregue.
+- **Barra que só avança.** Ao terminar de listar, a barra mostrava 18% e voltava para perto de zero quando o número de arquivos chegava. Agora esse número entra junto com a lista, e nenhuma etapa que descobre o próprio tamanho depois faz a barra voltar. **Listar os arquivos** aparece em andamento desde o início.
+- **Medido no editor fictício.** 121 arquivos, com 450 ms para abrir cada um no editor e 120 ms por pedido ao servidor fictício: 95,7 s pelo editor e 9,8 s com a leitura direta, com os mesmos arquivos no ZIP, byte a byte. [Validação](docs/VALIDACAO.md).
+
+**Ainda não validado numa loja real.** O endereço, o formato das respostas e a identificação da loja foram lidos no módulo público do editor em 18/10/2026 e reproduzidos no servidor fictício. Se a Yampi mudar algo, a amostra ou a identificação falham e o download volta sozinho para a leitura pelo editor, com o motivo nas etapas. O tempo numa loja real depende da rede e do servidor da Yampi. Envio, preflight e conferência após recarregar continuam lendo pelo editor. [Regras da leitura direta](docs/SPEC.md).
+
 ## Versão 0.6.0
 
 A 0.6.0 resolve o que o primeiro envio real mostrou: o envio parava quando o painel fechava, demorava e não dizia quanto faltava.
@@ -135,6 +147,7 @@ Sem `--preview`, só ferramentas e pacote mudam; a captura existente é mantida.
 npm ci
 npm run check
 npm run test:e2e
+npm run test:direct
 npm run test:preview
 npm run test:compression
 npm run audit:performance
@@ -145,13 +158,15 @@ npm run package
 
 Testes cobrem leitura integral, escrita somente fictícia, backup, conflitos, restauração, parser, privacidade e isolamento. Uma loja fictícia no formato real da vitrine (lista de seções com `position`, aliases `main_*`, `window.data.config`, `company`, fontes com subconjuntos, ícones de `$assets`, variantes de imagem e API pública) é exportada, instalada e aberta em Chromium. Duas lojas fictícias, escura/clara, continuam comparadas pixel a pixel. [Resultados e evidências](docs/VALIDACAO.md).
 
-Isso não certifica uma loja real. Exportações textuais reais anteriores tiveram hashes internos conferidos fora deste repositório. A captura 0.4.0 ainda não foi executada numa vitrine real; formato real da API além de coleções, banners e produtos, regras exatas do minificador da plataforma, URL de produção de `assets_url`, regeneração de `components.twig` e gravações/restaurações reais continuam sem validação.
+Isso não certifica uma loja real. Exportações textuais reais anteriores tiveram hashes internos conferidos fora deste repositório. A leitura direta da 0.7.0 ainda não foi executada numa loja real; `npm run test:direct` mede o mesmo download pelos dois caminhos no editor fictício. A captura 0.4.0 ainda não foi executada numa vitrine real; formato real da API além de coleções, banners e produtos, regras exatas do minificador da plataforma, URL de produção de `assets_url`, regeneração de `components.twig` e gravações/restaurações reais continuam sem validação.
 
 ## Privacidade e arquitetura
 
 Sem telemetria. `activeTab`/`scripting` operam a aba escolhida; o editor é lido explicitamente em `MAIN`, dentro de seu componente. HTTPS é uma permissão **opcional**; a interface solicita somente origens concretas. O worker exige painel/sessão autenticados, lock de leitura, permissão da origem e identidade antes/depois do GET, com `credentials: omit`, `redirect: error` e sem referrer. Nenhum acesso global é concedido automaticamente.
 
 Desde a 0.6.0, `offscreen` permite o documento da extensão que executa as operações com o painel fechado; ele só conversa com o worker, que confere se o pedido vem desse documento e da operação que recebeu o editor. `notifications` mostra o aviso de fim quando o painel está fechado. A pasta do projeto só recebe escrita quando você clica em **Usar no projeto**: o Chrome pede a permissão de escrita, e só um arquivo de `tema/` que já existe é trocado, se ainda estiver como na comparação. As fontes Atkinson Hyperlegible Next e Mono (SIL OFL 1.1) vêm no pacote; nenhuma fonte é carregada da internet.
+
+Desde a 0.7.0, a cópia pede os arquivos ao servidor do próprio editor (`bart.yampi.com.br`), a partir da página do editor e somente com `GET`: o navegador envia os cookies dessa página, como faz com os pedidos do editor, e a extensão não lê, guarda nem envia senha, cookie ou token. Da identificação da loja, usa só nome, link de prévia e apelido. Nenhuma permissão nova foi pedida ao Chrome.
 
 Originais e histórico ficam em IndexedDB local, separados por loja, sem criptografia adicional. ZIPs podem conter conteúdo privado. A extensão não envia projetos ao GitHub. Mantenha exports/backups fora deste repositório e revise qualquer publicação. [Licenças](docs/TERCEIROS.md).
 
