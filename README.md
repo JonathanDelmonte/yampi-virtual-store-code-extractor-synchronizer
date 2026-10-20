@@ -6,6 +6,17 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
+## Versão 0.9.1
+
+Corrige o download com a vitrine publicada, que pedia autorização várias vezes, recomeçava a captura e mostrava 100% antes do fim.
+
+- **Uma pergunta, no clique.** **Baixar ZIP** pede de uma vez a vitrine e os endereços onde a Yampi guarda imagens e fontes (`cdn.yampi.io`, `fonts.googleapis.com`, `fonts.gstatic.com`). O Chrome lembra essa permissão, então os próximos downloads não perguntam de novo.
+- **Sem perguntar o que já está liberado.** Durante a captura, um endereço que o Chrome já permite entra sem pergunta. Só um endereço realmente novo pausa o download, uma vez. As fontes de `fonts.googleapis.com` e `fonts.gstatic.com` são pedidas juntas.
+- **Sem recomeçar.** Depois de autorizar, a etapa continua de onde estava: **Completar a vitrine com os recursos autorizados**. O que já foi capturado vem do cache, e a contagem da etapa nunca volta.
+- **100% só no fim.** Enquanto alguma etapa tiver trabalho pela frente, a barra para em 99%.
+
+**Validado só com a vitrine fictícia.** Os testes cobrem as rodadas de autorização e a barra; o download real de uma loja com a 0.9.1 ainda não foi feito.
+
 ## Versão 0.9.0
 
 A 0.9.0 resolve o que um projeto real mostrou: a pasta com a referência do download antigo, um envio feito por ZIP em outro computador e edições depois dele. "Atualizar da loja" pedia decisão em 9 arquivos, sem dizer de quem era cada lado.

@@ -4,6 +4,7 @@ import {unzipSync} from 'fflate';
 import {runJob, type EngineHost} from '../src/jobs/engine';
 import type {Decision, JobRequest, JobState, SendInput} from '../src/jobs/types';
 import {makePlan} from '../src/core/planner';
+import {demonstration} from '../src/core/preview';
 import {changedPaths} from '../src/core/compare';
 import {chooseBaseline} from '../src/core/workspace';
 import {clearLocal, get, put, journalHistory, loadWorkspace, updateWorkspace} from '../src/storage';
@@ -182,5 +183,47 @@ describe('atualizar o projeto: leitura completa da loja', () => {
     expect(workspace.update?.reading?.partial).toBeUndefined();
     expect(workspace.update?.choices).toEqual({});
     expect(workspace.review).toMatchObject({overrides: ['x'], images: true});
+  });
+});
+describe('download com a vitrine: autorizar uma vez, sem voltar a contagem', () => {
+  // A fictitious storefront whose images and fonts live on three other origins.
+  const needed = ['https://cdn.yampi.io', 'https://fonts.gstatic.com', 'https://imagens-ficticias.invalid'];
+  function previewHost(granted: Set<string>) {
+    const editor = new FakeEditor(store), {host: h, reports} = host(editor), rounds: string[][] = [], questions: string[][] = [];
+    h.rpc = async request => {
+      if (request.action !== 'preview-allow') throw new Error('O editor fictício é usado diretamente.');
+      for (const origin of request.preview!.origins!) if (origin !== context.previewOrigin && !granted.has(origin)) throw new Error('Origem não autorizada no Chrome.');
+      return null;
+    };
+    h.preview = {
+      prepare: async () => ({}) as never,
+      finish: async (_draft, _fetch, origins, _signal, onProgress) => {
+        rounds.push([...origins]);
+        for (let done = 1; done <= 40; done++) onProgress?.(done, 40);
+        return {...demonstration(context, 'Vitrine fictícia.', Object.keys(store)), missing: needed.filter(origin => !origins.includes(origin))} as never;
+      },
+      unauthorized: bundle => (bundle as unknown as {missing: string[]}).missing
+    };
+    const control = {signal: new AbortController().signal, decision: async (waiting: {origins: string[]}): Promise<Decision> => {questions.push(waiting.origins); waiting.origins.forEach(origin => granted.add(origin)); return {action: 'allow', origins: waiting.origins};}};
+    return {h, reports, rounds, questions, control};
+  }
+  test('o que o Chrome já permite não gera pergunta; o resto é perguntado uma vez', async () => {
+    const {h, reports, rounds, questions, control} = previewHost(new Set(['https://cdn.yampi.io', 'https://fonts.gstatic.com']));
+    const final = await runJob({id: 'baixar-vitrine', kind: 'export', includePreview: true}, context, h, control);
+    expect(final.status).toBe('completed');
+    expect(rounds[0]).toEqual([context.previewOrigin, 'https://cdn.yampi.io', 'https://fonts.gstatic.com']);
+    expect(questions).toEqual([['https://imagens-ficticias.invalid']]);
+    expect(rounds).toHaveLength(2);
+    // The storefront step never counts back, and the bar reaches 100% only at the end.
+    const counts = reports.map(state => state.phases.find(phase => phase.id === 'preview')!.done);
+    expect(counts.every((value, index) => index === 0 || value >= counts[index - 1])).toBe(true);
+    expect(reports.filter(state => state.status !== 'completed').every(state => state.fraction < 1)).toBe(true);
+    expect(final.fraction).toBe(1);
+  });
+  test('tudo já permitido no Chrome: nenhuma pergunta', async () => {
+    const {h, rounds, questions, control} = previewHost(new Set(needed));
+    await runJob({id: 'baixar-vitrine-2', kind: 'export', includePreview: true}, context, h, control);
+    expect(questions).toEqual([]);
+    expect(rounds).toHaveLength(2);
   });
 });

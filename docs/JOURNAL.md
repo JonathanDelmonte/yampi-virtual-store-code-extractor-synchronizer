@@ -179,3 +179,19 @@ Decisões:
 - A comparação sem recarregar lê todos os textos pelo servidor. O e2e da restauração mostrou que a 0.8.1 lia pela aba um texto antigo quando havia poucos arquivos.
 
 Ainda sem validação real.
+
+## 19/10/2026 — Download com a vitrine: uma autorização, sem recomeçar (0.9.1)
+
+Relato do proprietário: o download pedia autorização para imagens e fontes, recapturava tudo, pedia de novo, e a barra mostrava 100% antes do fim.
+
+Causas:
+- o clique só pedia a origem da vitrine;
+- cada rodada perguntava até pelas origens que o Chrome já permitia;
+- cada rodada reportava a contagem da etapa desde o início;
+- o reancoramento da barra deixava ela chegar a 100% com etapas pendentes.
+
+Decisões:
+- o clique pede também as origens comuns de imagens e fontes da Yampi;
+- as origens já permitidas entram sem pergunta;
+- a contagem da etapa é monotônica;
+- a barra para em 99% enquanto há trabalho.

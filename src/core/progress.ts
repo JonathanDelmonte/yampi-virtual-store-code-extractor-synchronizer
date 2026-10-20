@@ -70,6 +70,10 @@ export class ProgressTracker {
     const ahead = total - this.anchor.units;
     const fraction = ahead > 0 ? this.anchor.fraction + (1 - this.anchor.fraction) * Math.max(0, done - this.anchor.units) / ahead : total && done >= total ? 1 : this.anchor.fraction;
     this.shown = Math.min(1, Math.max(this.shown, fraction)); this.shownUnits = done;
+    // 100% means finished: while any step still has work ahead (or has not learned its size), the
+    // bar stops just short of the end, whatever the estimate of the remaining work says.
+    const open = this.phases.some(p => (p.status === 'pending' || p.status === 'active') && (p.total === 0 || p.done < p.total));
+    if (open) this.shown = Math.min(this.shown, 0.99);
     return {
       phases: this.phases.map(({weight: _weight, ...state}) => state),
       fraction: this.shown,

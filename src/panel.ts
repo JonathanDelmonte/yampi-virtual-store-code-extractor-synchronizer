@@ -1,5 +1,5 @@
 import {preparePreview, finishPreview, unauthorizedOrigins} from './browser/preview-capture';
-import {publicUrl} from './core/preview';
+import {publicUrl, PREVIEW_ORIGINS} from './core/preview';
 import {BrowserAdapter, type RPC} from './browser/adapter';
 import {PanelConnection} from './browser/panel-connection';
 import {zipInWorker} from './browser/zip-client';
@@ -976,7 +976,7 @@ function requestScopes(origins: string[]): Promise<boolean> {
 }
 $('export').addEventListener('click', () => {
   // The permission prompt needs this click: ask before anything else.
-  const permission = $<HTMLInputElement>('include-preview').checked && context ? requestScopes([context.previewOrigin]) : Promise.resolve(false);
+  const permission = $<HTMLInputElement>('include-preview').checked && context ? requestScopes([context.previewOrigin, ...PREVIEW_ORIGINS]) : Promise.resolve(false);
   void run('Preparando o download', async () => {await startJob({id: newId(), kind: 'export', includePreview: await permission});});
 });
 $('preview-allow').addEventListener('click', () => {

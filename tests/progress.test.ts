@@ -131,3 +131,19 @@ describe('repetição segura de leituras', () => {
     expect(calls).toBe(1);
   });
 });
+describe('100% só no fim', () => {
+  test('etapas recomeçadas e totais que mudam não levam a barra a 100% antes de concluir', () => {
+    const tracker = new ProgressTracker([{id: 'inventory', label: '', weight: 2, total: 1}, {id: 'read', label: '', weight: 1}, {id: 'preview', label: '', weight: 0.6}, {id: 'zip', label: '', weight: 6, total: 1}, {id: 'download', label: '', weight: 3, total: 1}]);
+    tracker.start('inventory'); tracker.set('inventory', 1); tracker.total('read', 264); tracker.start('read'); tracker.set('read', 264); tracker.start('preview');
+    let highest = 0;
+    // Three rounds of the storefront capture, each one counting again from the start (as 0.9.0 did).
+    for (const end of [130, 141, 141]) for (let done = 1; done <= end; done++) {
+      tracker.total('preview', Math.min(200, Math.max(140, done))); tracker.set('preview', done);
+      highest = Math.max(highest, tracker.snapshot().fraction);
+    }
+    tracker.finish('preview'); tracker.start('zip'); highest = Math.max(highest, tracker.snapshot().fraction);
+    expect(highest).toBeLessThan(1);
+    tracker.complete();
+    expect(tracker.snapshot().fraction).toBe(1);
+  });
+});

@@ -1,5 +1,15 @@
 # Validação
 
+## Download com a vitrine na 0.9.1, em 19/10/2026
+
+Relato do proprietário num download real: depois de ler os 264 arquivos, a captura da vitrine pediu autorização, recomeçou a contagem e pediu de novo. Os números iam e voltavam, e o topo mostrava 100% com "Preparar o ZIP" e "Baixar o ZIP" pendentes.
+
+- **Reprodução** (`tests/progress.test.ts`): três rodadas recomeçando a contagem levavam a barra a 100% antes de preparar o ZIP. Agora ela não passa de 99% até concluir.
+- **Rodadas de autorização** (`tests/jobs.test.ts`): endereços já permitidos no Chrome entram sem pergunta; só o endereço novo é perguntado, uma vez; a contagem da etapa nunca volta; a barra só chega a 1 no fim; com tudo permitido, não há pergunta.
+- **Chromium, extensão real** (`npm run test:e2e`): com o endereço das imagens já permitido, o download foi direto ao ZIP, sem pausa. As demais suítes também passaram.
+
+Sem validação real: o download de uma loja real com a 0.9.1.
+
 ## Versões conhecidas, recibo, trechos e junção na 0.9.0, em 19/10/2026
 
 Pedido: um uso real da 0.8.0 com a referência do download de D0, um envio por ZIP em D7 feito em outra instalação, edições depois dele e possíveis mudanças do dono da loja. A atualização mostrava 9 arquivos "mudados dos dois lados". `npm run check` passou com 591 testes em 42 arquivos, só com dados fictícios.

@@ -19,6 +19,8 @@ Uma linha por armadilha; o detalhe fica no documento indicado.
 - Na pasta do projeto, a extensão grava só em `tema/` e nos seus registros de `.yampi-sync/` (`projectPath`), por um clique que liberou a escrita e com cada arquivo ainda como foi lido; nunca em ferramentas, `package.json`, `preview/` ou `node_modules`. → `docs/SPEC.md`, "Escrita na pasta do projeto".
 - A referência da pasta (manifesto + `baseline/`) muda sempre junto, com `referencia-pendente.json` gravado antes; o leitor aceita os dois estados enquanto a marcação existir, mas as ferramentas locais não a conhecem. → `docs/SPEC.md`, "Atualização do projeto".
 - Texto com marcações de conflito nunca vai para a loja, e uma nova atualização não o junta de novo (`marked`) nem avança a referência dele. → `docs/SPEC.md`, "Atualização do projeto".
+- A barra só mostra 100% quando todas as etapas terminaram; etapas que recomeçam reportam a contagem pelo máximo já visto. → `src/core/progress.ts`.
+- O download pede no clique a vitrine e as origens comuns de imagens e fontes; origem já permitida no Chrome não gera pergunta. → `src/jobs/engine.ts`, `exportTheme`.
 - Versões guardam só textos, cada um uma vez pelo SHA-256; imagens nunca entram. → `docs/SPEC.md`, "Versões".
 - Reescrever a referência mantém a versão do manifesto da pasta: ferramentas exportadas antes da versão 3 só aceitam 1 e 2. → `docs/SPEC.md`, "Atualização do projeto".
 - Uma comparação que não recarrega o editor lê todos os textos pelo servidor: a aba pode mostrar um texto antigo. → `docs/SPEC.md`, "Leitura direta".

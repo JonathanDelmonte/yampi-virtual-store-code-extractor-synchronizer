@@ -2,7 +2,7 @@ import {BrowserAdapter, type RPC} from '../browser/adapter';
 import {encodeSnapshot} from '../core/archive';
 import type {ArchiveEntries} from '../core/compression';
 import {assertContext, type Adapter, type Context, type Journal, type Progress, type Snapshot} from '../core/model';
-import {demonstration, type Data, type PreviewBundle} from '../core/preview';
+import {demonstration, PREVIEW_ORIGINS, type Data, type PreviewBundle} from '../core/preview';
 import {ProgressTracker, type PhaseSpec} from '../core/progress';
 import {retryReads} from '../core/retry';
 import {storeChanged} from '../core/direct';
@@ -161,20 +161,40 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
       const tools = host.preview, fetcher = remoteFetch(host.rpc, snapshot.context, control.signal);
       const draft = await tools.prepare(snapshot, fetcher, {editorData: await raw.visual?.(), enabled: true, signal: control.signal});
       let origins = [snapshot.context.previewOrigin];
+      // An origin Chrome already allows (asked at the download click, or in an earlier download)
+      // needs no question: the worker accepts it. Only the others are asked, once per round.
+      const allow = async (list: string[]) => {await host.rpc({action: 'preview-allow', preview: {origins: list, context: snapshot.context}});};
+      const granted = async (candidates: string[]) => {
+        const out: string[] = [];
+        for (const origin of candidates.filter(item => !origins.includes(item))) {try {await allow([...origins, ...out, origin]); out.push(origin);} catch { /* Not allowed in Chrome yet: asked below. */ }}
+        return out;
+      };
+      origins.push(...await granted(PREVIEW_ORIGINS));
+      // The count of this step never goes back: a later round finds in its cache what the earlier
+      // one already captured, and only goes further.
+      let best = {done: 0, total: 0};
       const finish = async () => {
-        await host.rpc({action: 'preview-allow', preview: {origins, context: snapshot.context}});
+        await allow(origins);
         state.detail = 'Baixando recursos visuais';
-        return tools.finish(draft, fetcher, origins, control.signal, (done, total) => {tracker.total('preview', total); tracker.set('preview', done); report();});
+        return tools.finish(draft, fetcher, origins, control.signal, (done, total) => {
+          best = {done: Math.max(best.done, done), total: Math.max(best.total, total, done)};
+          tracker.total('preview', best.total); tracker.set('preview', best.done); report();
+        });
       };
       visual = await finish();
       for (let missing = tools.unauthorized(visual); missing.length; missing = tools.unauthorized(visual)) {
-        state.status = 'waiting'; state.waiting = {kind: 'origins', origins: missing};
+        const known = await granted(missing);
+        if (known.length) {origins.push(...known); visual = await finish(); continue;}
+        // Fonts listed by fonts.googleapis.com are served by fonts.gstatic.com: asked together.
+        const asking = [...new Set([...missing, ...missing.some(origin => origin === 'https://fonts.googleapis.com') ? ['https://fonts.gstatic.com'] : []])].filter(origin => !origins.includes(origin));
+        state.status = 'waiting'; state.waiting = {kind: 'origins', origins: asking};
         state.detail = 'Código copiado; recursos visuais aguardam autorização';
         report(true);
         const decision = await control.decision(state.waiting);
         state.status = 'running'; delete state.waiting;
         if (decision.action === 'discard') throw new Error('Preparação visual descartada. Nenhum arquivo da Yampi foi alterado.');
         if (decision.action === 'partial') break;
+        tracker.relabel('preview', 'Completar a vitrine com os recursos autorizados');
         origins = [...new Set([...origins, ...decision.origins])];
         visual = await finish();
       }
