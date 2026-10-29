@@ -6,6 +6,31 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
+## Versão 0.10.0
+
+A prévia local passa a abrir as páginas que a vitrine linka. Até a 0.9.1, o download guardava 8 páginas representativas, e o menu, o rodapé, o "Ver tudo" das vitrines, quase todos os produtos e o voltar da página de produto davam "Rota não capturada nesta prévia".
+
+- **Páginas da loja.** Depois do recorte de 8 páginas, o download segue os links das páginas capturadas (menu, subcategorias, rodapé, breadcrumbs, banners), das leituras públicas gravadas (o "Ver tudo" das coleções) e os links escritos no próprio tema (`href`, `link` e `cta-url` com caminho literal em `.twig` e `.vue`). Entram categorias e subcategorias, vitrines `/l`, buscas, páginas institucionais e promoções, em até 4 rodadas: as páginas novas trazem os links da rodada seguinte.
+  - Uma página por caminho: `/categoria?sort_by=…` e `/categoria?page=2` são a mesma captura. Cada busca (`?q=`) é uma captura.
+- **Páginas dos produtos.** Em seguida, a página de cada produto (`/<slug>/p`) que as páginas capturadas, as leituras públicas e o tema mostram, e numa segunda rodada os que só outras páginas de produto mostram (semelhantes). Uma última rodada lê as categorias que só um produto linka: o voltar da página do produto.
+- **Orçamento próprio.** Até 200 páginas da loja (24 MiB) e 400 de produto (16 MiB), à parte das 8 representativas e do orçamento de CSS, fontes e banners. O que passa do limite vira aviso, com a contagem e exemplos.
+- **Fotos.** Nenhuma foto nova é baixada para essas páginas: uma foto sem cópia na exportação mostra o placeholder, como antes.
+- **Loja que pede calma.** Com HTTP 429 ou 503, todas as leituras esperam juntas (o `Retry-After`, até 60 s) e passam a sair mais espaçadas; queda de conexão tenta de novo. Só depois das tentativas a página vira aviso. Uma página que responde 404, redireciona (o redirecionamento não é seguido) ou não é do tipo esperado também vira aviso, e o download termina.
+- **Links quebrados.** Um caminho que a loja responde com 404 vira o aviso **link quebrado**, com o lugar do link: o arquivo do tema ou a chave dos dados (por exemplo, `merchant.categories`). Ele aparece no fim do download e em `preview/report.json`.
+- **Progresso e relatório.** O download mostra **Páginas da loja: N de M** e **Páginas dos produtos: N de M**. O resultado diz quantas entraram por tipo, quais ficaram de fora e por quê.
+- **Mesma limpeza.** As páginas novas passam pela mesma lista de bloqueio das demais: segredos, rastreamento e dados de cliente não entram no ZIP.
+- **Formato 3 da prévia.** `themeConfig` e `merchant`, que se repetem iguais em cada página, ficam uma vez em `preview/raw/shared/`, conferidos pelo SHA-256 como o resto ([motivo](docs/SPEC.md)). A prévia local (`npm run dev`, `npm run check`) aceita até 640 páginas. Ela abre qualquer ordenação ou página de uma categoria capturada pelo caminho dela, e a busca só pela pergunta exata. O índice `/__local/` mostra a contagem por tipo, com alguns exemplos.
+- **Envio: aviso de rota que não existe.** Categorias, vitrines e páginas são dados do painel da Yampi: o envio não cria rota.
+  - Na comparação, cada link interno literal dos textos que o projeto mudou é conferido na vitrine.
+  - Uma rota que responde 404 vira aviso: "Link para uma rota que não existe na loja: /x em elements/y.twig; crie a categoria ou a página no painel da Yampi, ou troque o link". É aviso, não bloqueio: a categoria pode estar sendo criada no painel.
+  - Sem a leitura da vitrine liberada no Chrome, os links ficam sem conferência, com o botão **Conferir os links**.
+- **Prévia nova depois de atualizar.** Ao terminar **Atualizar a pasta**, o painel oferece **Baixar a prévia nova**: um ZIP só com `preview/`, capturado a partir da referência que a atualização acabou de gravar, sem ler o tema de novo.
+  - Na pasta do projeto, `npm run previa:trocar -- previa-<loja>-<data>.zip` confere a captura (loja, hashes e formato), guarda a prévia anterior em `.yampi-sync/updates/` e põe a nova no lugar.
+  - A extensão continua sem gravar em `preview/`, e nada disso vai para a Yampi.
+- **Projetos antigos.** `node scripts/update-project.mjs <projeto> --preview <nova-exportação.zip>` leva as ferramentas novas e o formato 3. As ferramentas da 0.9.1 e anteriores não leem uma prévia com mais de 12 páginas.
+
+**Validado só com a loja fictícia.** Os testes exportam a loja fictícia no formato real, com mais categorias, subcategorias, vitrines, páginas de rodapé e produtos do que o recorte, uma rota 404, um redirecionamento para fora e uma categoria que responde 429 duas vezes. Em `npm run test:preview`, um navegador clica em menu, subcategorias, rodapé, "Ver tudo", busca, produtos e voltar na prévia local. Ainda não houve uma exportação real conferida pelo proprietário com a 0.10.0. [Validação](docs/VALIDACAO.md).
+
 ## Versão 0.9.1
 
 Corrige o download com a vitrine publicada, que pedia autorização várias vezes, recomeçava a captura e mostrava 100% antes do fim.
@@ -129,7 +154,7 @@ O ícone de código informa no hover que a extensão precisa do **Editor de cód
 | `tema/` | Código editável, copiado do editor |
 | `.yampi-sync/baseline/` e `manifest.json` | Referência: a loja como a extensão a conhece por último (download, atualização ou envio), com tamanhos e SHA-256, para comparar e devolver código |
 | `.yampi-sync/versoes/` | Versões do projeto: só textos, cada um guardado uma vez pelo SHA-256 |
-| `preview/` | Captura bruta (`raw/`), leituras públicas, recursos, manifesto e relatório |
+| `preview/` | Captura bruta (`raw/`, com `raw/shared/` para o que se repete), leituras públicas, recursos, manifesto e relatório |
 | `local.data.json` | Somente sobreposições da prévia (começa vazio) |
 | `local.config.json` | Templates, estilos, mapa de seções e opções de componentes |
 | `.yampi-sync/tools/` | Ferramentas portáteis para Twig/Sass/Vue 2, contrato, integridade e retorno |
@@ -154,7 +179,7 @@ npm run check
 npm run dev
 ```
 
-Abra `http://127.0.0.1:5182`. As páginas capturadas abrem pelos mesmos caminhos da loja; o índice em `/__local/` lista capturas e templates sem captura. A instalação inicial de dependências usa o registro npm.
+Abra `http://127.0.0.1:5182`. As páginas capturadas abrem pelos mesmos caminhos da loja, uma categoria com qualquer ordenação ou página e a busca pela pergunta exata; o índice em `/__local/` mostra a contagem de capturas por tipo, com exemplos, e os templates sem captura. A instalação inicial de dependências usa o registro npm.
 
 ## Captura e diagnóstico
 
@@ -162,7 +187,7 @@ A leitura é estática: literais, objetos, arrays e JSON/base64 declarativos. Ex
 
 PNG/JPEG/WebP/SVG, CSS e WOFF/WOFF2/TTF/OTF são validados, identificados por SHA-256 e deduplicados. URLs privadas, credenciais em URL, redirecionamentos, tipos desconhecidos e SVG ativo são recusados.
 
-Máximos: 8 páginas, 200 recursos, 12 MiB de recursos, 2 MiB por recurso e por página, 40 leituras públicas (4 MiB) e 15 segundos por leitura HTTP. O orçamento segue a prioridade descrita acima e o relatório mostra contagem e bytes por categoria.
+Máximos: 8 páginas representativas, 200 recursos, 12 MiB de recursos, 2 MiB por recurso e por página, 40 leituras públicas (4 MiB) e 15 segundos por leitura HTTP. O orçamento segue a prioridade descrita acima e o relatório mostra contagem e bytes por categoria. Desde a 0.10.0, à parte: até 200 páginas da loja (24 MiB, 4 rodadas) e 400 páginas de produto (16 MiB), sem recursos novos; o relatório lista por etapa o que entrou, por tipo, e o que ficou de fora, com o motivo.
 
 `preview/report.json` separa código, configuração, contrato (aliases, seções visíveis, chaves ausentes, cobertura de templates), assets, compilação, inicialização e visual. `npm run check` grava `.cache/yampi-check.json` com seções renderizadas por página, avisos de markup e componentes e a paridade de CSS. O servidor oferece `/__local/diagnostic.json`; o navegador expõe `__yampiLocalReady` e `__yampiLocalState`. HTTP 200 não certifica inicialização ou aparência.
 
@@ -233,7 +258,7 @@ node scripts/update-project.mjs "C:/caminho/do/projeto" --rollback .yampi-sync/u
 
 O primeiro comando mostra o plano: ferramentas, mudanças em `package.json` e lockfile, arquivos de `preview/` e a migração de `local.data.json`. O segundo aplica; o terceiro desfaz. Somente `.yampi-sync/tools/`, `package.json`, `package-lock.json` e `preview/` são substituídos; `tema/`, originais, manifesto e `local.config.json` são preservados. Um `local.data.json` no formato antigo (cópia completa dos dados) vai para o backup e dá lugar a sobreposições vazias. Dependências próprias do projeto continuam no lockfile; conflitos com as ferramentas são recusados. Ferramentas editadas pelo usuário e links também são recusados. Bytes anteriores e o registro ficam em `.yampi-sync/updates/`; o rollback recusa arquivos alterados depois da atualização. Não executa scripts do projeto nem chama a Yampi. Depois execute `npm ci`, `check:integrity`, `check` e `pack` no projeto atualizado.
 
-Sem `--preview`, só ferramentas e pacote mudam; a captura existente é mantida. Prévias capturadas pela 0.3.x são lidas em modo de compatibilidade, com parâmetros e ordem incompletos: faça uma nova exportação.
+Sem `--preview`, só ferramentas e pacote mudam; a captura existente é mantida. Para trocar só a prévia de um projeto que já tem as ferramentas da 0.10.0, use **Baixar a prévia nova** (depois de **Atualizar a pasta**) e `npm run previa:trocar -- <zip>` na pasta do projeto; o mesmo comando aceita uma exportação completa da mesma loja. Prévias capturadas pela 0.3.x são lidas em modo de compatibilidade, com parâmetros e ordem incompletos: faça uma nova exportação.
 
 ## Desenvolvimento e validação
 
@@ -256,7 +281,7 @@ Isso não certifica uma loja real. Exportações textuais reais anteriores tiver
 
 ## Privacidade e arquitetura
 
-Sem telemetria. `activeTab`/`scripting` operam a aba escolhida; o editor é lido explicitamente em `MAIN`, dentro de seu componente. HTTPS é uma permissão **opcional**; a interface solicita somente origens concretas. O worker exige painel/sessão autenticados, lock de leitura, permissão da origem e identidade antes/depois do GET, com `credentials: omit`, `redirect: error` e sem referrer. Nenhum acesso global é concedido automaticamente.
+Sem telemetria. `activeTab`/`scripting` operam a aba escolhida; o editor é lido explicitamente em `MAIN`, dentro de seu componente. HTTPS é uma permissão **opcional**; a interface solicita somente origens concretas. O worker exige painel/sessão autenticados, lock de leitura, permissão da origem e identidade antes/depois do GET, com `credentials: omit`, `redirect: manual` (o redirecionamento nunca é seguido; desde a 0.10.0 ele é distinguido de uma falha de rede) e sem referrer. Nenhum acesso global é concedido automaticamente.
 
 Desde a 0.6.0, `offscreen` permite o documento da extensão que executa as operações com o painel fechado; ele só conversa com o worker, que confere se o pedido vem desse documento e da operação que recebeu o editor. `notifications` mostra o aviso de fim quando o painel está fechado. A pasta do projeto só recebe escrita quando você clica em **Usar no projeto**: o Chrome pede a permissão de escrita, e só um arquivo de `tema/` que já existe é trocado, se ainda estiver como na comparação. As fontes Atkinson Hyperlegible Next e Mono (SIL OFL 1.1) vêm no pacote; nenhuma fonte é carregada da internet.
 
@@ -264,7 +289,7 @@ Desde a 0.7.0, a cópia pede os arquivos ao servidor do próprio editor (`bart.y
 
 Originais e histórico ficam em IndexedDB local, separados por loja, sem criptografia adicional. ZIPs podem conter conteúdo privado. A extensão não envia projetos ao GitHub. Mantenha exports/backups fora deste repositório e revise qualquer publicação. [Licenças](docs/TERCEIROS.md).
 
-`local-runtime/contract.mjs` define o contrato da plataforma e `dependencies.mjs` as dependências do retorno; ambos são usados pela extensão e pelo projeto exportado. `src/core/preview.ts` define formato e sanitização; `src/browser/preview-capture.ts` faz a captura estática, as leituras públicas e a fila de assets; `public-fetch.ts` limita downloads. `local-runtime/` compila e serve a prévia; `scripts/update-project.mjs` atualiza projetos. [ROADMAP.md](docs/ROADMAP.md) mantém capacidades ainda não implementadas.
+`local-runtime/contract.mjs` define o contrato da plataforma e `dependencies.mjs` as dependências do retorno; ambos são usados pela extensão e pelo projeto exportado. `src/core/preview.ts` define formato e sanitização; `src/browser/preview-capture.ts` faz a captura estática, as leituras públicas e a fila de assets; `src/browser/preview-pages.ts` lê as páginas da loja e dos produtos, com `src/core/preview-links.ts` (links da loja) e `src/core/pacer.ts` (espera compartilhada); `public-fetch.ts` limita downloads. `local-runtime/` compila e serve a prévia; `scripts/update-project.mjs` atualiza projetos. [ROADMAP.md](docs/ROADMAP.md) mantém capacidades ainda não implementadas.
 
 O nome interno `yampi-theme-sync` permanece nos formatos de exportação e armazenamento para compatibilidade com projetos e históricos existentes. [Configuração da conta](docs/CHROME-WEB-STORE.md).
 

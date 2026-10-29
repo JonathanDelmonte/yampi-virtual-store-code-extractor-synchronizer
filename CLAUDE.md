@@ -30,3 +30,7 @@ Uma linha por armadilha; o detalhe fica no documento indicado.
 - A cópia lê pelo servidor do editor só os tipos cuja amostra saiu igual ao CodeMirror; o editor reformata JSON ao mostrar, então JSON fica com a leitura pelo editor. → `docs/SPEC.md`, "Leitura direta".
 - Trocar de loja em outra aba pode mudar a loja da sessão sem mudar o cabeçalho do editor aberto; o próprio editor detecta isso por `merchant-identity` (lido no módulo público, não validado numa loja real). → `docs/SPEC.md`, "Leitura direta".
 - Com **Efeitos de transparência** desligado no Windows, `prefers-reduced-transparency` vale `reduce` e as barras ficam foscas, sem refração: emule o valor para conferir o vidro. → `docs/INTERFACE.md`, "Material".
+- O worker devolve à captura só a mensagem do erro: o status HTTP e o `Retry-After` do download público vão no texto e voltam por `fetchFailure`. → `src/browser/public-fetch.ts`.
+- `host.wait` espera no máximo 10 s por chamada: as esperas de um 429 vão em blocos. → `src/core/pacer.ts`.
+- Na prévia formato 3, o arquivo de uma página pode não ter `themeConfig` nem `merchant`: estão em `raw/shared/<sha256>.json`, indicados por `shared` no manifesto. → `docs/SPEC.md`, "Formato 3".
+- Mudou uma ferramenta de `local-runtime/`? O hash anterior precisa estar em `scripts/runtime-versions.json`, ou `update-project.mjs` recusa os projetos exportados antes como "ferramenta modificada". → `scripts/update-project.mjs`.

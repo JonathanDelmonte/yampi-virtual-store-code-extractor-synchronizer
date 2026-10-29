@@ -42,6 +42,16 @@ Um conflito em texto pode ser resolvido pelo usuário, arquivo a arquivo, com **
 
 Diferenças só de espaço em branco aparecem separadas, sem seleção inicial, e nunca acoplam outros arquivos.
 
+### Links para rotas da loja
+
+Categorias, vitrines e páginas são dados do painel da Yampi, não arquivos do tema: o envio não cria rota. Desde a 0.10.0, a comparação do projeto recebe os links internos literais (`href`, `link`, `cta-url` e `'/<slug>/p'`) dos `.twig` e `.vue` que o projeto mudou, até 80, e lê cada um na vitrine pública, como a prévia: `preview-fetch`, sem a sessão do editor, com espera para 429 e 503.
+
+- Um link que a loja responde com 404 ou 410 aparece em **Precisa da sua atenção**, com os arquivos que o escrevem. É aviso, não bloqueio: a categoria pode estar sendo criada no painel.
+- Redirecionamento ou outra resposta contam como rota existente.
+- Sem a permissão da vitrine no Chrome, os links ficam sem conferência, com o motivo. **Conferir os links** pede a permissão no clique e compara de novo.
+
+`tests/jobs.test.ts` verifica estas regras.
+
 ### Leitura da loja
 
 A comparação abre na loja só os caminhos que o projeto mudou e os textos que eles usam: textos diferentes do original, crus ou depois do ajuste das referências de imagem; imagens com bytes diferentes, com os dois nomes possíveis de uma imagem que muda de pasta; e os textos incluídos, importados ou usados como componente por esses textos, porque um texto que só a loja mudou continua bloqueando quem o usa. Os demais caminhos são listados, não abertos, e entram como iguais ao original (`assumed`): o projeto não os mudou, então nunca são enviados, e a listagem ainda mostra o que a loja tem a mais ou a menos. Alt+clique em **Comparar de novo** lê o tema inteiro.
@@ -222,3 +232,55 @@ A extensão nunca aciona Publicar, Excluir ou Renomear. Salvar no editor muda a 
 ## Restauração
 
 Usa o registro de um envio: o conteúdo enviado passa a ser o original e o anterior passa a ser o local. Só volta o arquivo que continua igual ao enviado; alterações posteriores aparecem como conflito. Um texto criado pela extensão volta ao conteúdo inicial da Yampi. Nada é excluído: arquivos criados e imagens enviadas continuam na loja.
+
+## Prévia: páginas da loja e dos produtos
+
+Desde a 0.10.0, depois do recorte representativo (até 8 páginas, uma de cada tipo primeiro) e dos seus recursos, o download lê mais páginas públicas da vitrine. Usa o mesmo `PreviewFetch` (o worker confere a loja antes e depois de cada GET), a mesma origem e as mesmas permissões, e nada da sessão do editor. `tests/rocket-like.test.ts`, `tests/preview-pages.test.ts`, `tests/jobs.test.ts` e `scripts/preview-e2e.mjs` verificam estas regras com a loja fictícia.
+
+- **De onde vêm os caminhos.** De `url_path`, `url`, `link`, `path` e `href` das páginas capturadas, em qualquer profundidade (menu, subcategorias, rodapé, breadcrumbs, banners, promoções), e das leituras públicas gravadas. Do tema exportado: `href`, `link` e `cta-url` com caminho literal nos `.twig` e `.vue`, `'/<slug>/p'` e `slug: '<slug>'` (este, só um palpite). Entram só caminhos da mesma origem feitos de slugs: sem a home, sem extensão de arquivo e sem nada que `publicUrl` recuse (checkout, carrinho, conta, parâmetros de sessão).
+- **Uma captura por caminho.** A chave é o caminho: `?sort_by=` e `?page=` não criam outra captura. A busca é a exceção, uma captura por `?q=`. A prévia local abre a categoria com qualquer ordenação ou página, e a busca só pela pergunta exata.
+- **Ordem.**
+  1. Páginas da loja, em até 4 rodadas: cada rodada lê os links das páginas novas.
+  2. Páginas de produto (`/<slug>/p`), em até 2 rodadas: a segunda lê os produtos que só outras páginas de produto mostram (semelhantes).
+  3. Uma última rodada de páginas da loja, com os links que só os produtos trazem (breadcrumbs: o voltar da página do produto).
+
+  Como página da loja, só `category` (categorias, subcategorias, vitrines `/l`, buscas), `pages` e `promotion`; uma página de produto alcançada por um link sem `/p` conta como produto. Como produto, só `product` com `window.data.product.data`.
+- **Orçamento.** `storePages` 200, `storeBytes` 24 MiB e `storeRounds` 4; `productPages` 400 e `productBytes` 16 MiB. Fica à parte de `pages` (8) e dos recursos. Os bytes contam o `data` de cada página e cada `themeConfig` ou `merchant` distinto uma vez, como ficam no ZIP. O que passa vira `store-page-limit` ou `product-page-limit`, com a contagem e exemplos. Um caminho achado só nas páginas da última rodada, com orçamento sobrando, vira `store-page-rounds` ou `product-page-rounds`: não é limite de páginas. Nenhum recurso novo (CSS, fonte, foto) é baixado para essas páginas.
+- **Falhas.**
+  - 429 ou 503: todas as leituras esperam juntas o `Retry-After` (no máximo 60 s; sem o cabeçalho, 5 s vezes a tentativa). O intervalo entre leituras cresce 250 ms por aviso, até 2 s, e encolhe 25 ms por leitura que dá certo. Até 6 tentativas.
+  - Falha de rede: até 3 tentativas.
+  - As esperas passam pelo worker, em blocos de até 10 s.
+  - Depois disso, ou com outra resposta, a página fica de fora com o motivo (`page-unavailable`), e o download segue. 404 e 410 viram `link-broken`, com até 3 lugares do link (arquivo do tema ou chave dos dados, como `merchant.categories`), salvo quando o caminho era só um palpite de slug.
+  - Redirecionamento não é seguido (`redirect: manual`).
+  - Troca de loja ou cancelamento param o download, como em toda a captura.
+- **Limpeza.** Cada página passa por `sanitizeRaw`, com a mesma lista de bloqueio e o mesmo limite de tamanho das representativas, e recebe por cima o rascunho do editor (`applyEditor`). Notas de limpeza iguais viram uma, com a contagem de páginas.
+- **Relatório.** `stages`, no manifesto e em `report.json > pages.stages`, traz por etapa: quantos caminhos foram achados, quantas páginas entraram por tipo, quantos caminhos ficaram de fora pelo limite e a lista do que ficou de fora, com o motivo (até 200). O painel mostra o progresso como **Páginas da loja: N de M** e **Páginas dos produtos: N de M**; o resultado resume as etapas e lista os links quebrados.
+
+### Formato 3
+
+`preview/manifest.json` passa à versão 3:
+
+- `pages[]` ganha `stage` (`store` ou `product`; ausente nas páginas representativas) e `shared` (`{themeConfig?, merchant?}`, com o SHA-256 de cada um);
+- `shared[]` lista os arquivos `raw/shared/<sha256>.json`, cada um com tamanho e hash.
+
+Um `themeConfig` ou `merchant` igual em duas páginas ou mais é gravado uma vez em `raw/shared/` e sai do arquivo da página. O que só uma página tem fica nela. As páginas das etapas são gravadas sem indentação.
+
+**Por que assim, e não `raw/products.json` com `{caminho: data}` sobre uma página base.** Guardar só `window.data` e emprestar `themeConfig` e `merchant` de outra página perderia o que de fato muda entre páginas: as seções de uma promoção sem página representativa, um `merchant` com metadados da própria página. A prévia também teria de adivinhar qual página serve de base. Com a deduplicação pelo hash, nada se perde, cada arquivo continua conferido, `routeFor` e `npm run check` tratam toda página do mesmo jeito, e o tamanho cai quase como na sugestão: de uma página de produto de cerca de 25 KB, ficam os 8 KB de `data`.
+
+A prévia local aceita as versões 1, 2 e 3. Na 3, aceita até 640 páginas (no máximo 12 sem `stage`) e 256 arquivos compartilhados. Cada arquivo é conferido uma vez por versão no disco (tamanho e data) e fica congelado na memória: o servidor relê o projeto a cada pedido, e nenhuma renderização pode alterar o que a próxima lê. As ferramentas da 0.9.1 e anteriores aceitam só as versões 1 e 2, com no máximo 12 páginas. `scripts/update-project.mjs` leva as ferramentas novas junto com a prévia (`--preview`), e `scripts/runtime-versions.json` reconhece as ferramentas de cada versão registrada no Git.
+
+### Prévia nova sem baixar o tema
+
+Depois de **Atualizar a pasta**, **Baixar a prévia nova** faz um download `previewOnly`:
+
+- o tema vem da referência que a extensão guarda (a loja lida pela atualização); o editor não é lido e a referência não muda;
+- o ZIP tem só `preview/`.
+
+A extensão nunca grava em `preview/` (veja "Escrita na pasta do projeto"). Quem troca é `npm run previa:trocar -- <zip>` (`local-runtime/preview-swap.mjs`), na pasta do projeto:
+
+1. aceita um ZIP com um único `preview/manifest.json` e recusa caminho inseguro;
+2. extrai em `.cache/` e confere com `loadPreview` (mesma loja, hashes, formato);
+3. move a prévia anterior para `.yampi-sync/updates/<data>-previa/`;
+4. só então põe a nova no lugar.
+
+`tema/` nunca muda, e `preview/` nunca vai para a Yampi.

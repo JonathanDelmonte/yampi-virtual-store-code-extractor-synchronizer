@@ -1,5 +1,25 @@
 # Validação
 
+## Páginas da loja e dos produtos na 0.10.0, em 29/10/2026
+
+Pedido: a prévia de uma loja real tinha 7 páginas, e menu, rodapé, "Ver tudo", quase todos os produtos e o voltar da página de produto davam "Rota não capturada". Tudo abaixo usa só a loja e o editor fictícios. `npm run check` passou com 609 testes em 43 arquivos.
+
+- **Loja fictícia no formato real** (`tests/rocket-like.test.ts`, `tests/fixtures/rocket-like.ts`): 4 categorias, 2 subcategorias, uma vitrine `/l` (só no "Ver tudo" da coleção), 4 páginas de rodapé, uma promoção, uma busca escrita no tema, uma categoria que só um breadcrumb de produto linka, 14 produtos e uma cadeia de produtos semelhantes. Também tem uma categoria e um produto removidos (404, linkados pelo rodapé do tema), uma página do rodapé que redireciona para outro site e uma categoria que responde 429 duas vezes.
+  - Resultado: 29 páginas, 8 delas no recorte representativo. A etapa da loja leu 10 páginas (6 categorias ou vitrines, 2 institucionais, 1 promoção, 1 busca) e a dos produtos, 11. 13 produtos têm a própria página. O 14º, que só a página do 13º mostra (lida na segunda e última rodada de produtos), fica de fora com esse motivo, e não como limite.
+  - Os dois 404 viraram **link quebrado**, com `sections/global/footer.twig` como lugar do link. O redirecionamento não foi seguido nem pedido ao outro site. A categoria com 429 esperou o `Retry-After` duas vezes e entrou.
+  - Uma página com 429 sem fim fica de fora com "HTTP 429" depois de esperar a cada tentativa. Com o limite de 4 páginas da loja, o aviso diz o limite e quantos caminhos ficaram de fora, e o recorte representativo não muda.
+  - `customer`, `session_token` e `api_key` dentro de `window.data` de uma categoria e de um produto não aparecem em nenhum JSON do ZIP.
+- **Formato 3 e runtime local** (`tests/preview-pages.test.ts`, `tests/local-runtime.test.mjs`):
+  - `themeConfig` e `merchant` repetidos vão uma vez para `raw/shared/`, e a página de produto guarda só `data` e `bodyClasses`. Um compartilhado alterado, ou uma página editada à mão depois de lida, é recusado.
+  - Rotas: categoria com qualquer ordenação ou página; busca só pela pergunta exata; `/__local/` com a contagem por tipo.
+  - `npm run previa:trocar` troca `preview/`, guarda a anterior e recusa outra loja, captura alterada ou caminho inseguro, sem tocar `tema/`.
+- **Operação e painel** (`tests/jobs.test.ts`): o progresso mostra **Páginas da loja: N de M** e **Páginas dos produtos: N de M**, e a barra só avança. O resultado lista os links quebrados. A prévia avulsa baixa só `preview/`, a partir da referência guardada, sem ler o editor nem mudar a referência.
+  - Na comparação, os links do rodapé alterado da loja fictícia foram lidos pelo `fetchPublicResource` real: os dois 404 apontam o arquivo, a busca existe. Um 429 espera e repete; sem a permissão da vitrine, os links ficam sem conferência, com o motivo, e a comparação termina.
+- **Chromium** (`npm run test:preview`): a exportação da loja fictícia foi movida, instalada com `npm ci`, e `npm run check` compilou todas as páginas, com todas as seções visíveis. Na prévia local, 14 cliques abriram a própria página: duas categorias do menu, duas subcategorias, duas páginas do rodapé, "Ver tudo", a busca do rodapé, três cards de produto e o voltar de cada um. O link para a categoria removida mostrou "Rota não capturada".
+- **Extensão real** (`npm run test:e2e`, `test:panel`, `test:update`, `test:direct`, `test:compression`): todas passaram. Em execuções seguidas, `test:e2e` falhou duas vezes na restauração com mudança externa e uma vez no heartbeat do painel. A primeira falha também aconteceu no código da 0.9.1 (`2bcd120`), sem as mudanças desta versão. A execução final passou inteira, sem alteração, inclusive o download com a vitrine fictícia no formato 3 dentro do documento de segundo plano. `test:direct` falhou uma vez ao abrir o editor fictício e passou ao repetir.
+
+Sem validação real: nenhuma exportação de loja real com a 0.10.0 foi feita nem conferida pelo proprietário.
+
 ## Download com a vitrine na 0.9.1, em 19/10/2026
 
 Relato do proprietário num download real: depois de ler os 264 arquivos, a captura da vitrine pediu autorização, recomeçou a contagem e pediu de novo. Os números iam e voltavam, e o topo mostrava 100% com "Preparar o ZIP" e "Baixar o ZIP" pendentes.

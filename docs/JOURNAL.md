@@ -195,3 +195,24 @@ Decisões:
 - as origens já permitidas entram sem pergunta;
 - a contagem da etapa é monotônica;
 - a barra para em 99% enquanto há trabalho.
+
+## 29/10/2026 — Páginas da loja e dos produtos na prévia (0.10.0)
+
+Pedido do proprietário, em dois textos de 26 e 27/10/2026 escritos a partir da prévia de uma loja real:
+- a exportação deve trazer sozinha as páginas da loja que as páginas capturadas e o tema linkam (categorias, subcategorias, vitrines `/l`, buscas, páginas de atendimento, promoções) e a página de cada produto, para que menu, rodapé, "Ver tudo", produtos e voltar abram na prévia local;
+- o envio deve avisar quando o tema linka uma rota que não existe na loja.
+
+Na exportação real de referência (20/10/2026), a prévia tinha 7 páginas, e a home linkava mais de cem produtos. O proprietário já fazia isso fora da extensão, com scripts locais do projeto da loja. Eles foram lidos só como referência de comportamento; nada do projeto da loja veio para este repositório, e os testes usam a loja fictícia.
+
+Decisões:
+- Duas etapas depois do recorte, nesta ordem: páginas da loja (até 4 rodadas), páginas dos produtos e uma rodada final com as categorias que só um produto linka. Orçamento próprio (200 e 400 páginas), à parte do recorte e dos recursos.
+- Da página ao vivo entram os três objetos públicos, não só `window.data` como nos scripts de referência. `themeConfig` e `merchant` repetidos são guardados uma vez pelo hash, em `raw/shared/` (formato 3 da prévia). O motivo está em [SPEC.md](SPEC.md), "Formato 3".
+- Sem fotos novas: o orçamento de recursos continua com CSS, fontes e banners.
+- 404 vira `link-broken`, com o lugar do link. A comparação usa o mesmo critério para os links dos textos que vão no envio; é aviso, não bloqueio.
+- 429 e 503 fazem todas as leituras esperarem juntas. O download público passou a `redirect: 'manual'`, que também não segue o redirecionamento, mas o distingue de uma falha de rede.
+- A extensão continua sem gravar em `preview/`. A prévia nova depois de **Atualizar a pasta** vem num ZIP, e uma ferramenta do projeto (`npm run previa:trocar`) faz a troca.
+- `scripts/runtime-versions.json` não tinha os hashes das ferramentas da 0.9.1: `update-project.mjs` recusaria esses projetos ao trocar `preview.mjs`. Agora registra todas as versões das ferramentas no Git.
+
+Não feito: os scripts de referência também gravavam, para cada produto, uma leitura `catalog/products/<slug>` montada com a página. Não foi reproduzido, porque seria uma resposta da API inventada a partir de outra fonte. As seções que pedem um produto pelo slug continuam com as leituras planejadas pela captura.
+
+Ainda sem validação real: nenhuma loja real foi acessada. O formato das páginas de busca, promoção e vitrine `/l` segue o descrito pelo proprietário e foi reproduzido na loja fictícia.
