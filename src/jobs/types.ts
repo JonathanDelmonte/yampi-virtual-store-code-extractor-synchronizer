@@ -1,5 +1,6 @@
 import type {Context, Plan} from '../core/model';
 import type {PhaseState} from '../core/progress';
+import type {LinkCheck, LinkReport} from '../core/preview-links';
 // A long operation that runs outside the panel: in the extension's background document, so
 // closing the panel or switching tabs never stops it. The panel only shows its state.
 export type JobKind = 'export' | 'compare' | 'send';
@@ -11,6 +12,11 @@ export interface JobRequest {
   id: string; kind: JobKind;
   // export: also capture the published storefront (already authorized by the user in the panel).
   includePreview?: boolean;
+  // export: only preview/, from the reference the extension keeps (after "Atualizar da loja"); the
+  // theme is not read again and the reference does not change.
+  previewOnly?: boolean;
+  // compare: the internal links of the texts the project changed, checked against the storefront.
+  links?: LinkCheck[];
   // compare and send: the project or the undo of an earlier send (journalId); compare also the update.
   scope?: CompareScope; journalId?: string;
   // compare: the store files to read; full reads every file.
@@ -25,8 +31,8 @@ export interface JobEvent {at: number; text: string; path?: string; tone: 'ok' |
 export interface Waiting {kind: 'origins'; origins: string[]}
 export type Decision = {action: 'allow'; origins: string[]} | {action: 'partial'} | {action: 'discard'};
 export type JobResult =
-  | {kind: 'export'; texts: number; images: number; pages?: number; fileName: string; preview: string; previewDetails?: string}
-  | {kind: 'compare'; read: number; listed: number; full: boolean}
+  | {kind: 'export'; texts: number; images: number; pages?: number; fileName: string; preview: string; previewDetails?: string; warnings?: string[]; previewOnly?: boolean}
+  | {kind: 'compare'; read: number; listed: number; full: boolean; links?: LinkReport}
   | {kind: 'send'; journalId?: string; verified: number; created: number; uploaded: number; total: number; warnings: string[]; preview?: string};
 export interface JobState {
   id: string; kind: JobKind; status: JobStatus; scope?: CompareScope; resumed?: boolean;

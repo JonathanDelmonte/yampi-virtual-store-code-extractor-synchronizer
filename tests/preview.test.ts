@@ -59,7 +59,7 @@ describe('contexto visual portátil separado do código',()=>{
   test('download público é somente GET sem credenciais; streaming não é truncado',async()=>{
     const fetcher=vi.fn(async()=>new Response('<svg/>',{headers:{'content-type':'image/svg+xml'}}));
     expect((await fetchPublicResource('https://cdn.invalid/a.svg',['https://cdn.invalid'],fetcher as any)).encoded).toBe(btoa('<svg/>'));
-    expect(fetcher).toHaveBeenCalledWith('https://cdn.invalid/a.svg',expect.objectContaining({method:'GET',credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'}));
+    expect(fetcher).toHaveBeenCalledWith('https://cdn.invalid/a.svg',expect.objectContaining({method:'GET',credentials:'omit',redirect:'manual',referrerPolicy:'no-referrer'}));
     await expect(fetchPublicResource('https://cdn.invalid/a.svg',[],fetcher as any)).rejects.toThrow('autorizada');
     const large=vi.fn(async()=>new Response(new Uint8Array(2*1024*1024+1)));await expect(fetchPublicResource('https://cdn.invalid/a.svg',['https://cdn.invalid'],large as any)).rejects.toThrow('não foi truncado');
     const redirected=vi.fn(async()=>{const r=new Response('<svg/>');Object.defineProperty(r,'url',{value:'https://other.invalid/a.svg'});return r;});await expect(fetchPublicResource('https://cdn.invalid/a.svg',['https://cdn.invalid'],redirected as any)).rejects.toThrow('redirecionado');

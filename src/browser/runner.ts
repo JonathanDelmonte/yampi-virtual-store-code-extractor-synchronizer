@@ -3,6 +3,7 @@
 // which holds the editor tab, the lock and the downloads; it never reaches a page directly.
 import {runJob, type EngineHost} from '../jobs/engine';
 import {preparePreview, finishPreview, unauthorizedOrigins} from './preview-capture';
+import {expandPreview} from './preview-pages';
 import {zipInWorker} from './zip-client';
 import {validateContext, type Context} from '../core/model';
 import type {Decision, JobRequest, JobState} from '../jobs/types';
@@ -36,7 +37,7 @@ function start(job: JobRequest, context: Context, token: string): void {
     report: (state: JobState) => {reports = reports.then(() => ask({...base, action: 'job-report', state})).then(() => {}, () => {});},
     wait: ms => ask({...base, action: 'job-wait', ms}),
     compress: zipInWorker,
-    preview: {prepare: preparePreview, finish: finishPreview, unauthorized: unauthorizedOrigins}
+    preview: {prepare: preparePreview, finish: finishPreview, unauthorized: unauthorizedOrigins, expand: expandPreview}
   };
   const control = {signal: controller.signal, decision: () => new Promise<Decision>(resolve => {running.decide = resolve;})};
   void runJob(job, context, host, control)

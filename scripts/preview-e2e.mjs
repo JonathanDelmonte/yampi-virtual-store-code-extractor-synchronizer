@@ -45,8 +45,12 @@ try {
   await build({entryPoints:[path.join(repository,'tests/fixtures/rocket-like.ts')],bundle:true,platform:'node',format:'esm',outfile:path.join(temporary,'rocket-like.mjs'),logLevel:'silent'});
   const rocketModule=await import(pathToFileURL(path.join(temporary,'rocket-like.mjs'))),{compileStyles}=await import(pathToFileURL(path.join(repository,'local-runtime/engine.mjs')));
   const rocket=rocketModule.rocketLike({flagsRoute:true}),rocketResources={...rocket.resources,...Object.fromEntries(Object.entries(rocket.themeSheets).map(([url,entries])=>[url,{type:'text/css',text:entries.length?rocketModule.platformMinify(compileStyles(rocket.snapshot.files,entries,{style:'compressed',assets:rocketModule.ASSETS})):''}]))};
-  const network=[];
-  await captureContext.route('https://**/*',async route=>{const url=route.request().url(),resource=fixtures.dark.resources[url]||fixtures.light.resources[url]||rocketResources[url];assert.ok(resource,'URL externa inesperada: '+url);assert.equal(route.request().method(),'GET');assert.equal(route.request().headers()['cookie'],undefined);network.push(url);await route.fulfill({contentType:resource.type,body:resource.base64?Buffer.from(resource.base64,'base64'):resource.text,headers:{'Access-Control-Allow-Origin':'*'}});});
+  const network=[],throttled=new Map();
+  // The fictional store answers like a store: any order or page of a path (?sort_by=, ?page=), a 404, a 302 to another site, and 429 with Retry-After before answering.
+  const storePath=url=>{const parsed=new URL(url);if(parsed.origin!==rocketModule.STORE)return url;for(const key of [...parsed.searchParams.keys()])if(key!=='q')parsed.searchParams.delete(key);return parsed.href;};
+  await captureContext.route('https://**/*',async route=>{const url=route.request().url(),resource=fixtures.dark.resources[url]||fixtures.light.resources[url]||rocketResources[url]||rocketResources[storePath(url)];assert.ok(resource,'URL externa inesperada: '+url);assert.equal(route.request().method(),'GET');assert.equal(route.request().headers()['cookie'],undefined);network.push(url);
+    const seen=throttled.get(url)||0;if(resource.throttle&&seen<resource.throttle){throttled.set(url,seen+1);await route.fulfill({status:429,contentType:'text/plain',body:'Calma',headers:{'Retry-After':'1','Access-Control-Allow-Origin':'*'}});return;}
+    await route.fulfill({status:resource.status||200,contentType:resource.type,body:resource.base64?Buffer.from(resource.base64,'base64'):resource.text,headers:{'Access-Control-Allow-Origin':'*',...resource.headers}});});
   const captures={dark:await capturePage.evaluate(()=>VisualHarness.capture('dark')),light:await capturePage.evaluate(()=>VisualHarness.capture('light'))},rocketCapture=await capturePage.evaluate(()=>VisualHarness.captureRocket());
   assert.ok(!network.some(url=>/\.scss|fictional-cyrillic/.test(url)),'Requisição derivada de Sass ou fonte fora de latin.');
   await captureContext.close();await new Promise(r=>harnessServer.close(r));harnessServer=null;
@@ -98,19 +102,44 @@ try {
   const {createLocalServer:createRocketServer}=await import(pathToFileURL(path.join(rocketMoved,'.yampi-sync/tools/dev.mjs'))+'?rocket');const rocketCompiler=await import(pathToFileURL(path.join(rocketMoved,'node_modules/esbuild/lib/main.js')));buildStops.push(rocketCompiler.stop||rocketCompiler.default.stop);const rocketLocal=await createRocketServer(rocketMoved);localServer=rocketLocal.server;await new Promise(r=>localServer.listen(0,'127.0.0.1',r));const rocketBase='http://127.0.0.1:'+localServer.address().port;
   const rocketContext=await browser.newContext(),rocketForeign=[];await rocketContext.route('**/*',route=>{if(route.request().url().startsWith(rocketBase+'/'))return route.continue();rocketForeign.push(route.request().url());return route.abort();});
   const rocketPages=[];
-  for(const [route,expectedSections] of [['/',3],['/categoria-a',1],['/produto-ficticio-1',2],['/sobre',1],['/promocao',1]]) {
+  // The stages read the store's pages and every product page: a 404 became a broken link, the 302 was not followed and category D waited out its two 429s.
+  assert.ok(rocketCapture.pages.filter(p=>p.stage==='store').length>=10,JSON.stringify(rocketCapture.stages));assert.equal(rocketCapture.pages.filter(p=>p.kind==='product').length,13);
+  assert.deepEqual(rocketCapture.issues.filter(i=>i.code==='link-broken').map(i=>i.resource),['/categoria-removida','/produto-removido/p']);assert.ok(rocketCapture.pages.some(p=>p.sourceUrl===rocketModule.STORE+'/categoria-d'));assert.equal(throttled.get(rocketModule.STORE+'/categoria-d'),2);
+  assert.ok(!network.some(url=>url.startsWith('https://parceiro-ficticio.invalid')),'Redirecionamento seguido para outra origem.');
+  for(const [route,expectedSections] of [['/',3],['/categoria-a',1],['/produto-ficticio-1/p',2],['/sobre',1],['/promocao',1]]) {
     const page=await rocketContext.newPage(),consoleMessages=[];page.on('console',message=>consoleMessages.push(message.text()));page.on('pageerror',error=>consoleMessages.push(error.message));
     await page.goto(rocketBase+route);await page.waitForFunction(()=>window.__yampiLocalState);await page.waitForLoadState('networkidle');
-    if(route==='/produto-ficticio-1')await page.locator('.flags').filter({hasText:'rota ausente'}).waitFor();
+    if(route==='/produto-ficticio-1/p')await page.locator('.flags').filter({hasText:'rota ausente'}).waitFor();
     if(route==='/')await page.locator('.shelf-image').nth(1).waitFor();
     const state=await page.evaluate(async()=>{await document.fonts.load('16px "Fictional Sans"');await document.fonts.ready;const icon=document.querySelector('.icon-cart');const iconUrl=icon&&getComputedStyle(icon).backgroundImage.match(/url\("?([^")]+)"?\)/)?.[1];return {ready:window.__yampiLocalReady,local:window.__yampiLocalState,fonts:[...document.fonts].filter(f=>f.family.includes('Fictional')).map(f=>f.status),images:[...document.images].map(i=>({src:i.currentSrc,width:i.naturalWidth})),iconStatus:iconUrl?(await fetch(iconUrl)).status:0,iconUrl,summary:document.querySelector('#yampi-preview-status [data-summary]')?.textContent};});
     assert.equal(state.ready,true,route+': '+JSON.stringify(state.local));assert.equal(state.local.renderedSections,expectedSections,route);assert.equal(state.local.expectedSections,expectedSections,route);
     assert.ok(state.fonts.length&&state.fonts.every(status=>status==='loaded'),route+' fontes: '+state.fonts);assert.ok(!consoleMessages.some(text=>/OTS|Failed to decode downloaded font/.test(text)),route+': '+consoleMessages.join(' | '));
     assert.ok(state.images.length&&state.images.every(image=>image.src.includes('/preview/assets/')&&image.width>0),route+' imagens: '+JSON.stringify(state.images));assert.equal(state.local.placeholders,0);
     assert.equal(state.iconStatus,200,route+' ícone '+state.iconUrl);assert.ok(state.iconUrl.includes('/__platform/assets/img/themes/vitrine/icons/cart.svg'));
-    if(route==='/produto-ficticio-1')assert.deepEqual(state.local.missingRoutes,['GET catalog/products/1/flags']);else assert.deepEqual(state.local.missingRoutes,[],route);
+    if(route==='/produto-ficticio-1/p')assert.deepEqual(state.local.missingRoutes,['GET catalog/products/1/flags']);else assert.deepEqual(state.local.missingRoutes,[],route);
     rocketPages.push({route,state});await page.close();
   }
+  // Every link a visitor follows opens its own page: the menu, the subcategories, the footer, "Ver tudo", a product card, the way back from the product and a search the theme writes.
+  const clicks=[];
+  const follow=async(page,selector,title,expected)=>{const link=page.locator(selector).first();await link.waitFor();const href=await link.getAttribute('href');await link.click();await page.waitForURL(rocketBase+(expected??href));await page.waitForFunction(()=>window.__yampiLocalState);const shown=(await page.locator('.page-title').first().textContent())?.trim();assert.equal(shown,title,selector+' '+href);clicks.push({selector,href,title:shown});};
+  // Tall enough that the preview's fixed status bar never covers the footer.
+  const visitor=await rocketContext.newPage();await visitor.setViewportSize({width:1280,height:2400});
+  const at=async route=>{await visitor.goto(rocketBase+route);await visitor.waitForFunction(()=>window.__yampiLocalState);};
+  await at('/');await follow(visitor,'.category-link:text("Categoria C")','Categoria C');
+  await at('/');await follow(visitor,'.subcategory-link:text("Subcategoria C1")','Subcategoria C1');
+  await at('/');await follow(visitor,'.subcategory-link:text("Subcategoria C2")','Subcategoria C2');
+  await at('/');await follow(visitor,'.category-link:text("Categoria D")','Categoria D');
+  await at('/');await follow(visitor,'.page-link:text("Trocas")','Trocas');
+  await at('/');await follow(visitor,'.page-link:text("Privacidade")','Privacidade');
+  await at('/');await follow(visitor,'.see-all','Destaques fictícios');
+  await at('/');await follow(visitor,'.search-shortcut','Busca');
+  await at('/categoria-c?sort_by=best_sellers');await follow(visitor,'.grid-product:has-text("Produto Fictício 5")','Produto Fictício 5');await follow(visitor,'.back-link','Categoria Oculta');
+  await at('/categoria-d');await follow(visitor,'.grid-product:has-text("Produto Fictício 9")','Produto Fictício 9');await follow(visitor,'.back-link','Categoria D');
+  await at('/');await follow(visitor,'.shelf-product:has-text("Produto Fictício 3")','Produto Fictício 3');await follow(visitor,'.back-link','Categoria B');
+  await at('/');await visitor.locator('.old-shortcut').click();await visitor.waitForURL(rocketBase+'/categoria-removida');assert.match(await visitor.content(),/Rota não capturada/);
+  const index=await (await fetch(rocketBase+'/__local/')).text();assert.match(index,/<strong>Produtos<\/strong>: 13/);
+  await visitor.close();
+  console.log('Prévia formato real: '+clicks.length+' cliques em menu, subcategorias, rodapé, Ver tudo, busca, produtos e voltar abriram a própria página.');
   // A template that stops rendering its sections is reported as incomplete.
   await writeFile(path.join(rocketMoved,'tema/templates/promotion.twig'),'<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"><p>Sem seções</p></div></body></html>');
   const broken=await rocketContext.newPage();await broken.goto(rocketBase+'/promocao');await broken.waitForFunction(()=>window.__yampiLocalState);
@@ -118,7 +147,7 @@ try {
   const uncaptured=await fetch(rocketBase+'/rota-que-nao-existe');assert.equal(uncaptured.status,404);assert.match(await uncaptured.text(),/Rota não capturada/);
   assert.deepEqual(rocketForeign,[]);await rocketContext.close();await new Promise(r=>localServer.close(r));localServer=null;
   console.log('Prévia formato real: seções, fontes latin, ícones de $assets, imagens capturadas, rota ausente explícita e prontidão estrutural conferidas.');
-  summary.push({store:'Loja Fictícia Vitrine',format:'real',pages:rocketCapture.pages.map(p=>p.kind),assets:rocketCapture.resources.length,cssParity:'published-verified-by-css',checks:rocketPages.map(p=>({route:p.route,sections:p.state.local.renderedSections+'/'+p.state.local.expectedSections}))});
+  summary.push({store:'Loja Fictícia Vitrine',format:'real',pages:rocketCapture.pages.map(p=>p.kind),stages:rocketCapture.stages,clicks,assets:rocketCapture.resources.length,cssParity:'published-verified-by-css',checks:rocketPages.map(p=>({route:p.route,sections:p.state.local.renderedSections+'/'+p.state.local.expectedSections}))});
   await writeFile(path.join(evidence,'report.json'),JSON.stringify({fictionalOnly:true,realStoreVisualValidation:false,networkRequests:network.length,stores:summary},null,2));console.log('Três lojas fictícias validadas: duas com comparação visual e uma no formato real da vitrine. Evidências em .cache/visual-validation/. Nenhuma certificação visual de loja real.');
 } catch(error) {console.error('Falha na validação visual:',error);throw error;
 } finally {

@@ -71,7 +71,7 @@ describe('painel lateral, permissões e isolamento do editor', () => {
     await message(token,{action:'lock',access:'write'});expect((await message(token,{action:'preview-fetch',preview:{url:'https://store-a.invalid/a.svg',context:ctx}})).error).toContain('leitura');expect(fetcher).not.toHaveBeenCalled();
     await message(token,{action:'unlock'});await message(token,{action:'lock',access:'read'});
     expect((await message(token,{action:'preview-allow',preview:{origins:['https://cdn-a.invalid'],context:ctx}})).ok).toBe(true);
-    expect((await message(token,{action:'preview-fetch',preview:{url:'https://cdn-a.invalid/a.svg',context:ctx}})).ok).toBe(true);expect(fetcher).toHaveBeenCalledWith('https://cdn-a.invalid/a.svg',expect.objectContaining({credentials:'omit',redirect:'error'}));
+    expect((await message(token,{action:'preview-fetch',preview:{url:'https://cdn-a.invalid/a.svg',context:ctx}})).ok).toBe(true);expect(fetcher).toHaveBeenCalledWith('https://cdn-a.invalid/a.svg',expect.objectContaining({credentials:'omit',redirect:'manual'}));
     expect((await message(token,{action:'preview-fetch',preview:{url:'https://cdn-b.invalid/a.svg',context:ctx}})).ok).toBe(false);expect(fetcher).toHaveBeenCalledTimes(1);
     await message(token,{action:'unlock'});expect(stored[token].previewOrigins).toBeUndefined();await message(token,{action:'lock',access:'read'});expect((await message(token,{action:'preview-fetch',preview:{url:'https://cdn-a.invalid/a.svg',context:ctx}})).ok).toBe(false);
   });

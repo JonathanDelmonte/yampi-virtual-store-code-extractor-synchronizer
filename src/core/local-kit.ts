@@ -12,10 +12,11 @@ import platform from '../../local-runtime/platform.mjs?raw';
 import browserPlatform from '../../local-runtime/platform-browser.mjs?raw';
 import twig from '../../local-runtime/twig.mjs?raw';
 import knownRuntime from '../../local-runtime/known.mjs?raw';
+import swapRuntime from '../../local-runtime/preview-swap.mjs?raw';
 import pkg from '../../local-runtime/package.json?raw';
 import lock from '../../local-runtime/package-lock.json?raw';
 const json = (value: unknown) => JSON.stringify(value, null, 2) + '\n';
-export const TOOL_FILES: Record<string, string> = {'engine.mjs': engine, 'dev.mjs': dev, 'pack.mjs': pack, 'platform.mjs': platform, 'platform-browser.mjs': browserPlatform, 'twig.mjs': twig, 'preview.mjs': previewRuntime, 'integrity.mjs': integrityRuntime, 'contract.mjs': contractRuntime, 'dependencies.mjs': dependenciesRuntime, 'parity.mjs': parityRuntime, 'known.mjs': knownRuntime};
+export const TOOL_FILES: Record<string, string> = {'engine.mjs': engine, 'dev.mjs': dev, 'pack.mjs': pack, 'platform.mjs': platform, 'platform-browser.mjs': browserPlatform, 'twig.mjs': twig, 'preview.mjs': previewRuntime, 'integrity.mjs': integrityRuntime, 'contract.mjs': contractRuntime, 'dependencies.mjs': dependenciesRuntime, 'parity.mjs': parityRuntime, 'known.mjs': knownRuntime, 'preview-swap.mjs': swapRuntime};
 // Sections map generated from the exported inventory and the captured aliases.
 // Rule-based resolution still applies; this file documents and allows overrides.
 function sectionMap(paths: string[], preview?: PreviewBundle): Record<string, string> {
@@ -75,7 +76,7 @@ npm run check
 npm run dev
 \`\`\`
 
-Abra http://127.0.0.1:5182: as páginas capturadas abrem pelos mesmos caminhos da loja (por exemplo, \`/\` e \`/produto-x\`). O índice em http://127.0.0.1:5182/__local/ lista as capturas e os templates sem captura. Edite \`tema/\` e recarregue para conferir.
+Abra http://127.0.0.1:5182: as páginas capturadas abrem pelos mesmos caminhos da loja (por exemplo, \`/\`, \`/categoria-x\` e \`/produto-x/p\`). Além das páginas representativas, a exportação traz as páginas da loja que elas e o tema linkam (categorias, vitrines, buscas, atendimento, promoções) e a página de cada produto que elas mostram. Uma categoria abre com qualquer ordenação ou página; uma busca, só pela pergunta capturada. O índice em http://127.0.0.1:5182/__local/ mostra quantas páginas há de cada tipo e os templates sem captura. Edite \`tema/\` e recarregue para conferir.
 
 \`npm run check\` compila todas as páginas, confere se cada seção visível foi renderizada e compara o CSS compilado com o CSS publicado capturado. O resultado fica em \`.cache/yampi-check.json\`. A falta de uma seção, um alias sem arquivo ou um dado obrigatório ausente interrompe o check com o nome da página, do alias ou do arquivo.
 
@@ -94,6 +95,16 @@ Depois de cada atualização e de cada envio, a referência (\`.yampi-sync/manif
 Antes de mudar a pasta, a extensão guarda versões em \`.yampi-sync/versoes/\`: a referência, a pasta e a loja, só com textos. Imagens não entram. Em **Versões**, abra uma versão para ver o que mudou desde então e trazer um arquivo, ou todos, de volta para \`tema/\`. A pasta de antes também fica guardada. Você pode salvar uma versão com nome a qualquer momento.
 
 Se o projeto usa Git, rode \`npm run versoes:conhecidas\` antes de atualizar: ele grava em \`.yampi-sync/versoes-conhecidas.json\` cada versão que o Git teve de cada texto de \`tema/\`. Um texto da loja igual a uma delas é mudança do próprio projeto, não de outra pessoa, mesmo que o envio tenha sido feito em outro computador. Depois de cada envio, baixe o **recibo do envio** na extensão e guarde-o em \`.yampi-sync/recibos/\`, com commit, para que todos partam da mesma referência.
+
+## Atualizar a prévia
+
+Categorias e páginas criadas no painel da Yampi depois da exportação não estão em \`preview/\`. Depois de **Atualizar a pasta** na extensão, use **Baixar a prévia nova**: ele gera um ZIP só com \`preview/\`, sem ler o tema de novo. Nesta pasta:
+
+\`\`\`sh
+npm run previa:trocar -- caminho/do/previa-loja.zip
+\`\`\`
+
+A ferramenta confere a loja, os hashes e o formato, guarda a prévia anterior em \`.yampi-sync/updates/\` e põe a nova no lugar. \`tema/\` não muda, e \`preview/\` nunca vai para a Yampi. O mesmo comando aceita uma exportação completa da mesma loja.
 
 ## Limitações do retorno
 
@@ -151,7 +162,7 @@ O \`.gitignore\` ignora \`tema/\`, originais, manifesto, versões e \`preview/\`
 
 O relatório em preview/report.json informa a origem, as chaves que o código usa e a captura não trouxe, aliases sem arquivo e recursos ausentes. Configuração publicada pode diferir do rascunho; compilação não certifica fidelidade visual.
 
-A prévia compila Twig, Vue 2 e Sass e simula um conjunto explícito de helpers, mixins e leituras públicas gravadas. Rotas da API que não foram gravadas falham com erro explícito. Produtos e categorias são uma amostra datada; não há backend, estoque/preços em tempo real, pagamentos ou checkout. Chamadas externas e formulários são bloqueados. A barra inferior mostra seções renderizadas, imagens em placeholder, fontes com erro e rotas não capturadas. Confira também o resultado na Yampi antes de publicar. Vue 2 é mantido para compatibilidade e está fora de manutenção.
+A prévia compila Twig, Vue 2 e Sass e simula um conjunto explícito de helpers, mixins e leituras públicas gravadas. Rotas da API que não foram gravadas falham com erro explícito. Produtos e categorias são uma amostra datada: até 8 páginas representativas, 200 páginas da loja e 400 de produto. As páginas da loja e de produto vêm sem fotos novas, e uma foto sem cópia aparece como placeholder. Um link que a loja respondeu com 404 aparece em preview/report.json como link quebrado. Não há backend, estoque/preços em tempo real, pagamentos ou checkout. Chamadas externas e formulários são bloqueados. A barra inferior mostra seções renderizadas, imagens em placeholder, fontes com erro e rotas não capturadas. Confira também o resultado na Yampi antes de publicar. Vue 2 é mantido para compatibilidade e está fora de manutenção.
 
 Imagens exportadas ficam em \`tema/assets/\`. Não altere à mão \`.yampi-sync/manifest.json\`, \`.yampi-sync/baseline/\` nem \`.yampi-sync/versoes/\`: a extensão os mantém.
 

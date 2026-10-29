@@ -2,12 +2,34 @@ import type {Snapshot} from '../../src/core/model';
 import {fontBase64} from './visual-stores';
 // Entirely fictional store and theme in the real capture format: raw section list
 // with position 0/1/2, main_* aliases, window.data.config, order, company, font
-// subsets, $assets icons, thumbor-like variants and public catalog reads.
+// subsets, $assets icons, thumbor-like variants and public catalog reads. It has more
+// categories, subcategories, showcases, footer pages and products than the 8-page cut,
+// a link of the theme to a route the store does not have (404), a page that redirects
+// to another origin and a category that answers 429 twice before answering.
 export const STORE = 'https://ficticia-loja.invalid', CDN = 'https://cdn-ficticio.invalid', IMG = 'https://img-ficticio.invalid', FONTS = 'https://fontes-ficticias.invalid';
 export const API = 'https://api.dooki.com.br/v2/ficticia/public/', ASSETS = CDN + '/vitrine/assets';
 const SIG = 'AbCdEfGhIjKlMnOpQrStUvWxYz0=';
 const variant = (size: string, path: string) => `${IMG}/${SIG}/fit-in/${size}/${path}`;
-export interface FixtureResource {text?: string; base64?: string; type: string}
+// status/headers: an answer other than 200 (404, a 302 to another origin). throttle: how many
+// times the URL answers 429 (Retry-After: 1) before answering.
+export interface FixtureResource {text?: string; base64?: string; type: string; status?: number; headers?: Record<string, string>; throttle?: number}
+// The fixture as a fetch(): what fetchPublicResource receives from the browser, 429s included.
+export function fixtureFetch(resources: Record<string, FixtureResource>, requested: string[] = []): typeof fetch {
+  const throttled = new Map<string, number>();
+  return (async (input: string | URL) => {
+    // Like the store, a page answers with any order or page (?sort_by=, ?page=); a search keeps ?q=.
+    const url = String(input), parsed = new URL(url);
+    for (const key of [...parsed.searchParams.keys()]) if (key !== 'q') parsed.searchParams.delete(key);
+    const resource = resources[url] ?? (parsed.origin === STORE ? resources[parsed.href] : undefined);
+    requested.push(url);
+    if (!resource) throw new TypeError('Failed to fetch: recurso fictício ausente ' + url);
+    const seen = throttled.get(url) || 0;
+    if (resource.throttle && seen < resource.throttle) {throttled.set(url, seen + 1); return new Response('Calma', {status: 429, headers: {'retry-after': '1'}});}
+    if (resource.status && resource.status >= 300 && resource.status < 400) {const response = new Response(null, {status: resource.status, headers: resource.headers}); Object.defineProperty(response, 'type', {value: 'opaqueredirect'}); return response;}
+    const body = resource.base64 ? Uint8Array.from(atob(resource.base64), c => c.charCodeAt(0)) : new TextEncoder().encode(resource.text ?? '');
+    return new Response(body, {status: resource.status ?? 200, headers: {'content-type': resource.type, ...resource.headers}});
+  }) as typeof fetch;
+}
 export interface RocketOptions {company?: boolean; missingAlias?: boolean; flagsRoute?: boolean}
 const layout = `<!DOCTYPE html>
 <html lang="pt-br">
@@ -49,7 +71,7 @@ ${options.flagsRoute ? "<script type='module' src='{{ '/components/ProductFlags.
 <header class="site-header" style="background-color: {{ section.params.background_color }}">
 {% if section.params.topbar_enabled %}<div class="topbar">{{ section.params.topbar_text }}</div>{% endif %}
 <a href="{{ merchantData.base_url }}" class="logo-link"><img class="logo" src="{{ thumborize(merchantData.logo_url) }}" alt="{{ merchantData.manifest.name }}"></a>
-<nav>{% for category in categories %}<a class="category-link" href="{{ category.url_path }}">{{ category.name }}</a>{% endfor %}</nav>
+<nav>{% for category in categories %}<a class="category-link" href="{{ category.url_path }}">{{ category.name }}</a>{% for child in category.children.data %}<a class="subcategory-link" href="{{ child.url_path }}">{{ child.name }}</a>{% endfor %}{% endfor %}</nav>
 {% if section.params.search_enabled %}<span class="search-enabled">Buscar</span>{% endif %}
 <i class="icon icon-cart"></i>
 </header>
@@ -61,7 +83,8 @@ ${options.flagsRoute ? "<script type='module' src='{{ '/components/ProductFlags.
 {% if section.params.show_email and merchantData.company.email %}<span class="contact-email">{{ merchantData.company.email }}</span>{% endif %}
 {% if section.params.newsletter_enabled %}<p class="newsletter">{{ section.params.newsletter_title }}</p>{% endif %}
 {% if merchantData.cookies_policy.active %}<p class="cookies">{{ merchantData.cookies_policy.text }}</p>{% endif %}
-<p class="pages">{% for item in merchantData.pages %}<a href="{{ item.url_path }}">{{ item.name }}</a>{% endfor %}</p>
+<p class="pages">{% for item in merchantData.pages %}<a class="page-link" href="{{ item.url_path }}">{{ item.name }}</a>{% endfor %}</p>
+<p class="shortcuts"><a class="search-shortcut" href="/busca?q=oferta">Ofertas</a> <a class="old-shortcut" href="/categoria-removida">Coleção antiga</a> <a class="old-product" href="/produto-removido/p">Produto antigo</a></p>
 </footer>
 `,
     'sections/home/main_banner.twig': `<section class="main_banner main_banner-{{ section.order }}">
@@ -90,6 +113,7 @@ ${options.flagsRoute ? "<script type='module' src='{{ '/components/ProductFlags.
 <h1 class="page-title">{{ product.data.name }}</h1>
 <img class="product-image" src="{{ thumborize(product.data.images.data[0].url) }}" alt="{{ product.data.name }}">
 <span class="price">{{ product.data.prices.data.price_formated }}</span>
+{% set back = product.data.breadcrumbs.data | last %}{% if back %}<a class="back-link" href="{{ back.url_path }}">Voltar para {{ back.name }}</a>{% endif %}
 ${options.flagsRoute ? '<product-flags :product-id="{{ product.data.id }}"></product-flags>\n' : ''}</section>
 `,
     'sections/product/product_similars.twig': '<section class="product-similars"><rocket-emitter event="similares"><h2>Semelhantes</h2></section>\n',
@@ -119,9 +143,9 @@ body{margin:0;font-family:'Fictional Sans', Arial, sans-serif;background:#ffffff
 <script>import client from '@/modules/axios/api';
 export default {name: 'BannerCarousel', props: ['ids', 'delay'], data: () => ({banners: []}), async mounted() {const response = await client.get('catalog/banners', {params: {'id[]': this.ids, status: 'active'}}); this.banners = response.data.data;}};</script>
 `,
-    'components/CollectionShelf.vue': `<template><div class="collection-shelf"><a v-for="product in products" :key="product.id" class="shelf-product" :href="$safeCleanLink(product.url_path)"><img class="shelf-image" :src="$thumborize(product.images.data[0].url)" :alt="product.name"><span>{{ product.name }}</span></a></div></template>
+    'components/CollectionShelf.vue': `<template><div class="collection-shelf"><a v-for="product in products" :key="product.id" class="shelf-product" :href="$safeCleanLink(product.url_path)"><img class="shelf-image" :src="$thumborize(product.images.data[0].url)" :alt="product.name"><span>{{ product.name }}</span></a><a v-if="all" class="see-all" :href="$safeCleanLink(all)">Ver tudo</a></div></template>
 <script>import client from '@/modules/axios/api';
-export default {name: 'CollectionShelf', props: ['collectionId', 'limit'], data: () => ({products: []}), async mounted() {const response = await client.get('catalog/collections', {params: {'id[]': [this.collectionId], limit: this.limit}}); this.products = response.data.data[0].products.data;}};</script>
+export default {name: 'CollectionShelf', props: ['collectionId', 'limit'], data: () => ({products: [], all: ''}), async mounted() {const response = await client.get('catalog/collections', {params: {'id[]': [this.collectionId], limit: this.limit}}); this.products = response.data.data[0].products.data; this.all = response.data.data[0].url_path || '';}};</script>
 `,
     'components/ProductGrid.vue': `<template><div class="product-grid" :data-per-page="productsPerPage"><a v-for="product in products" :key="product.id" class="grid-product" :href="$safeCleanLink(product.url_path)"><img class="grid-image" :src="$thumborize(product.images.data[0].url)" :alt="product.name"><b>{{ product.name }}</b></a></div></template>
 <script>export default {name: 'ProductGrid', props: ['products', 'productsPerPage']};</script>
@@ -133,8 +157,17 @@ export default {name: 'ProductFlags', props: ['productId'], data: () => ({state:
 `} : {}),
   };
 }
-const card = (id: number, name: string, image: string, price: number) => ({id, name, slug: 'produto-ficticio-' + id, url_path: `${STORE}/produto-ficticio-${id}`, images: {data: [{url: image}]}, prices: {data: {price, price_formated: 'R$ ' + price + ',00'}}});
+const card = (id: number, name: string, image: string, price: number) => ({id, name, slug: 'produto-ficticio-' + id, url_path: `${STORE}/produto-ficticio-${id}/p`, images: {data: [{url: image}]}, prices: {data: {price, price_formated: 'R$ ' + price + ',00'}}});
 export const products = {p1: card(1, 'Produto Fictício 1', `${IMG}/products/p1-large.jpg`, 35), p2: card(2, 'Produto Fictício 2', `${IMG}/products/p2-large.jpg`, 55), p3: card(3, 'Produto Fictício 3', `${IMG}/products/p3-large.jpg`, 75)};
+// Products only the store's pages show (categories C and D, subcategories, the showcase, the
+// promotion, a search and a hidden category): the 8-page cut never reaches them.
+export const more = Object.fromEntries(Array.from({length: 9}, (_, i) => i + 4).map(id => ['p' + id, card(id, 'Produto Fictício ' + id, `${IMG}/products/p${id}-large.jpg`, 10 + id * 5)])) as Record<string, ReturnType<typeof card>>;
+// Where each product page's way back leads: the last breadcrumb, a category with its order.
+const crumb = (name: string, slug: string) => ({breadcrumbs: {data: [{name: 'Início', url_path: STORE + '/'}, {name, url_path: `${STORE}/${slug}?sort_by=best_sellers`}]}});
+// Similar products: product 7 shows 13, which only product 13 shows 14. The second product round
+// reads 13; 14 stays out, found only in the pages of the last round.
+export const similar = {p13: card(13, 'Produto Semelhante 13', `${IMG}/products/p13-large.jpg`, 80), p14: card(14, 'Produto Semelhante 14', `${IMG}/products/p14-large.jpg`, 85)};
+export const BACK: Record<string, [string, string]> = {p13: ['Subcategoria C2', 'categoria-c/sub-c2'], p1: ['Categoria A', 'categoria-a'], p2: ['Categoria A', 'categoria-a'], p3: ['Categoria B', 'categoria-b'], p4: ['Categoria C', 'categoria-c'], p5: ['Categoria Oculta', 'categoria-oculta'], p6: ['Subcategoria C1', 'categoria-c/sub-c1'], p7: ['Subcategoria C2', 'categoria-c/sub-c2'], p8: ['Categoria D', 'categoria-d'], p9: ['Categoria D', 'categoria-d'], p10: ['Destaques fictícios', 'destaques/l'], p11: ['Semana fictícia', 'promocoes/semana'], p12: ['Categoria D', 'categoria-d']};
 const params = {
   fonts_texts_family: 'Fictional Sans', fonts_titles_family: 'Fictional Sans', show_dark_mode: false, color_general_background: '#ffffff', custom_css: '.text_button-2 h2{letter-spacing:1px}',
   grids_card_style: 'bordered', grids_image_ratio: 'square', buttons_style: 'rounded', buttons_radius: 8, empty_cart_title: 'Carrinho vazio fictício', empty_cart_button: 'Continuar', border_apply_on_images: true, highlight_type_payment: 'pix', cart_type: 'side_cart',
@@ -155,18 +188,38 @@ export function storefront(options: RocketOptions = {}) {
     ...(options.company === false ? {} : {company: {name: 'Pessoa Fictícia', person_type: 'person', cpf: '123.456.789-09', email: 'contato@ficticia.invalid', phone: {number: '(11) 90000-0000'}, whatsapp: {number: '11900000000'}, address: {street: 'Rua Fictícia', number: '1', city: 'Cidade Fictícia'}, social: {instagram: 'https://instagram.invalid/ficticia', facebook: ''}}}),
     cookies_policy: {active: true, text: 'Esta loja fictícia usa cookies de exemplo.'}, checkout: {skip_cart: false, checkout_token: 'FAKE-CHECKOUT-TOKEN'}, meta: {title: 'Loja Fictícia'}, meta_tags: [{name: 'description', content: 'Exemplo fictício'}],
     store_search_v1: true, session_id: 'FAKE-SESSION-ID',
-    categories: [{id: 1, name: 'Categoria A', url_path: `${STORE}/categoria-a`, featured: true, children: {data: []}}, {id: 2, name: 'Categoria B', url_path: `${STORE}/categoria-b`, children: {data: []}}],
-    pages: [{id: 1, name: 'Sobre nós', url_path: `${STORE}/sobre`}],
+    categories: [{id: 1, name: 'Categoria A', url_path: `${STORE}/categoria-a`, featured: true, children: {data: []}}, {id: 2, name: 'Categoria B', url_path: `${STORE}/categoria-b`, children: {data: []}},
+      {id: 3, name: 'Categoria C', url_path: `${STORE}/categoria-c?sort_by=best_sellers`, children: {data: [{id: 31, name: 'Subcategoria C1', url_path: `${STORE}/categoria-c/sub-c1?sort_by=best_sellers`}, {id: 32, name: 'Subcategoria C2', url_path: `${STORE}/categoria-c/sub-c2`}]}},
+      {id: 4, name: 'Categoria D', url_path: `${STORE}/categoria-d`, children: {data: []}}],
+    pages: [{id: 1, name: 'Sobre nós', url_path: `${STORE}/sobre`}, {id: 2, name: 'Trocas', url_path: `${STORE}/atendimento/trocas`}, {id: 3, name: 'Privacidade', path: '/atendimento/privacidade', url_path: `${STORE}/atendimento/privacidade`}, {id: 4, name: 'Parceiro', url_path: `${STORE}/atendimento/parceiro`}],
+    promotion: [{id: 1, name: 'Semana fictícia', url: `${STORE}/promocoes/semana`}],
   };
   const theme = {id: 3, alias: 'vitrine', params};
   const main = (alias: string, extra: Record<string, unknown> = {}) => ({section_alias: alias, position: 1, order: 1, visible: true, params: {}, ...extra});
   const categoryConfig = (perPage: number) => ({section_alias: 'main_category_content', position: 1, order: 1, visible: true, params: {products_per_page: perPage, show_sort: true, filters_enabled: false}});
+  const categoryPage = (name: string, slug: string, list: unknown[], extra: Record<string, unknown> = {}) => ({kind: 'category', themeConfig: {theme, sections: [header, main('main_category_content'), footer]}, data: {context: 'category', slug, limit: 12, config: categoryConfig(12), content: {data: {data: list, meta: {name, total: list.length}}}, ...extra}});
+  const productPage = (key: string, item: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({kind: 'product', themeConfig: {theme, sections: [header, main('main_product_content'), main('product_similars', {order: 2}), footer]}, data: {context: 'product', config: main('main_product_content'), product: {data: {...item, ...crumb(...BACK[key]), ...extra}}}});
+  const institutional = (name: string) => ({kind: 'pages', themeConfig: {theme, sections: [header, main('base_page_content'), footer]}, data: {context: 'pages', content: {data: {name, content: '<p>Texto fictício: ' + name + '.</p>'}}}});
   const pages: Record<string, {kind: string; themeConfig: unknown; data: unknown; html?: string}> = {
+    // A blocked key inside window.data of a category and of a product never reaches the ZIP.
+    '/categoria-c': categoryPage('Categoria C', 'categoria-c', [more.p4, more.p5], {customer: {name: 'Cliente Fictício'}, session_token: 'FAKE-CATEGORY-TOKEN'}),
+    '/categoria-c/sub-c1': categoryPage('Subcategoria C1', 'sub-c1', [more.p6]),
+    '/categoria-c/sub-c2': categoryPage('Subcategoria C2', 'sub-c2', [more.p7]),
+    '/categoria-d': categoryPage('Categoria D', 'categoria-d', [more.p8, more.p9, more.p12]),
+    '/categoria-oculta': categoryPage('Categoria Oculta', 'categoria-oculta', [products.p3]),
+    '/destaques/l': categoryPage('Destaques fictícios', 'destaques', [products.p1, products.p3, more.p10]),
+    '/busca?q=oferta': {kind: 'category', themeConfig: {theme, sections: [header, main('main_category_content'), footer]}, data: {context: 'search', config: categoryConfig(24), content: {data: {data: [more.p12], meta: {name: 'Busca'}}}}},
+    '/promocoes/semana': {kind: 'promotion', themeConfig: {theme, sections: [header, main('main_promotion_content'), footer]}, data: {context: 'promotion', content: {data: {name: 'Semana fictícia', data: [more.p11]}}}},
+    '/atendimento/trocas': institutional('Trocas'),
+    '/atendimento/privacidade': institutional('Privacidade'),
+    ...Object.fromEntries(Object.entries(more).map(([key, item]) => [`/produto-ficticio-${item.id}/p`, productPage(key, item, key === 'p4' ? {api_key: 'FAKE-PRODUCT-KEY', customer: {name: 'Cliente Fictício'}} : key === 'p7' ? {similars: {data: [similar.p13]}} : {})])),
+    '/produto-ficticio-13/p': productPage('p13', similar.p13, {similars: {data: [similar.p14]}}),
     '/': {kind: 'home', themeConfig: {theme, sections: homeSections}, data: {context: 'home'}, html: `<img class="hero" src="${variant('1200x400', 'banners/hero-large.jpg')}"><a href="/sobre">Sobre</a><a href="/promocao">Promoção</a><a href="/carrinho">Carrinho</a><a href="/categoria-b">Categoria B</a>`},
     '/categoria-a': {kind: 'category', themeConfig: {theme, sections: [header, main('main_category_content'), footer]}, data: {context: 'category', slug: 'categoria-a', limit: 12, config: categoryConfig(12), content: {data: {data: [products.p1, products.p2], meta: {name: 'Categoria A', total: 2}}}}, html: `<img class="grid-image" src="${variant('600x600', 'products/p1-large.jpg')}">`},
     '/categoria-b': {kind: 'category', themeConfig: {theme, sections: [header, main('main_category_content'), footer]}, data: {context: 'category', slug: 'categoria-b', limit: 12, config: categoryConfig(8), content: {data: {data: [products.p3], meta: {name: 'Categoria B', total: 1}}}}},
-    '/produto-ficticio-1': {kind: 'product', themeConfig: {theme, sections: [header, main('main_product_content'), main('product_similars', {order: 2}), footer]}, data: {context: 'product', config: main('main_product_content', {params: {show_sku: true}}), product: {data: {...products.p1, images: {data: [{url: `${IMG}/products/p1-large.jpg`}]}}}}, html: `<img class="product-image" src="${variant('600x600', 'products/p1-large.jpg')}">`},
-    '/produto-ficticio-2': {kind: 'product', themeConfig: {theme, sections: [header, main('main_product_content'), main('product_similars', {order: 2}), footer]}, data: {context: 'product', config: main('main_product_content'), product: {data: products.p2}}},
+    '/produto-ficticio-1/p': {kind: 'product', themeConfig: {theme, sections: [header, main('main_product_content'), main('product_similars', {order: 2}), footer]}, data: {context: 'product', config: main('main_product_content', {params: {show_sku: true}}), product: {data: {...products.p1, images: {data: [{url: `${IMG}/products/p1-large.jpg`}]}, ...crumb(...BACK.p1)}}}, html: `<img class="product-image" src="${variant('600x600', 'products/p1-large.jpg')}">`},
+    '/produto-ficticio-2/p': productPage('p2', products.p2),
+    '/produto-ficticio-3/p': productPage('p3', products.p3),
     '/sobre': {kind: 'pages', themeConfig: {theme, sections: [header, main('base_page_content'), footer]}, data: {context: 'pages', content: {data: {name: 'Sobre nós', content: '<p>Texto fictício institucional.</p>'}}}},
     '/promocao': {kind: 'promotion', themeConfig: {theme, sections: [header, main('promotion_content'), footer]}, data: {context: 'promotion', content: {data: {name: 'Promoção fictícia'}}}},
     '/busca?q=produto': {kind: 'category', themeConfig: {theme, sections: [header, main('main_category_content'), footer]}, data: {context: 'search', config: categoryConfig(24), content: {data: {data: [products.p2], meta: {name: 'Busca'}}}}},
@@ -191,7 +244,13 @@ export function storefront(options: RocketOptions = {}) {
   resources[`${FONTS}/s/fictional-latin.woff2`] = {type: 'font/woff2', base64: fontBase64};
   resources[`${FONTS}/s/fictional-cyrillic.woff2`] = {type: 'font/woff2', base64: fontBase64};
   resources[API + 'catalog/banners?status=active&id%5B%5D=11'] = {type: 'application/json', text: JSON.stringify({data: [{id: 11, image_url: `${IMG}/banners/hero-large.jpg`, mobile_image_url: `${IMG}/banners/hero-mobile-large.jpg`, link: '/promocao', session_token: 'FAKE-TOKEN'}]})};
-  resources[API + 'catalog/collections?id%5B%5D=21&limit=2'] = {type: 'application/json', text: JSON.stringify({data: [{id: 21, name: 'Destaques fictícios', products: {data: [products.p1, products.p3]}}], meta: {total: 1}})};
+  resources[API + 'catalog/collections?id%5B%5D=21&limit=2'] = {type: 'application/json', text: JSON.stringify({data: [{id: 21, name: 'Destaques fictícios', url_path: `${STORE}/destaques/l`, products: {data: [products.p1, products.p3]}}], meta: {total: 1}})};
+  // The theme links to a category removed from the panel; a footer page leaves for another site;
+  // category D asks for calm twice before answering.
+  resources[STORE + '/categoria-removida'] = {type: 'text/html; charset=utf-8', status: 404, text: '<!doctype html><title>Não encontrada</title>'};
+  resources[STORE + '/produto-removido/p'] = {type: 'text/html; charset=utf-8', status: 404, text: '<!doctype html><title>Não encontrado</title>'};
+  resources[STORE + '/atendimento/parceiro'] = {type: 'text/html; charset=utf-8', status: 302, headers: {location: 'https://parceiro-ficticio.invalid/'}, text: ''};
+  resources[STORE + '/categoria-d'].throttle = 2;
   // Theme sheets as served: compiled by the caller, since Sass runs only in Node.
   const themeSheets: Record<string, string[]> = {[`${CDN}/vitrine/css/global.css`]: ['assets/styles/global/main.scss'], [`${CDN}/vitrine/css/themes/vitrine-mobile.css`]: ['assets/styles/global/main-mobile.scss']};
   for (const kind of ['home', 'category', 'product', 'pages', 'promotion']) {

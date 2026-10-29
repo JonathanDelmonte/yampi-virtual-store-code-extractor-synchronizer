@@ -7,20 +7,36 @@ export const PAGE_KIND_LIST: PageKind[] = ['home', 'category', 'product', 'pages
 export interface PreviewIssue {code: string; resource?: string; reason: string}
 // window.themeConfig, window.data and window.merchant as served, after the blocklist.
 export interface RawPage {themeConfig?: Data; data?: Data; merchant?: Data; bodyClasses?: string[]}
-export interface PreviewPage {id: string; kind: PageKind; context?: string; sourceUrl: string; raw: RawPage}
+// stage: pages read after the representative cut, following the links of the captured pages
+// ("store": categories, showcases, searches, institutional and promotion pages; "product": the
+// page of each product). Absent on the representative pages.
+export type PageStage = 'store' | 'product';
+export interface PreviewPage {id: string; kind: PageKind; context?: string; sourceUrl: string; stage?: PageStage; raw: RawPage}
 export type ResourceCategory = 'theme-css' | 'font-css' | 'css' | 'font' | 'icon' | 'image' | 'other';
 export interface PreviewResource {url: string; path: string; type: string; bytes: number; sha256: string; category: ResourceCategory; priority: number}
 export interface ApiRecord {method: 'GET'; path: string; query: string; url: string; status: number; body: Json}
 export interface PreviewPlatform {assetsBase?: string; apiBase?: string; fontSheets: {url: string; families: string[]}[]; themeSheets: {url: string; group: string; page?: string}[]}
+// What a stage read, by kind, and what stayed out and why. found: routes read; skipped: read and
+// left out (404, redirect, another kind, past the budget); left: found and never read.
+export interface StageSkip {route: string; reason: string; sources?: string[]}
+export interface StageSummary {found: number; captured: number; byKind: Record<string, number>; left: number; skipped: StageSkip[]}
+const KIND_TEXT: Record<string, [string, string]> = {category: ['categoria ou vitrine', 'categorias ou vitrines'], search: ['busca', 'buscas'], pages: ['institucional', 'institucionais'], promotion: ['promoção', 'promoções'], product: ['produto', 'produtos'], home: ['home', 'homes']};
+// "34 categorias ou vitrines, 8 buscas, 13 institucionais".
+export function kindsText(byKind: Record<string, number>): string {
+  return Object.entries(byKind).filter(([, n]) => n).map(([kind, n]) => `${n} ${(KIND_TEXT[kind] || [kind, kind])[n === 1 ? 0 : 1]}`).join(', ');
+}
 export interface PreviewBundle {
-  format: 'yampi-local-preview'; version: 2; toolVersion: string; capturedAt: string;
+  format: 'yampi-local-preview'; version: 3; toolVersion: string; capturedAt: string;
   source: {kind: 'editor' | 'published' | 'demonstration'; origin: string; association: 'same-editor' | 'published-unverified' | 'unavailable'};
   limits: PreviewLimits; pages: PreviewPage[]; api: ApiRecord[]; assets: Assets; resources: PreviewResource[];
   aliases: Record<string, string>; platform: PreviewPlatform; issues: PreviewIssue[]; removedKeys: string[];
+  stages?: Partial<Record<PageStage, StageSummary>>;
 }
-export interface PreviewLimits {pages: number; resources: number; resourceBytes: number; totalBytes: number; jsonBytes: number; apiRequests: number; apiBytes: number; timeoutMs: number}
-export const PREVIEW_LIMITS: PreviewLimits = {pages: 8, resources: 200, resourceBytes: 2 * 1024 * 1024, totalBytes: 12 * 1024 * 1024, jsonBytes: 2 * 1024 * 1024, apiRequests: 40, apiBytes: 4 * 1024 * 1024, timeoutMs: 15000};
-export const TOOL_VERSION = '0.9.1';
+// pages: the representative cut (one of each kind first). The store and product pages have their
+// own budget, so they never take the place of a representative page, CSS, fonts or banners.
+export interface PreviewLimits {pages: number; resources: number; resourceBytes: number; totalBytes: number; jsonBytes: number; apiRequests: number; apiBytes: number; timeoutMs: number; storePages: number; storeBytes: number; storeRounds: number; productPages: number; productBytes: number}
+export const PREVIEW_LIMITS: PreviewLimits = {pages: 8, resources: 200, resourceBytes: 2 * 1024 * 1024, totalBytes: 12 * 1024 * 1024, jsonBytes: 2 * 1024 * 1024, apiRequests: 40, apiBytes: 4 * 1024 * 1024, timeoutMs: 15000, storePages: 200, storeBytes: 24 * 1024 * 1024, storeRounds: 4, productPages: 400, productBytes: 16 * 1024 * 1024};
+export const TOOL_VERSION = '0.10.0';
 // Where Yampi storefronts keep their images and fonts: asked together with the storefront, in one
 // question at the download click, so the capture does not stop to ask for each one.
 export const PREVIEW_ORIGINS = ['https://cdn.yampi.io', 'https://fonts.googleapis.com', 'https://fonts.gstatic.com'];
@@ -162,7 +178,7 @@ export function demonstrationPages(context: Context, paths: string[] = []): Prev
 }
 export function demonstration(context: Context, reason: string, paths: string[] = []): PreviewBundle {
   validateContext(context);
-  return {format: 'yampi-local-preview', version: 2, toolVersion: TOOL_VERSION, capturedAt: new Date().toISOString(), source: {kind: 'demonstration', origin: context.previewOrigin, association: 'unavailable'}, limits: {...PREVIEW_LIMITS}, pages: demonstrationPages(context, paths), api: [], assets: {}, resources: [], aliases: {}, platform: {fontSheets: [], themeSheets: []}, issues: [{code: 'visual-context-unavailable', reason}], removedKeys: []};
+  return {format: 'yampi-local-preview', version: 3, toolVersion: TOOL_VERSION, capturedAt: new Date().toISOString(), source: {kind: 'demonstration', origin: context.previewOrigin, association: 'unavailable'}, limits: {...PREVIEW_LIMITS}, pages: demonstrationPages(context, paths), api: [], assets: {}, resources: [], aliases: {}, platform: {fontSheets: [], themeSheets: []}, issues: [{code: 'visual-context-unavailable', reason}], removedKeys: []};
 }
 const textFiles = (files: Files) => Object.fromEntries(Object.entries(files).filter(([p]) => /\.(?:twig|vue|s?css)$/.test(p)));
 // Verification before the ZIP: aliases resolve, pages have visible sections and
@@ -170,14 +186,18 @@ const textFiles = (files: Files) => Object.fromEntries(Object.entries(files).fil
 // runs in `npm run check`.
 export function contractReport(bundle: PreviewBundle, files: Files) {
   const paths = Object.keys(files), issues: PreviewIssue[] = [];
+  // Hundreds of product pages share one template: the same note becomes one issue with a count.
+  const repeated = new Map<string, PreviewIssue & {count: number}>();
+  const note = (issue: PreviewIssue) => {const key = issue.code + '\u0000' + issue.reason, current = repeated.get(key); if (current) current.count++; else {const entry = {...issue, count: 1}; repeated.set(key, entry); issues.push(entry);}};
   const pages = bundle.pages.map(page => {
     const visible = expectedSections(page.raw), unresolved: {alias: string; reason: string}[] = [];
     for (const section of visible) try {resolveSectionFile(section.alias, page.kind, paths);} catch (error) {unresolved.push({alias: section.alias, reason: (error as Error).message});}
-    for (const item of unresolved) issues.push({code: 'section-alias-unresolved', resource: page.id, reason: item.reason});
-    if (!visible.length && bundle.source.kind !== 'demonstration') issues.push({code: 'page-without-main-sections', resource: page.id, reason: `Página ${page.kind} sem seções principais visíveis (position 1) na captura.`});
+    for (const item of unresolved) note({code: 'section-alias-unresolved', resource: page.id, reason: item.reason});
+    if (!visible.length && bundle.source.kind !== 'demonstration') note({code: 'page-without-main-sections', resource: page.id, reason: `Página ${page.kind} sem seções principais visíveis (position 1) na captura.`});
     const {header, footer} = pageSections(page.raw);
-    return {id: page.id, kind: page.kind, context: page.context ?? null, sourceUrl: page.sourceUrl, visibleMainSections: visible.length, aliases: visible.map(v => v.alias), header: !!header, footer: !!footer, unresolved};
+    return {id: page.id, kind: page.kind, context: page.context ?? null, ...(page.stage ? {stage: page.stage} : {}), sourceUrl: page.sourceUrl, visibleMainSections: visible.length, aliases: visible.map(v => v.alias), header: !!header, footer: !!footer, unresolved};
   });
+  for (const issue of issues as (PreviewIssue & {count?: number})[]) {if (issue.count! > 1) issue.reason += ` (${issue.count} páginas)`; delete issue.count;}
   const referenced = referencedKeys(textFiles(files)), captured = capturedKeys(bundle.pages.map(p => p.raw)), removed = new Set(bundle.removedKeys);
   const keys = Object.fromEntries((['theme', 'section', 'merchant'] as const).map(scope => {
     const missing = referenced[scope].filter(key => !captured[scope].has(key)).map(key => ({key, reason: removed.has(key) ? 'removed-by-privacy-filter' : 'not-provided-by-storefront'}));
@@ -194,10 +214,16 @@ function bytesByCategory(resources: PreviewResource[]) {
   for (const item of resources) {const entry = output[item.category] ||= {count: 0, bytes: 0}; entry.count++; if (!seen.has(item.path)) {seen.add(item.path); entry.bytes += item.bytes;}}
   return output;
 }
+// themeConfig and merchant repeat unchanged on every page of a kind (5 KB and 12 KB on a product
+// page whose own data is about 8 KB). One copy goes to raw/shared/<sha256>.json and each page
+// names it; nothing is lost, and a page whose object differs keeps its own.
+const SHARED_KEYS = ['themeConfig', 'merchant'] as const, MAX_ISSUES = 900;
+export const STAGE_LIST: PageStage[] = ['store', 'product'];
 export async function previewEntries(bundle: PreviewBundle, files: Files = {}): Promise<Assets> {
-  if (bundle.format !== 'yampi-local-preview' || bundle.version !== 2 || !Number.isFinite(Date.parse(bundle.capturedAt))) throw new Error('Prévia inválida.');
+  if (bundle.format !== 'yampi-local-preview' || bundle.version !== 3 || !Number.isFinite(Date.parse(bundle.capturedAt))) throw new Error('Prévia inválida.');
   const limits = previewLimits(bundle.limits), entries: Assets = {}, seen = new Set<string>(); let total = 0;
-  if (bundle.pages.length > limits.pages || bundle.resources.length > limits.resources || bundle.api.length > limits.apiRequests) throw new Error('Prévia ultrapassa limites.');
+  const staged = (stage?: PageStage) => bundle.pages.filter(page => page.stage === stage).length;
+  if (staged() > limits.pages || staged('store') > limits.storePages || staged('product') > limits.productPages || bundle.pages.some(page => page.stage !== undefined && !STAGE_LIST.includes(page.stage)) || bundle.resources.length > limits.resources || bundle.api.length > limits.apiRequests) throw new Error('Prévia ultrapassa limites.');
   for (const item of bundle.resources) {
     publicUrl(item.url, bundle.source.origin); previewPath(item.path);
     const bytes = bundle.assets[item.path];
@@ -207,13 +233,35 @@ export async function previewEntries(bundle: PreviewBundle, files: Files = {}): 
   if (Object.keys(bundle.assets).some(p => !seen.has(p))) throw new Error('Asset sem registro.');
   for (const [from, to] of Object.entries(bundle.aliases)) {publicUrl(from, bundle.source.origin); if (!bundle.resources.some(r => r.url === to)) throw new Error('Alias de imagem sem recurso capturado.');}
   const encode = (v: unknown) => new TextEncoder().encode(JSON.stringify(v, null, 2) + '\n');
+  // Hundreds of store and product pages are written without indentation: the same data, read
+  // faster by the local tools.
+  const compact = (v: unknown) => new TextEncoder().encode(JSON.stringify(v) + '\n');
   // Raw captures are immutable; URL and route rewriting happens in the local tools.
-  const pages = [], issues = [...bundle.issues];
-  for (const page of bundle.pages) {
-    if (!/^page-\d+$/.test(page.id) || !PAGE_KIND_LIST.includes(page.kind) || new URL(publicUrl(page.sourceUrl, bundle.source.origin)).origin !== bundle.source.origin) throw new Error('Página de prévia inválida.');
-    const {raw} = sanitizeRaw(page.raw, page.id, limits), file = `raw/${page.id}.json`, bytes = encode(raw);
+  const pages = [], issues = [...bundle.issues], ids = new Set<string>();
+  const cleaned = bundle.pages.map(page => {
+    if (!/^page-\d+$/.test(page.id) || ids.has(page.id) || !PAGE_KIND_LIST.includes(page.kind) || new URL(publicUrl(page.sourceUrl, bundle.source.origin)).origin !== bundle.source.origin) throw new Error('Página de prévia inválida.');
+    ids.add(page.id);
+    const {raw} = sanitizeRaw(page.raw, page.id, limits);
+    return {page, raw, parts: Object.fromEntries(SHARED_KEYS.filter(key => raw[key]).map(key => [key, JSON.stringify(raw[key])]))};
+  });
+  const uses = new Map<string, number>();
+  for (const {parts} of cleaned) for (const text of Object.values(parts)) uses.set(text, (uses.get(text) || 0) + 1);
+  const shared = new Map<string, {file: string; bytes: number; sha256: string}>();
+  for (const {page, raw, parts} of cleaned) {
+    const own: RawPage = {...raw}, refs: Record<string, string> = {};
+    for (const [key, text] of Object.entries(parts)) {
+      if (uses.get(text)! < 2) continue;
+      let entry = shared.get(text);
+      if (!entry) {
+        const bytes = new TextEncoder().encode(text + '\n'), sha256 = await hashBytes(bytes);
+        entry = {file: `raw/shared/${sha256}.json`, bytes: bytes.length, sha256};
+        entries['preview/' + entry.file] = bytes; shared.set(text, entry);
+      }
+      refs[key] = entry.sha256; delete own[key as keyof RawPage];
+    }
+    const file = `raw/${page.id}.json`, bytes = page.stage ? compact(own) : encode(own);
     entries['preview/' + file] = bytes;
-    pages.push({id: page.id, kind: page.kind, ...(page.context ? {context: page.context} : {}), sourceUrl: page.sourceUrl, file, bytes: bytes.length, sha256: await hashBytes(bytes)});
+    pages.push({id: page.id, kind: page.kind, ...(page.context ? {context: page.context} : {}), ...(page.stage ? {stage: page.stage} : {}), sourceUrl: page.sourceUrl, file, bytes: bytes.length, sha256: await hashBytes(bytes), ...(Object.keys(refs).length ? {shared: refs} : {})});
   }
   let api;
   if (bundle.api.length) {
@@ -224,8 +272,10 @@ export async function previewEntries(bundle: PreviewBundle, files: Files = {}): 
   }
   const {contract, issues: contractIssues} = contractReport(bundle, files);
   issues.push(...contractIssues);
+  // The local tools accept up to 1000 notes; the full lists of each stage stay in report.json.
+  if (issues.length > MAX_ISSUES) issues.splice(MAX_ISSUES - 1, Infinity, {code: 'issues-limited', reason: `${issues.length - MAX_ISSUES + 1} observações a mais não cabem no manifesto; as listas das etapas estão em report.json > pages.`});
   const {assets: _assets, pages: _pages, api: _api, removedKeys: _removed, ...manifest} = bundle;
-  entries['preview/manifest.json'] = encode({...manifest, issues, pages, ...(api ? {api} : {})});
-  entries['preview/report.json'] = encode({code: {integrity: 'hashes-and-sizes', completeness: 'stable-editor-inventory; independent remote inventory not verified'}, configuration: {source: bundle.source, status: bundle.source.kind === 'demonstration' ? 'demonstration' : 'partial', association: bundle.source.association}, contract, assets: {included: seen.size, byCategory: bytesByCategory(bundle.resources), aliases: Object.keys(bundle.aliases).length, issues}, api: {recorded: bundle.api.length, note: 'Somente GETs públicos anônimos; rotas não gravadas falham explicitamente na prévia.'}, compilation: 'not-run', initialization: 'not-run', visual: 'not-validated', capturedAt: bundle.capturedAt, toolVersion: bundle.toolVersion, limits});
+  entries['preview/manifest.json'] = encode({...manifest, issues, pages, ...(shared.size ? {shared: [...shared.values()]} : {}), ...(api ? {api} : {})});
+  entries['preview/report.json'] = encode({code: {integrity: 'hashes-and-sizes', completeness: 'stable-editor-inventory; independent remote inventory not verified'}, configuration: {source: bundle.source, status: bundle.source.kind === 'demonstration' ? 'demonstration' : 'partial', association: bundle.source.association}, pages: {representative: staged(), store: staged('store'), product: staged('product'), stages: bundle.stages ?? {}}, contract, assets: {included: seen.size, byCategory: bytesByCategory(bundle.resources), aliases: Object.keys(bundle.aliases).length, issues}, api: {recorded: bundle.api.length, note: 'Somente GETs públicos anônimos; rotas não gravadas falham explicitamente na prévia.'}, compilation: 'not-run', initialization: 'not-run', visual: 'not-validated', capturedAt: bundle.capturedAt, toolVersion: bundle.toolVersion, limits});
   return entries;
 }

@@ -7,7 +7,7 @@ import type {JobRequest, JobState} from '../jobs/types';
 // job: the background operation that holds the lock. While it runs, the panel only watches it,
 // and closing or reopening the panel never releases the editor.
 type Session = {tabId: number; editorUrl: string; documentId?: string; locked: boolean; access?: 'read' | 'write'; previewOrigins?: string[]; job?: string};
-const BRIDGE_VERSION = '0.9.1';
+const BRIDGE_VERSION = '0.10.0';
 const RUNNER = 'runner.html';
 const inFlight = new Map<string, Set<Promise<unknown>>>();
 const ports = new Map<string, Set<Promise<string>>>();

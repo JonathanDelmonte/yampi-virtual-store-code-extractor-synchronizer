@@ -1,4 +1,5 @@
 import {preparePreview, finishPreview, unauthorizedOrigins} from './browser/preview-capture';
+import {expandPreview} from './browser/preview-pages';
 import {publicUrl, PREVIEW_ORIGINS} from './core/preview';
 import {BrowserAdapter, type RPC} from './browser/adapter';
 import {PanelConnection} from './browser/panel-connection';
@@ -6,6 +7,7 @@ import {zipInWorker} from './browser/zip-client';
 import {decodeProject, readProjectDirectory, readProjectEntries, type Project} from './core/archive';
 import {makePlan, missingNewTexts, selectionIssues, sendable, IMAGES_OFF} from './core/planner';
 import {changedPaths, remoteFromCapture} from './core/compare';
+import {sendRoutes} from './core/preview-links';
 import {explainBlock} from './core/explain';
 import {formatDuration} from './core/progress';
 import {chooseBaseline, type Review, type Workspace} from './core/workspace';
@@ -41,8 +43,8 @@ let connection: PanelConnection | undefined;
 let client: JobClient;
 let connected = false, context: Context | undefined;
 let offline: {title: string; text: string} | undefined;
-// tone ok: a confirmation (green), otherwise a problem to fix (red).
-let notice: {title: string; text: string; tone?: 'ok'} | undefined;
+// tone ok: a confirmation (green), otherwise a problem to fix (red). action: the next step it suggests.
+let notice: {title: string; text: string; tone?: 'ok'; action?: {label: string; run: () => void}} | undefined;
 let busy = false, busyTitle = '', controller: AbortController | undefined;
 let localProgress: {done: number; total: number} | undefined;
 let workspace: Workspace | undefined, plan: Plan | undefined, scope: Scope = 'project', restoreJournal: Journal | undefined;
@@ -82,7 +84,7 @@ if (isDemo) {
     if (!reply.ok) throw new Error(reply.error);
     return reply.value;
   };
-  client = new LocalJobs(rpc, {download: (bytes, name, type) => save(bytes, name, type), compress: zipInWorker, preview: {prepare: preparePreview, finish: finishPreview, unauthorized: unauthorizedOrigins}});
+  client = new LocalJobs(rpc, {download: (bytes, name, type) => save(bytes, name, type), compress: zipInWorker, preview: {prepare: preparePreview, finish: finishPreview, unauthorized: unauthorizedOrigins, expand: expandPreview}});
 } else {
   connection = new PanelConnection(chrome.runtime, () => {
     const wasConnected = connected; connected = false;
@@ -152,6 +154,7 @@ function updateHead(): Head {
 function resultHead(state: JobState): Head {
   const result = state.result, restore = state.scope === 'restore';
   if (state.status === 'completed') {
+    if (result?.kind === 'export' && result.previewOnly) return {title: 'Prévia baixada', detail: `No terminal da pasta do projeto: npm run previa:trocar -- ${result.fileName}. Só preview/ muda; tema/ fica como está.`, tone: 'ok'};
     if (result?.kind === 'export') return {title: 'ZIP baixado', detail: 'Extraia numa pasta e abra no VS Code para editar.', tone: 'ok'};
     if (result?.kind === 'send') {
       const items = result.verified + result.uploaded;
@@ -173,7 +176,7 @@ function render(): void {
   $('status').textContent = info.title;
   $('detail').textContent = info.detail;
   $('notice').hidden = !notice || view === 'job' || view === 'offline' || view === 'connecting';
-  if (notice) $('notice').replaceChildren(el('strong', {text: notice.title}), notice.text);
+  if (notice) $('notice').replaceChildren(el('strong', {text: notice.title}), notice.text, ...(notice.action ? [' ', linkButton(notice.action.label, notice.action.run)] : []));
   $('notice').dataset.tone = notice?.tone || '';
   $('notice').setAttribute('role', notice?.tone === 'ok' ? 'status' : 'alert');
   $('export-section').hidden = view !== 'export';
@@ -285,8 +288,10 @@ function renderResult(): void {
   $('done-summary').textContent = send && state.status === 'completed' ? `${send.verified} ${send.verified === 1 ? 'arquivo salvo' : 'arquivos salvos'}${send.created ? `, ${send.created} ${send.created === 1 ? 'deles criado' : 'deles criados'} pela extensão` : ''}${send.uploaded ? ` e ${send.uploaded} ${send.uploaded === 1 ? 'imagem enviada' : 'imagens enviadas'}` : ''}. A extensão não publicou nada.` : send ? `${plural(send.verified + send.uploaded, 'item conferido', 'itens conferidos')} de ${send.total} antes de parar.` : '';
   $('preview-info').hidden = !exported; $('preview-more').hidden = !exported;
   if (exported) {$('preview-info').textContent = exported.preview; $('preview-details').textContent = `${exported.previewDetails ?? ''} Arquivo: ${exported.fileName}.`.trim();}
-  $('done-warnings').hidden = !send?.warnings.length;
-  $('done-warnings').replaceChildren(...(send?.warnings || []).map(text => el('li', {}, el('span', {text}))));
+  // A send's warnings, or the links of the store a download found broken.
+  const warnings = send?.warnings || exported?.warnings || [];
+  $('done-warnings').hidden = !warnings.length;
+  $('done-warnings').replaceChildren(...warnings.map(text => el('li', {}, el('span', {text}))));
   $('undo').hidden = !(send && state.status === 'completed');
   $('download-receipt').hidden = !(send && send.verified);
   renderEvents(state.status !== 'completed');
@@ -486,7 +491,20 @@ function attention(): HTMLLIElement[] {
   }
   for (const issue of selectionIssues(plan, selected)) items.push(attentionItem(`${issue.path} precisa ir junto com ${issue.requires}.`));
   for (const warning of plan.warnings || []) items.push(attentionItem(`${warning.path}: ${warning.message}`));
+  // Categories and pages live in the Yampi panel: a send creates no route. A warning, never a block.
+  const links = scope === 'project' ? review()?.links : undefined;
+  for (const link of links?.broken || []) items.push(attentionItem(`Link para uma rota que não existe na loja: ${routeText(link.url)} em ${list(link.files)}; crie a categoria ou a página no painel da Yampi, ou troque o link.`));
+  if (links?.reason) items.push(attentionItem(`${plural(links.unchecked, 'link não conferido', 'links não conferidos')} na loja: ${links.reason}`, linkButton('Conferir os links', checkLinksAgain)));
   return items;
+}
+const routeText = (url: string) => {const parsed = new URL(url); return parsed.pathname + parsed.search;};
+// The storefront read needs Chrome's permission, asked in this click; then the comparison runs again.
+function checkLinksAgain(): void {
+  const granted = context ? requestScopes([context.previewOrigin]) : Promise.resolve(false);
+  void run('Preparando a comparação', async () => {
+    if (!await granted) throw new Error('O Chrome não liberou a leitura da vitrine. Os links continuam sem conferência; o envio não depende dela.');
+    await compare();
+  });
 }
 function setOverride(row: PlanRow, use: boolean): void {
   const current = review(); if (!current) return;
@@ -979,6 +997,15 @@ $('export').addEventListener('click', () => {
   const permission = $<HTMLInputElement>('include-preview').checked && context ? requestScopes([context.previewOrigin, ...PREVIEW_ORIGINS]) : Promise.resolve(false);
   void run('Preparando o download', async () => {await startJob({id: newId(), kind: 'export', includePreview: await permission});});
 });
+// Only preview/, from the reference the update just wrote: the theme is not read again. Chrome asks
+// for the storefront and the image and font origins in this click, as in the download.
+function downloadPreview(): void {
+  const permission = context ? requestScopes([context.previewOrigin, ...PREVIEW_ORIGINS]) : Promise.resolve(false);
+  void run('Preparando a prévia', async () => {
+    if (!await permission) throw new Error('O Chrome não liberou a leitura da vitrine. Sem ela, não há prévia nova para baixar.');
+    await startJob({id: newId(), kind: 'export', includePreview: true, previewOnly: true});
+  });
+}
 $('preview-allow').addEventListener('click', () => {
   const origins = job?.waiting?.origins || [];
   const permission = requestScopes(origins);
@@ -1053,7 +1080,9 @@ async function compare(full = false): Promise<void> {
   const base = workspace?.baseline, project = workspace?.project;
   if (!base || !project) throw new Error('Carregue a exportação original e a pasta editada.');
   closeSheet('confirm-panel');
-  await startJob({id: newId(), kind: 'compare', scope: 'project', paths: changedPaths(base, project.local, project.localAssets), ...(full ? {full: true} : {})});
+  const changed = Object.keys(project.local).filter(path => project.local[path] !== base.files[path]);
+  const links = sendRoutes(project.local, changed, base.context.previewOrigin).map(route => ({url: route.url, files: route.sources}));
+  await startJob({id: newId(), kind: 'compare', scope: 'project', paths: changedPaths(base, project.local, project.localAssets), ...(full ? {full: true} : {}), ...(links.length ? {links} : {})});
 }
 async function readFolder(folder: Folder, full = false, compareAfter = true): Promise<void> {
   busyTitle = `Lendo “${folder.name}”`; render();
@@ -1171,8 +1200,9 @@ $('apply-update').addEventListener('click', () => {
     notice = {title: 'Pasta atualizada com a loja', tone: 'ok', text: [
       `${plural(result.written.length, 'arquivo gravado', 'arquivos gravados')}${result.removed.length ? ` e ${plural(result.removed.length, 'removido', 'removidos')}` : ''} em tema/.`,
       result.marked.length ? `Com marcações de conflito para resolver no editor de código: ${list(result.marked)}.` : '',
-      'Versões guardadas em .yampi-sync/versoes/. Nada foi enviado à loja.'
-    ].filter(Boolean).join(' ')};
+      'Versões guardadas em .yampi-sync/versoes/. Nada foi enviado à loja.',
+      'A prévia local (preview/) continua com a captura do download: baixe uma prévia nova para ver as categorias e páginas criadas no painel desde então.'
+    ].filter(Boolean).join(' '), action: {label: 'Baixar a prévia nova', run: downloadPreview}};
   });
 });
 $('open-versions').addEventListener('click', () => {

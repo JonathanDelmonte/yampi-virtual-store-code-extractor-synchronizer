@@ -25,7 +25,7 @@ export async function encodeSnapshot(snapshot: Snapshot, project = false, previe
   const check=()=>{if(options.signal?.aborted)throw new Error('Preparação do ZIP cancelada. Nenhum arquivo da Yampi foi alterado.');};check();
   const source = safeSnapshot(snapshot);
   const visual = project ? preview || demonstration(source.context, 'Contexto visual não capturado; prévia demonstrativa.', Object.keys(source.files)) : undefined;
-  const manifest: Manifest = {format: 'yampi-theme-sync', version: 3, tool: {name: 'yampi-code-sync', version: TOOL_VERSION}, theme: themeInfo(visual), context: source.context, capturedAt: source.capturedAt, files: [], skipped: SKIPPED, ...(visual ? {preview: {manifest: 'preview/manifest.json', format: 2}} : {})};
+  const manifest: Manifest = {format: 'yampi-theme-sync', version: 3, tool: {name: 'yampi-code-sync', version: TOOL_VERSION}, theme: themeInfo(visual), context: source.context, capturedAt: source.capturedAt, files: [], skipped: SKIPPED, ...(visual ? {preview: {manifest: 'preview/manifest.json', format: 3}} : {})};
   const entries: Record<string, Uint8Array> = Object.create(null);
   const all = {...Object.fromEntries(Object.entries(source.files).map(([p, v]) => [p, strToU8(v)])), ...source.assets};
   for (const path of Object.keys(all).sort()) {
@@ -42,6 +42,14 @@ export async function encodeSnapshot(snapshot: Snapshot, project = false, previe
   }
   check();
   return options.compress?options.compress(entries,options.signal):compressArchive(entries);
+}
+// Only preview/, for a project that already exists: after "Atualizar da loja", so categories and
+// pages created in the Yampi panel since the export open in the local preview too. The extension
+// never writes preview/ in the project folder; npm run previa:trocar puts this ZIP in place.
+export async function encodePreview(snapshot: Snapshot, preview: PreviewBundle, options:{signal?:AbortSignal;compress?:(entries:ArchiveEntries,signal?:AbortSignal)=>Promise<Uint8Array>}={}): Promise<Uint8Array> {
+  const source = safeSnapshot(snapshot), entries: Record<string, Uint8Array> = await previewEntries(preview, source.files);
+  if (options.signal?.aborted) throw new Error('Preparação do ZIP cancelada. Nenhum arquivo da Yampi foi alterado.');
+  return options.compress ? options.compress(entries, options.signal) : compressArchive(entries);
 }
 function safeArchivePath(path: string): void {
   if (!path || path.length > 500 || /[\\\u0000-\u001f\u007f:<>"|?*]/.test(path) || path.startsWith('/') || path.split('/').some(p => p === '..' || p === '.')) throw new Error(`Caminho inseguro no ZIP: ${path}`);

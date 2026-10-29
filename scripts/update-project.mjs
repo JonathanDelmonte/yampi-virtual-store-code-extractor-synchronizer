@@ -7,7 +7,7 @@ import {readProject,safeRead,digest} from '../local-runtime/engine.mjs';
 import {loadPreview} from '../local-runtime/preview.mjs';
 import {isOverrides,emptyOverrides} from '../local-runtime/contract.mjs';
 const repository=path.resolve(import.meta.dirname,'..'),runtime=path.join(repository,'local-runtime');
-export const tools=['engine.mjs','dev.mjs','pack.mjs','platform.mjs','platform-browser.mjs','twig.mjs','preview.mjs','integrity.mjs','contract.mjs','dependencies.mjs','parity.mjs','known.mjs'];
+export const tools=['engine.mjs','dev.mjs','pack.mjs','platform.mjs','platform-browser.mjs','twig.mjs','preview.mjs','integrity.mjs','contract.mjs','dependencies.mjs','parity.mjs','known.mjs','preview-swap.mjs'];
 const RETIRED=['twig'];
 const json=v=>JSON.stringify(v,null,2)+'\n';
 async function destination(root,relative) {
@@ -58,7 +58,7 @@ async function previewFromZip(zipPath,project) {
   const temporary=await mkdtemp(path.join(os.tmpdir(),'yampi-preview-check-'));
   try{
     for(const [name,bytes] of Object.entries(preview)){const target=path.join(temporary,name);await mkdir(path.dirname(target),{recursive:true});await writeFile(target,bytes);}
-    const loaded=await loadPreview(temporary,project);if(loaded.version!==2)throw new Error('A nova exportação usa um formato de prévia antigo.');
+    const loaded=await loadPreview(temporary,project);if(![2,3].includes(loaded.version))throw new Error('A nova exportação usa um formato de prévia antigo.');
     const sameTheme=manifest.files?.length===project.manifest.files.length&&manifest.files.every(f=>project.manifest.files.some(o=>o.path===f.path&&o.sha256===f.sha256));
     return {files:preview,summary:{capturedAt:loaded.capturedAt,source:loaded.source,pages:loaded.pages.map(p=>p.kind+(p.context==='search'?' (busca)':'')),resources:loaded.resources.length,themeMatchesBaseline:sameTheme}};
   }finally{await rm(temporary,{recursive:true,force:true});}

@@ -5,7 +5,7 @@ import {assertContext, validatePath, validatePaths, validateImage, imagePath, wr
 import {openSession, readFiles, YAMPI_SERVER, type Server} from './server-read';
 // directOpen/directRead: copies straight from the editor's own server (see server-read.ts).
 export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write' | 'create' | 'upload' | 'links' | 'directOpen' | 'directRead'; context?: Context; path?: string; paths?: string[]; store?: string; expected?: string; content?: string}
-export const version = '0.9.1';
+export const version = '0.10.0';
 type Reply = {ok: true; value: unknown} | {ok: false; error: string};
 const clean = (e: Element | null) => e?.textContent?.trim() || '';
 type EditorRoot = ShadowRoot | HTMLElement;

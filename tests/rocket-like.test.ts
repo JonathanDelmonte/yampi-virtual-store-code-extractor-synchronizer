@@ -5,8 +5,11 @@ import os from 'node:os';
 import http from 'node:http';
 import {unzipSync} from 'fflate';
 import {installDomParser} from './fixtures/dom';
-import {rocketLike, platformMinify, FONTS, IMG, ASSETS, type RocketOptions} from './fixtures/rocket-like';
+import {rocketLike, platformMinify, fixtureFetch, FONTS, IMG, ASSETS, STORE, more, type RocketOptions, type FixtureResource} from './fixtures/rocket-like';
+import type {PreviewLimits} from '../src/core/preview';
 import {preparePreview, finishPreview} from '../src/browser/preview-capture';
+import {expandPreview} from '../src/browser/preview-pages';
+import {fetchPublicResource} from '../src/browser/public-fetch';
 import {encodeSnapshot} from '../src/core/archive';
 import {underlyingImage} from '../local-runtime/contract.mjs';
 // @ts-expect-error Embedded runtime is native JavaScript, exercised here at runtime.
@@ -22,27 +25,34 @@ afterEach(async () => {
   }
 });
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
-async function exportFixture(options: RocketOptions = {}) {
+// A captured page as the local tools read it: its own file plus the shared themeConfig/merchant.
+function rawPage(entries: Record<string, Uint8Array>, id: string) {
+  const manifest = JSON.parse(decode(entries['preview/manifest.json'])), page = manifest.pages.find((item: {id: string}) => item.id === id);
+  const own = JSON.parse(decode(entries['preview/' + page.file]));
+  for (const [key, sha] of Object.entries(page.shared || {})) own[key] = JSON.parse(decode(entries[`preview/raw/shared/${sha}.json`]));
+  return own;
+}
+async function exportFixture(options: RocketOptions = {}, extra: {limits?: Partial<PreviewLimits>; tweak?: (resources: Record<string, FixtureResource>) => void} = {}) {
   const fixture = rocketLike(options);
   const served = Object.fromEntries(Object.entries(fixture.themeSheets).map(([url, entries]) => [url, {type: 'text/css', text: entries.length ? platformMinify(compileStyles(fixture.snapshot.files, entries, {style: 'compressed', assets: ASSETS})) : ''}]));
-  const resources: Record<string, {text?: string; base64?: string; type: string}> = {...fixture.resources, ...served}, requested: string[] = [];
-  const fetcher = async (url: string) => {
-    requested.push(url);
-    const resource = resources[url];
-    if (!resource) throw new Error('Recurso fictício ausente: ' + url);
-    return {url, type: resource.type, bytes: resource.base64 ? Uint8Array.from(atob(resource.base64), c => c.charCodeAt(0)) : new TextEncoder().encode(resource.text)};
-  };
+  const resources: Record<string, FixtureResource> = {...fixture.resources, ...served}, requested: string[] = [];
+  extra.tweak?.(resources);
+  const network = fixtureFetch(resources, requested);
+  // The same download the extension's worker makes, on top of the fictional storefront.
+  const fetcher = async (url: string) => {const result = await fetchPublicResource(url, fixture.origins, network); return {url: result.url, type: result.type, bytes: Uint8Array.from(atob(result.encoded), c => c.charCodeAt(0))};};
+  // Waiting is counted, not slept: 429 answers say how long.
+  const waits: number[] = [], progress: string[] = []; let clock = 0;
   const restore = installDomParser();
   try {
-    const draft = await preparePreview(fixture.snapshot, fetcher);
-    const bundle = await finishPreview(draft, fetcher, fixture.origins);
+    const draft = await preparePreview(fixture.snapshot, fetcher, extra.limits ? {limits: extra.limits} : {});
+    const bundle = await expandPreview(await finishPreview(draft, fetcher, fixture.origins), fixture.snapshot.files, fetcher, {wait: async ms => {waits.push(ms); clock += ms;}, now: () => clock, onProgress: (stage, done, total) => progress.push(`${stage} ${done}/${total}`)});
     const zip = await encodeSnapshot(fixture.snapshot, true, bundle);
     const root = await mkdtemp(path.join(os.tmpdir(), 'yampi-ficticio-')); folders.push(root);
     const entries = unzipSync(zip);
     for (const [name, bytes] of Object.entries(entries)) {await mkdir(path.dirname(path.join(root, name)), {recursive: true}); await writeFile(path.join(root, name), bytes);}
     // Dependencies come from this repository; the tools are byte-identical copies.
     await symlink(path.resolve('node_modules'), path.join(root, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
-    return {fixture, bundle, entries, root, requested};
+    return {fixture, bundle, entries, root, requested, waits, progress};
   } finally {restore();}
 }
 describe('exportação nova no formato real da vitrine', () => {
@@ -80,7 +90,7 @@ describe('exportação nova no formato real da vitrine', () => {
     const {entries} = await exportFixture();
     const preview = Object.entries(entries).filter(([name]) => name.startsWith('preview/') && /\.json$/.test(name)).map(([, bytes]) => decode(bytes)).join('\n');
     for (const secret of ['FAKE-SECRET-KEY-0001', 'FAKE-CHECKOUT-TOKEN', 'FAKE-SESSION-ID', 'FAKE-TOKEN', 'PX-FICTICIO', 'contato@ficticia.invalid', '123.456.789-09', 'Rua Fictícia']) expect(preview).not.toContain(secret);
-    const home = JSON.parse(decode(entries['preview/raw/page-0.json']));
+    const home = rawPage(entries, 'page-0');
     expect(home.merchant.company).toMatchObject({person_type: 'person', cpf: 'redacted', email: 'redacted', phone: {number: 'redacted'}, social: {instagram: 'https://instagram.invalid/ficticia'}});
     expect(Object.keys(home.themeConfig.theme.params)).toEqual(expect.arrayContaining(['grids_card_style', 'buttons_style', 'empty_cart_title', 'border_apply_on_images']));
     expect(home.themeConfig.theme.params.checkout_api_key).toBeUndefined();
@@ -149,5 +159,94 @@ describe('exportação nova no formato real da vitrine', () => {
     const report = JSON.parse(decode(unresolved.entries['preview/report.json']));
     expect(report.contract.pages[0].unresolved.map((u: {alias: string}) => u.alias)).toEqual(['secao_inexistente']);
     await expect(validateLocal(unresolved.root)).rejects.toThrow('Seção sem arquivo: alias "secao_inexistente" na página "home"');
+  }, 60000);
+});
+describe('páginas da loja e dos produtos depois do recorte', () => {
+  const route = (url: string) => {const parsed = new URL(url); return parsed.pathname + parsed.search;};
+  test('categorias, subcategorias, vitrines, rodapé, promoção, busca do tema e cada produto entram na exportação', async () => {
+    const {bundle, entries, waits, progress} = await exportFixture();
+    const staged = (stage: string) => bundle.pages.filter(page => page.stage === stage).map(page => route(page.sourceUrl));
+    expect(bundle.pages.filter(page => !page.stage).length).toBeLessThanOrEqual(8);
+    expect(staged('store')).toEqual(expect.arrayContaining(['/categoria-c?sort_by=best_sellers', '/categoria-c/sub-c1?sort_by=best_sellers', '/categoria-c/sub-c2', '/categoria-d', '/destaques/l', '/busca?q=oferta', '/promocoes/semana', '/atendimento/trocas', '/atendimento/privacidade', '/categoria-oculta?sort_by=best_sellers']));
+    expect(bundle.pages.map(page => route(page.sourceUrl))).toEqual(expect.arrayContaining(['/', '/categoria-a', '/categoria-b', '/sobre', '/promocao']));
+    // Every product any captured page shows has its own page: those of the cut plus the stage's.
+    const productRoutes = new Set(bundle.pages.filter(page => page.kind === 'product').map(page => route(page.sourceUrl)));
+    for (const id of [1, 2, 3, ...Object.values(more).map(item => item.id)]) expect(productRoutes, 'produto ' + id).toContain(`/produto-ficticio-${id}/p`);
+    // A similar product only another product page shows comes in the second product round; the one only it shows stays out, said so.
+    expect(productRoutes).toContain('/produto-ficticio-13/p'); expect(productRoutes).not.toContain('/produto-ficticio-14/p');
+    expect(bundle.issues.find(issue => issue.code === 'product-page-rounds')?.reason).toBe('1 caminho só apareceu nas páginas da última rodada (2 rodadas) e ficou de fora (ex.: /produto-ficticio-14/p).');
+    expect(bundle.issues.map(issue => issue.code)).not.toContain('product-page-limit'); expect(bundle.stages!.product!.left).toBe(1);
+    expect(bundle.pages.find(page => route(page.sourceUrl) === '/busca?q=oferta')).toMatchObject({kind: 'category', context: 'search', stage: 'store'});
+    expect(bundle.pages.find(page => route(page.sourceUrl) === '/promocoes/semana')).toMatchObject({kind: 'promotion', stage: 'store'});
+    // The category only a product links to comes in the last round, after the products.
+    expect(staged('store').at(-1)).toBe('/categoria-oculta?sort_by=best_sellers');
+    // A 404 is a broken link, with where it is written; a redirect elsewhere is only left out.
+    expect(bundle.issues.filter(issue => issue.code === 'link-broken')).toEqual([{code: 'link-broken', resource: '/categoria-removida', reason: expect.stringContaining('sections/global/footer.twig')}, {code: 'link-broken', resource: '/produto-removido/p', reason: expect.stringContaining('sections/global/footer.twig')}]);
+    expect(bundle.stages!.product!.skipped).toEqual([{route: '/produto-removido/p', reason: 'HTTP 404: link quebrado', sources: ['sections/global/footer.twig']}]);
+    expect(bundle.issues.some(issue => issue.code === 'page-unavailable' && issue.resource === STORE + '/atendimento/parceiro' && /redirecionado/.test(issue.reason))).toBe(true);
+    expect(bundle.stages!.store!.skipped).toEqual(expect.arrayContaining([{route: '/categoria-removida', reason: 'HTTP 404: link quebrado', sources: ['sections/global/footer.twig']}, {route: '/atendimento/parceiro', reason: 'redirecionamento não seguido', sources: ['merchant.pages']}]));
+    // Category D answered 429 twice: every read waited the Retry-After before trying again.
+    expect(waits.reduce((sum, ms) => sum + ms, 0)).toBeGreaterThanOrEqual(2000);
+    expect(bundle.issues.some(issue => issue.resource?.includes('categoria-d'))).toBe(false);
+    expect(progress.some(line => /^store \d+\/\d+$/.test(line))).toBe(true); expect(progress.at(-1)).toMatch(/^store /);
+    expect(progress.filter(line => line.startsWith('product ')).at(-1)).toBe(`product ${bundle.stages!.product!.found}/${bundle.stages!.product!.found}`);
+    expect(bundle.issues.map(issue => issue.code)).not.toContain('page-limit');
+    expect(bundle.issues.filter(issue => issue.code === 'page-kind-missing')).toEqual([]);
+    expect(bundle.stages!.store!.byKind).toMatchObject({category: 6, search: 1, promotion: 1, pages: 2});
+    // Stored once: themeConfig and merchant shared by many pages, each page file only with its own data.
+    const manifest = JSON.parse(decode(entries['preview/manifest.json']));
+    expect(manifest.version).toBe(3); expect(manifest.shared.length).toBeGreaterThan(0);
+    const product = manifest.pages.find((page: {sourceUrl: string}) => page.sourceUrl === STORE + '/produto-ficticio-7/p');
+    expect(product).toMatchObject({stage: 'product', shared: {themeConfig: expect.any(String), merchant: expect.any(String)}});
+    expect(Object.keys(JSON.parse(decode(entries['preview/' + product.file]))).sort()).toEqual(['bodyClasses', 'data']);
+    expect(rawPage(entries, product.id).data.product.data.name).toBe('Produto Fictício 7');
+    const report = JSON.parse(decode(entries['preview/report.json']));
+    expect(report.pages).toMatchObject({store: bundle.stages!.store!.captured, product: bundle.stages!.product!.captured, stages: {store: {skipped: expect.any(Array)}}});
+  }, 60000);
+  test('uma chave bloqueada dentro de window.data de categoria e de produto não chega ao ZIP', async () => {
+    const {entries, bundle} = await exportFixture();
+    expect(bundle.pages.some(page => route(page.sourceUrl).startsWith('/categoria-c?'))).toBe(true);
+    expect(bundle.pages.some(page => route(page.sourceUrl) === '/produto-ficticio-4/p')).toBe(true);
+    const preview = Object.entries(entries).filter(([name]) => name.startsWith('preview/') && /\.json$/.test(name)).map(([, bytes]) => decode(bytes)).join('\n');
+    for (const secret of ['FAKE-CATEGORY-TOKEN', 'FAKE-PRODUCT-KEY', 'Cliente Fictício']) expect(preview).not.toContain(secret);
+    expect(bundle.removedKeys).toEqual(expect.arrayContaining(['customer', 'session_token', 'api_key']));
+  }, 60000);
+  test('a prévia local abre cada página pelo caminho, com qualquer ordem; a busca, só pela pergunta', async () => {
+    const {root} = await exportFixture();
+    const report = await validateLocal(root);
+    expect(report.pages.filter((page: {stage?: string}) => page.stage).every((page: {renderedSections: number; expectedSections: number}) => page.renderedSections === page.expectedSections)).toBe(true);
+    const local = await createLocalServer(root); servers.push(local.server);
+    await new Promise<void>(resolve => local.server.listen(0, '127.0.0.1', resolve));
+    const base = 'http://127.0.0.1:' + (local.server.address() as {port: number}).port;
+    const open = async (target: string) => {const response = await fetch(base + target); return {status: response.status, html: await response.text()};};
+    for (const [target, text] of [['/categoria-c?sort_by=lowest_price', 'Categoria C'], ['/categoria-c/sub-c1?sort_by=best_sellers&page=2', 'Subcategoria C1'], ['/categoria-oculta?sort_by=best_sellers', 'Categoria Oculta'], ['/destaques/l', 'Destaques fictícios'], ['/atendimento/trocas', 'Trocas'], ['/promocoes/semana', 'Semana fictícia'], ['/busca?q=oferta', 'Busca'], ['/produto-ficticio-9/p', 'Produto Fictício 9']] as const) {
+      const page = await open(target);
+      expect(page.status, target).toBe(200); expect(page.html, target).toContain(text);
+    }
+    expect((await open('/produto-ficticio-5/p')).html).toContain('href="/categoria-oculta?sort_by=best_sellers"');
+    const other = await open('/busca?q=outra');
+    expect(other.status).toBe(404); expect(other.html).toContain('Rota não capturada');
+    const index = await open('/__local/');
+    expect(index.html).toMatch(/<strong>Produtos<\/strong>: 13/); expect(index.html).toMatch(/<strong>Buscas<\/strong>: 2/);
+    expect((index.html.match(/<li>/g) || []).length).toBeLessThan(20);
+  }, 60000);
+  test('429 sem fim, 404 e redirecionamento viram aviso; o limite da etapa fica no relatório', async () => {
+    // A store that never stops asking for calm: the page waits each time and only then is left out.
+    const calm = await exportFixture({}, {tweak: resources => {resources[STORE + '/categoria-c/sub-c2'].throttle = 99;}});
+    expect(calm.bundle.stages!.store!.skipped).toContainEqual(expect.objectContaining({route: '/categoria-c/sub-c2', reason: 'HTTP 429'}));
+    expect(calm.bundle.issues.find(issue => issue.code === 'page-unavailable' && issue.resource === STORE + '/categoria-c/sub-c2')?.reason).toMatch(/HTTP 429/);
+    // Five more answers of 429 with Retry-After: 1 (plus the two of category D), waited in full.
+    expect(calm.waits.reduce((sum, ms) => sum + ms, 0)).toBeGreaterThanOrEqual(7000);
+    expect(calm.bundle.pages.some(page => page.sourceUrl === STORE + '/produto-ficticio-7/p')).toBe(false);
+    // The stage's own budget: what passes it is counted and named, and the export finishes.
+    const limited = await exportFixture({}, {limits: {storePages: 4}});
+    expect(limited.bundle.pages.filter(page => page.stage === 'store').length).toBe(4);
+    expect(limited.bundle.issues.find(issue => issue.code === 'store-page-limit')?.reason).toMatch(/^Limite de 4 páginas da loja ou 24 MiB atingido; \d+ caminhos ficaram de fora/);
+    // Past the budget is a limit, never a "last round" note.
+    expect(limited.bundle.issues.map(issue => issue.code)).not.toContain('store-page-rounds');
+    expect(limited.bundle.stages!.store!.left).toBeGreaterThan(0);
+    expect(limited.bundle.pages.filter(page => !page.stage).length).toBe(calm.bundle.pages.filter(page => !page.stage).length);
+    const zip = await encodeSnapshot(limited.fixture.snapshot, true, limited.bundle);
+    expect(zip.length).toBeGreaterThan(0);
   }, 60000);
 });

@@ -161,6 +161,21 @@ export function planApi(pages: PreviewPage[], limits: PreviewLimits): {base?: st
   for (const slug of [...slugs].slice(0, 24)) add('catalog/products/' + encodeURIComponent(slug), new URLSearchParams());
   return {base, requests: requests.slice(0, limits.apiRequests)};
 }
+// One public page, read without executing it: the three objects after the blocklist, the draft
+// theme settings of the editor on top, and the kind the page says it is.
+export interface ReadPage {raw: RawPage; kind: PageKind; context?: string; doc: Document; issues: PreviewIssue[]; removed: string[]; editor: boolean}
+export async function readPage(url: string, fetcher: PreviewFetch, limits: PreviewLimits, expected: PageKind, editorData?: Data): Promise<ReadPage> {
+  const response = await fetcher(url);
+  if (response.bytes.length > 4 * 1024 * 1024 || !response.type.startsWith('text/html')) throw new Error('Página não é HTML público dentro do limite.');
+  if (publicUrl(response.url, url) !== url) throw new Error('Redirecionamento não autorizado.');
+  const doc = new DOMParser().parseFromString(new TextDecoder('utf-8', {fatal: true}).decode(response.bytes), 'text/html');
+  const parsed = staticContext(doc);
+  const bodyClasses = (doc.body?.className || '').split(/\s+/).filter(name => /^[a-z0-9_-]{1,100}$/i.test(name)).slice(0, 30);
+  const clean = sanitizeRaw({...parsed.raw, bodyClasses}, url, limits);
+  if (!clean.raw.themeConfig && !clean.raw.merchant) throw new Error('Configuração e identidade públicas não encontradas; nenhuma variável foi executada.');
+  const raw = applyEditor(clean.raw, editorData);
+  return {raw, ...detectKind(raw, expected), doc, issues: [...parsed.issues.map(reason => ({code: 'static-data', resource: url, reason})), ...clean.issues], removed: clean.removed, editor: raw !== clean.raw};
+}
 function applyEditor(raw: RawPage, editor: Data | undefined): RawPage {
   const config = object(editor?.themeConfig);
   if (!plain(config.theme)) return raw;
@@ -185,25 +200,15 @@ export async function preparePreview(snapshot: Snapshot, fetcher: PreviewFetch, 
     if (options.signal?.aborted) throw new Error('Captura de prévia cancelada.');
     fetched.add(url);
     try {
-      const response = await fetcher(url);
-      if (response.bytes.length > 4 * 1024 * 1024 || !response.type.startsWith('text/html')) throw new Error('Página não é HTML público dentro do limite.');
-      if (publicUrl(response.url, url) !== url) throw new Error('Redirecionamento não autorizado.');
-      const doc = new DOMParser().parseFromString(new TextDecoder('utf-8', {fatal: true}).decode(response.bytes), 'text/html');
-      const parsed = staticContext(doc);
-      const bodyClasses = (doc.body?.className || '').split(/\s+/).filter(name => /^[a-z0-9_-]{1,100}$/i.test(name)).slice(0, 30);
-      const clean = sanitizeRaw({...parsed.raw, bodyClasses}, url, bundle.limits);
-      if (!clean.raw.themeConfig && !clean.raw.merchant) throw new Error('Configuração e identidade públicas não encontradas; nenhuma variável foi executada.');
-      const raw = applyEditor(clean.raw, options.editorData);
-      if (raw !== clean.raw) bundle.source = {kind: 'editor', origin: snapshot.context.previewOrigin, association: 'same-editor'};
-      const detected = detectKind(raw, expected);
+      const read = await readPage(url, fetcher, bundle.limits, expected, options.editorData), {raw, doc} = read;
+      if (read.editor) bundle.source = {kind: 'editor', origin: snapshot.context.previewOrigin, association: 'same-editor'};
       const found = candidates(raw, url);
       for (const kind of ['category', 'product', 'pages', 'promotion'] as const) remember(kind, found[kind]);
       if (expected === 'home') remember('unknown', [...doc.querySelectorAll('a[href]')].map(a => sameOrigin(a.getAttribute('href'), url)).filter((u): u is string => !!u && u !== url).slice(0, 40));
       // A probe only stays when it fills a missing page kind.
-      if (probe && bundle.pages.some(p => p.kind === detected.kind && (p.context ?? '') === (detected.context ?? ''))) return undefined;
-      for (const reason of parsed.issues) bundle.issues.push({code: 'static-data', resource: url, reason});
-      bundle.issues.push(...clean.issues); clean.removed.forEach(key => removed.add(key));
-      const page: PreviewPage = {id: 'page-' + bundle.pages.length, kind: detected.kind, ...(detected.context ? {context: detected.context} : {}), sourceUrl: url, raw};
+      if (probe && bundle.pages.some(p => p.kind === read.kind && (p.context ?? '') === (read.context ?? ''))) return undefined;
+      bundle.issues.push(...read.issues); read.removed.forEach(key => removed.add(key));
+      const page: PreviewPage = {id: 'page-' + bundle.pages.length, kind: read.kind, ...(read.context ? {context: read.context} : {}), sourceUrl: url, raw};
       bundle.pages.push(page); docs.set(url, doc);
       htmlResources(doc, url, typeof raw.merchant?.logo_url === 'string' ? raw.merchant.logo_url : undefined, resources, bundle.issues);
       dataResources({merchant: raw.merchant, themeConfig: raw.themeConfig, data: raw.data}, url, resources);
@@ -267,14 +272,16 @@ function rewriteSheet(css: string, base: string, map: Map<string, string>): stri
     return target ? `url("${target}")` : IMAGE.test(value) ? 'url("/__local/placeholder.svg")' : 'url("")';
   });
 }
-// The same sanitization note on every page becomes one issue with a page count.
-function mergeIssues(issues: PreviewIssue[]): PreviewIssue[] {
+// The same sanitization note on every page becomes one issue with a page count. A note merged
+// before (the representative pages) keeps adding to its count when more pages come.
+export function mergeIssues(issues: PreviewIssue[]): PreviewIssue[] {
   const output: (PreviewIssue & {count: number})[] = [], index = new Map<string, PreviewIssue & {count: number}>();
   for (const issue of issues) {
-    const key = ['company-redacted', 'keys-removed', 'values-redacted', 'active-content-neutralized'].includes(issue.code) ? issue.code + '\u0000' + issue.reason : undefined;
+    const merged = ['company-redacted', 'keys-removed', 'values-redacted', 'active-content-neutralized'].includes(issue.code), counted = merged ? issue.reason.match(/^([\s\S]*) \((\d+) páginas\)$/) : null;
+    const reason = counted ? counted[1] : issue.reason, weight = counted ? Number(counted[2]) : 1, key = merged ? issue.code + '\u0000' + reason : undefined;
     const current = key ? index.get(key) : undefined;
-    if (current) {current.count++; continue;}
-    const entry = {...issue, count: 1}; output.push(entry); if (key) index.set(key, entry);
+    if (current) {current.count += weight; continue;}
+    const entry = {...issue, reason, count: weight}; output.push(entry); if (key) index.set(key, entry);
   }
   return output.map(({count, ...issue}) => count > 1 ? {...issue, reason: `${issue.reason} (${count} páginas)`} : issue);
 }

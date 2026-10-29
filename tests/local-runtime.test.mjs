@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
 import {unzipSync, zipSync, strToU8} from 'fflate';
-import {encodeSnapshot, decodeProject} from '../src/core/archive';
+import {encodeSnapshot, encodePreview, decodeProject} from '../src/core/archive';
 import {demonstration} from '../src/core/preview';
 import {demoSnapshot} from '../src/demo/sample';
 import {readProject, renderPage, validateMarkup, compileStyles, compileComponents, registeredComponents} from '../local-runtime/engine.mjs';
@@ -14,6 +14,7 @@ import {checkIntegrity} from '../local-runtime/preview.mjs';
 import {adaptedLocutus} from '../local-runtime/twig.mjs';
 import {localKit} from '../src/core/local-kit';
 import {updateProject, rollbackProject} from '../scripts/update-project.mjs';
+import {swapPreview} from '../local-runtime/preview-swap.mjs';
 const folders = [], servers = [];
 afterEach(async () => {
   for (const server of servers.splice(0)) await new Promise(resolve => server.close(resolve));
@@ -32,6 +33,26 @@ async function project(zip) {
 }
 const render = (template, data = {}) => renderPage({'templates/t.twig': template}, 'templates/t.twig', data);
 describe('ambiente local portátil', () => {
+  test('npm run previa:trocar põe a prévia nova no lugar, guarda a anterior e nunca toca tema/', async () => {
+    const root = await project(), oldManifest = await readFile(path.join(root, 'preview/manifest.json')), theme = await readFile(path.join(root, 'tema/templates/home.twig'));
+    const fresh = demonstration(demoSnapshot.context, 'Prévia nova fictícia', Object.keys(demoSnapshot.files)); fresh.capturedAt = '2026-10-27T12:00:00.000Z';
+    const zip = path.join(await temporary(), 'previa.zip'); await writeFile(zip, await encodePreview(demoSnapshot, fresh));
+    expect(Object.keys(unzipSync(await readFile(zip))).every(name => name.startsWith('preview/'))).toBe(true);
+    const result = await swapPreview(root, zip);
+    expect(result.capturedAt).toBe('2026-10-27T12:00:00.000Z'); expect(result.backup.startsWith('.yampi-sync/updates/') && result.backup.endsWith('-previa')).toBe(true);
+    expect(JSON.parse(await readFile(path.join(root, 'preview/manifest.json'))).capturedAt).toBe('2026-10-27T12:00:00.000Z');
+    expect(await readFile(path.join(root, result.backup, 'preview/manifest.json'))).toEqual(oldManifest);
+    expect(await readFile(path.join(root, 'tema/templates/home.twig'))).toEqual(theme);
+    expect(await checkIntegrity(root)).toMatchObject({previewError: null, previewFormat: 3, modified: 0});
+    // Another store, a tampered capture or an unsafe path: refused, and preview/ stays as it was.
+    const now = await readFile(path.join(root, 'preview/manifest.json'));
+    const other = path.join(await temporary(), 'outra.zip'); await writeFile(other, await encodePreview({...demoSnapshot, context: {...demoSnapshot.context, previewOrigin: 'https://outra-loja.invalid'}}, demonstration({...demoSnapshot.context, previewOrigin: 'https://outra-loja.invalid'}, 'Outra', [])));
+    await expect(swapPreview(root, other)).rejects.toThrow('outra loja');
+    const entries = unzipSync(await readFile(zip)); entries['preview/raw/page-0.json'] = strToU8('{"alterado":true}');
+    const tampered = path.join(await temporary(), 'alterada.zip'); await writeFile(tampered, zipSync(entries)); await expect(swapPreview(root, tampered)).rejects.toThrow('alterados');
+    const unsafe = path.join(await temporary(), 'insegura.zip'); await writeFile(unsafe, zipSync({...unzipSync(await readFile(zip)), 'preview/../tema/x.twig': strToU8('x')})); await expect(swapPreview(root, unsafe)).rejects.toThrow('inseguro');
+    expect(await readFile(path.join(root, 'preview/manifest.json'))).toEqual(now);
+  });
   test('atualizador preserva edições, configuração, contexto e baseline; dry-run não grava', async () => {
     const root = await project(), pkg = JSON.parse(await readFile(path.join(root, 'package.json'))); pkg.version = '0.2.4'; pkg.scripts.dev = 'node meu-servidor.mjs'; pkg.scripts.custom = 'echo personalizado'; delete pkg.scripts['check:integrity'];
     await writeFile(path.join(root, 'package.json'), JSON.stringify(pkg, null, 2)); await writeFile(path.join(root, 'tema/templates/home.twig'), '<h1>Trabalho do usuário</h1>'); await writeFile(path.join(root, 'local.data.json'), '{"meusDados":true}');
@@ -105,7 +126,7 @@ describe('ambiente local portátil', () => {
     }
     expect(blocks.every(block => block.comments.length > 0 && block.rules.length > 0)).toBe(true);
     expect(kit['.gitignore']).toContain('# Em um repositório PRIVADO'); expect(kit['README.md']).toContain('Como editar local.data.json');
-    expect(Object.keys(kit).filter(p => p.startsWith('.yampi-sync/tools/')).sort()).toEqual(['contract.mjs', 'dependencies.mjs', 'dev.mjs', 'engine.mjs', 'integrity.mjs', 'known.mjs', 'pack.mjs', 'parity.mjs', 'platform-browser.mjs', 'platform.mjs', 'preview.mjs', 'twig.mjs'].map(n => '.yampi-sync/tools/' + n));
+    expect(Object.keys(kit).filter(p => p.startsWith('.yampi-sync/tools/')).sort()).toEqual(['contract.mjs', 'dependencies.mjs', 'dev.mjs', 'engine.mjs', 'integrity.mjs', 'known.mjs', 'pack.mjs', 'parity.mjs', 'platform-browser.mjs', 'platform.mjs', 'preview-swap.mjs', 'preview.mjs', 'twig.mjs'].map(n => '.yampi-sync/tools/' + n));
   });
   test('compila Sass, parciais e imports relativos; $assets aponta para os ícones da plataforma', () => {
     expect(compileStyles({'assets/styles/main.scss': '@use "colors"; body { color: colors.$brand; }', 'assets/styles/_colors.scss': '$brand: #123456;'}, ['assets/styles/main.scss'])).toContain('#123456');
@@ -161,7 +182,7 @@ describe('ambiente local portátil', () => {
   });
   test('integridade: --original, adicionados separados e ZIP de retorno conferido', async () => {
     const root = await project();
-    expect(await checkIntegrity(root, {original: true})).toMatchObject({modified: 0, added: 0, returnZip: {status: 'absent'}, previewFormat: 2});
+    expect(await checkIntegrity(root, {original: true})).toMatchObject({modified: 0, added: 0, returnZip: {status: 'absent'}, previewFormat: 3});
     await writeFile(path.join(root, 'tema/templates/home.twig'), '<h1>Editado</h1>\n'); await writeFile(path.join(root, 'tema/templates/novo.twig'), '<p>Novo</p>\n');
     await expect(checkIntegrity(root, {original: true})).rejects.toThrow('1 modificados, 1 adicionados');
     await writeFile(path.join(root, 'retorno-yampi.zip'), await packProject(root));

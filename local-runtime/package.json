@@ -12,7 +12,8 @@
     "pack": "node .yampi-sync/tools/pack.mjs",
     "start": "node .yampi-sync/tools/dev.mjs",
     "check:integrity": "node .yampi-sync/tools/integrity.mjs",
-    "versoes:conhecidas": "node .yampi-sync/tools/known.mjs"
+    "versoes:conhecidas": "node .yampi-sync/tools/known.mjs",
+    "previa:trocar": "node .yampi-sync/tools/preview-swap.mjs"
   },
   "dependencies": {
     "@splidejs/splide": "4.1.4",

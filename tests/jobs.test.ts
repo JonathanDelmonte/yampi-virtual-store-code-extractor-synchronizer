@@ -10,6 +10,9 @@ import {chooseBaseline} from '../src/core/workspace';
 import {clearLocal, get, put, journalHistory, loadWorkspace, updateWorkspace} from '../src/storage';
 import type {Journal} from '../src/core/model';
 import {FakeEditor, context, png, snapshot} from './fixtures/fake-editor';
+import {rocketLike, fixtureFetch} from './fixtures/rocket-like';
+import {sendRoutes} from '../src/core/preview-links';
+import {fetchPublicResource} from '../src/browser/public-fetch';
 const home = 'templates/home.twig', product = 'templates/product.twig';
 const store = {[home]: 'home', [product]: 'product', 'elements/head.twig': 'head'};
 function host(editor: FakeEditor) {
@@ -225,5 +228,99 @@ describe('download com a vitrine: autorizar uma vez, sem voltar a contagem', () 
     await runJob({id: 'baixar-vitrine-2', kind: 'export', includePreview: true}, context, h, control);
     expect(questions).toEqual([]);
     expect(rounds).toHaveLength(2);
+  });
+});
+describe('páginas da loja, prévia avulsa e links do envio', () => {
+  const published = () => ({...demonstration(context, 'Vitrine fictícia.', Object.keys(store)), source: {kind: 'published' as const, origin: context.previewOrigin, association: 'published-unverified' as const}});
+  const allowing = (h: EngineHost) => {h.rpc = async request => {if (request.action === 'preview-allow') return null; throw new Error('O editor fictício é usado diretamente.');};};
+  test('download mostra "Páginas da loja: N de M" e "Páginas dos produtos: N de M" e lista os links quebrados', async () => {
+    const editor = new FakeEditor(store), {host: h, reports} = host(editor);
+    allowing(h);
+    h.preview = {
+      prepare: async () => ({}) as never, finish: async () => published(), unauthorized: () => [],
+      expand: async (visual, _files, _fetch, options) => {
+        for (let done = 0; done <= 3; done++) options.onProgress?.('store', done, 3);
+        for (let done = 0; done <= 2; done++) options.onProgress?.('product', done, 2);
+        // The last round of store pages: the category only a product links to.
+        options.onProgress?.('store', 3, 4); options.onProgress?.('store', 4, 4);
+        return {...visual, stages: {store: {found: 4, captured: 3, byKind: {category: 2, pages: 1}, left: 0, skipped: [{route: '/colecao-encerrada', reason: 'HTTP 404: link quebrado', sources: ['elements/atalhos.twig']}]}, product: {found: 2, captured: 2, byKind: {product: 2}, left: 0, skipped: []}}, issues: [...visual.issues, {code: 'link-broken', resource: '/colecao-encerrada', reason: 'A loja responde HTTP 404: /colecao-encerrada não existe. Linkado em elements/atalhos.twig.'}]};
+      }
+    };
+    const final = await runJob({id: 'baixar-paginas', kind: 'export', includePreview: true}, context, h, control());
+    expect(final.status).toBe('completed');
+    for (const detail of ['Páginas da loja: 0 de 3', 'Páginas da loja: 3 de 3', 'Páginas dos produtos: 0 de 2', 'Páginas dos produtos: 2 de 2', 'Páginas da loja: 4 de 4']) expect(reports.map(state => state.detail), detail).toContain(detail);
+    expect(final.phases.find(p => p.id === 'store')).toMatchObject({label: 'Páginas da loja', status: 'done', done: 4, total: 4});
+    expect(final.phases.find(p => p.id === 'products')).toMatchObject({label: 'Páginas dos produtos', status: 'done', done: 2, total: 2});
+    const counts = reports.map(state => state.fraction);
+    expect(counts.every((value, index) => index === 0 || value >= counts[index - 1])).toBe(true);
+    expect(final.result).toMatchObject({kind: 'export', warnings: ['Link quebrado na loja: A loja responde HTTP 404: /colecao-encerrada não existe. Linkado em elements/atalhos.twig.']});
+    expect((final.result as {previewDetails: string}).previewDetails).toContain('Páginas da loja: 3 (2 categorias ou vitrines, 1 institucional); 1 de fora: /colecao-encerrada (HTTP 404: link quebrado). Páginas dos produtos: 2 (2 produtos); nenhuma de fora.');
+  });
+  test('prévia avulsa: só preview/, a partir da referência guardada, sem ler o tema nem mudar a referência', async () => {
+    await updateWorkspace(context, workspace => {workspace.baseline = snapshot(store); workspace.lineage = {exportedAt: snapshot(store).capturedAt, journals: []};});
+    const editor = new FakeEditor({...store, [home]: 'mudou na loja'}), {host: h, downloads} = host(editor);
+    allowing(h);
+    let seen: Record<string, string> = {};
+    h.preview = {prepare: async value => {seen = value.files; return {} as never;}, finish: async () => published(), unauthorized: () => []};
+    const final = await runJob({id: 'previa', kind: 'export', includePreview: true, previewOnly: true}, context, h, control());
+    expect(final).toMatchObject({status: 'completed', title: 'Baixando a prévia de Loja fictícia', detail: 'ZIP da prévia baixado', result: {kind: 'export', previewOnly: true, texts: 0}});
+    expect(seen[home]).toBe('home'); expect(editor.reads).toEqual([]);
+    expect(final.phases.find(p => p.id === 'read')?.status).toBe('skipped');
+    expect(downloads.map(d => d.name)).toEqual([expect.stringMatching(/^previa-loja-ficticia-/)]);
+    expect(Object.keys(unzipSync(downloads[0].bytes)).every(name => name.startsWith('preview/'))).toBe(true);
+    expect((await loadWorkspace(context))!.baseline).toEqual(snapshot(store));
+    // Without the storefront's permission, or without a reference, there is nothing to download.
+    const denied = await runJob({id: 'previa-2', kind: 'export', previewOnly: true}, context, h, control());
+    expect(denied).toMatchObject({status: 'failed', error: expect.stringContaining('Sem a leitura da vitrine')});
+    await clearLocal();
+    const none = await runJob({id: 'previa-3', kind: 'export', includePreview: true, previewOnly: true}, context, h, control());
+    expect(none).toMatchObject({status: 'failed', error: expect.stringContaining('não guarda o tema')});
+  });
+  test('comparação confere os links do que vai no envio: 404 vira aviso, 429 espera; sem permissão, fica sem conferir', async () => {
+    const editor = new FakeEditor(store), {host: h} = host(editor), asked: string[] = [];
+    let calm = 1;
+    h.rpc = async request => {
+      if (request.action !== 'preview-fetch') throw new Error('O editor fictício é usado diretamente.');
+      const url = request.preview!.url!; asked.push(url);
+      if (url.endsWith('/colecao-encerrada')) throw new Error('Recurso público indisponível: HTTP 404.');
+      if (url.endsWith('/ofertas') && calm-- > 0) throw new Error('Recurso público indisponível: HTTP 429; aguardar 1 s.');
+      return {encoded: btoa('<html></html>'), type: 'text/html', url};
+    };
+    const links = [{url: context.previewOrigin + '/colecao-encerrada', files: ['elements/atalhos.twig']}, {url: context.previewOrigin + '/ofertas', files: ['elements/atalhos.twig']}, {url: context.previewOrigin + '/categoria-a', files: [home]}];
+    const final = await runJob({id: 'comparar-links', kind: 'compare', scope: 'project', paths: [home], links}, context, h, control());
+    expect(final.status).toBe('completed');
+    expect(final.result).toMatchObject({kind: 'compare', links: {checked: 3, broken: [links[0]], unchecked: 0}});
+    expect(asked.filter(url => url.endsWith('/ofertas'))).toHaveLength(2);
+    expect(final.phases.find(p => p.id === 'links')).toMatchObject({status: 'done', done: 3, total: 3});
+    expect((await loadWorkspace(context))!.review?.links?.broken).toEqual([links[0]]);
+    expect(final.events.some(event => event.tone === 'warn' && event.text === '1 link leva a uma rota que não existe na loja')).toBe(true);
+    h.rpc = async request => {if (request.action === 'preview-fetch') throw new Error('Permissão de leitura da vitrine/recurso não concedida.'); throw new Error('O editor fictício é usado diretamente.');};
+    const again = await runJob({id: 'comparar-links-2', kind: 'compare', scope: 'project', paths: [home], links}, context, h, control());
+    expect(again).toMatchObject({status: 'completed', result: {links: {checked: 0, broken: [], unchecked: 3, reason: 'O Chrome não liberou a leitura da vitrine.'}}});
+    // A comparison without links (or an update) has no link step.
+    const plain = await runJob({id: 'comparar-sem-links', kind: 'compare', scope: 'project', paths: [home]}, context, h, control());
+    expect(plain.phases.find(p => p.id === 'links')?.status).toBe('skipped');
+  });
+});
+describe('envio: link do tema para rota que não existe, com a loja fictícia', () => {
+  test('a comparação aponta o arquivo do tema cujo link a loja responde com 404', async () => {
+    const fixture = rocketLike(), ctx = fixture.snapshot.context, footer = 'sections/global/footer.twig';
+    // The project changed the footer: its links go in the send and are read on the storefront.
+    const local = {...fixture.snapshot.files, [footer]: fixture.snapshot.files[footer] + '<p>Rodapé editado no projeto.</p>\n'};
+    const links = sendRoutes(local, [footer], ctx.previewOrigin).map(route => ({url: route.url, files: route.sources}));
+    expect(links.map(link => new URL(link.url).pathname)).toEqual(expect.arrayContaining(['/busca', '/categoria-removida', '/produto-removido/p']));
+    const editor = new FakeEditor(fixture.snapshot.files), {host: h} = host(editor);
+    editor.ctx = {...ctx};
+    const network = fixtureFetch(fixture.resources);
+    h.rpc = async request => {
+      if (request.action !== 'preview-fetch') throw new Error('O editor fictício é usado diretamente.');
+      return fetchPublicResource(request.preview!.url!, [ctx.previewOrigin], network);
+    };
+    const final = await runJob({id: 'comparar-rodape', kind: 'compare', scope: 'project', paths: [footer], links}, ctx, h, control());
+    expect(final.status).toBe('completed');
+    const report = (final.result as {links: {broken: {url: string; files: string[]}[]; checked: number}}).links;
+    expect(report.broken).toEqual([{url: ctx.previewOrigin + '/categoria-removida', files: [footer]}, {url: ctx.previewOrigin + '/produto-removido/p', files: [footer]}]);
+    expect(report.checked).toBe(links.length);
+    expect((await loadWorkspace(ctx))!.review?.links?.broken).toHaveLength(2);
   });
 });

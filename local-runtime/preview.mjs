@@ -1,10 +1,14 @@
 import path from 'node:path';
-import {readdir, stat} from 'node:fs/promises';
+import {readdir, stat, lstat, realpath} from 'node:fs/promises';
 import {unzipSync} from 'fflate';
 import {safeRead, digest, readProject} from './engine.mjs';
 import {platformContext, applyOverrides, legacyToRaw, isOverrides, validateOverrides, emptyOverrides, expectedSections, urlRewriter, plain, PAGE_KINDS} from './contract.mjs';
 const MIMES = {png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', svg: 'image/svg+xml', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', css: 'text/css; charset=utf-8'};
-const KINDS = new Set(PAGE_KINDS), MAX_RESOURCES = 240, MAX_ASSET = 2 * 1024 * 1024, MAX_ASSETS = 32 * 1024 * 1024, MAX_JSON = 4 * 1024 * 1024;
+// Since 0.10.0 (format 3) the store's pages (up to 200) and the product pages (up to 400) come
+// after the representative cut (up to 12), and themeConfig/merchant repeated on many pages are
+// stored once in raw/shared/.
+const KINDS = new Set(PAGE_KINDS), STAGES = new Set(['store', 'product']), MAX_RESOURCES = 240, MAX_ASSET = 2 * 1024 * 1024, MAX_ASSETS = 32 * 1024 * 1024, MAX_JSON = 4 * 1024 * 1024, MAX_PAGES = 640, MAX_SHARED = 256;
+const PAGE_FILE = /^raw\/[a-z0-9-]+\.json$/, SHARED_FILE = /^raw\/shared\/[a-f0-9]{64}\.json$/;
 export const PLACEHOLDER = '/__local/placeholder.svg';
 export function assetPath(value) {if (!/^assets\/[a-f0-9]{64}\.(png|jpg|webp|svg|woff2?|ttf|otf|css)$/.test(value)) throw new Error('Asset de prévia com caminho inseguro.'); return value;}
 function validAsset(bytes, ext) {
@@ -22,11 +26,23 @@ function safeUrl(value) {
   if (url.protocol !== 'https:' || url.username || url.password || [...url.searchParams.keys()].some(k => /token|secret|auth|session|password|key|signature/i.test(k))) throw new Error('URL de recurso visual inválida.');
   return url;
 }
-async function verifiedJson(root, file, record, label) {
-  if (!record || typeof record.file !== 'string' || !/^raw\/[a-z0-9-]+\.json$/.test(record.file) || record.file !== file) throw new Error(`Arquivo da prévia sem registro: ${label}.`);
-  const bytes = await safeRead(root, 'preview/' + file, MAX_JSON);
-  if (bytes.length !== record.bytes || digest(bytes) !== record.sha256) throw new Error(`Dados capturados alterados ou ausentes: preview/${file}. Use local.data.json para sobrepor valores.`);
-  return JSON.parse(bytes);
+// The local server reads the project on every request, and a preview can have hundreds of pages:
+// each file is verified once per version on disk (size and time), and the parsed value is frozen,
+// so no render can change what the next one reads. A file edited by hand is verified again.
+const verified = new Map();
+function freeze(value) {if (value && typeof value === 'object' && !Object.isFrozen(value)) {Object.freeze(value); for (const item of Object.values(value)) freeze(item);} return value;}
+async function verifiedJson(root, file, record, label, pattern = PAGE_FILE) {
+  if (!record || typeof record.file !== 'string' || !pattern.test(record.file) || record.file !== file) throw new Error(`Arquivo da prévia sem registro: ${label}.`);
+  const relative = 'preview/' + file, absolute = path.resolve(root, relative);
+  let info; try {info = await lstat(absolute);} catch {info = undefined;}
+  const hit = info && verified.get(absolute);
+  if (hit && info.isFile() && hit.size === info.size && hit.mtimeMs === info.mtimeMs && hit.sha256 === record.sha256 && hit.bytes === record.bytes && (await realpath(absolute)).startsWith(await realpath(root) + path.sep)) return hit.value;
+  let bytes; try {bytes = await safeRead(root, relative, MAX_JSON);} catch (error) {if (error.code !== 'ENOENT') throw error;}
+  if (!bytes || bytes.length !== record.bytes || digest(bytes) !== record.sha256) throw new Error(`Dados capturados alterados ou ausentes: preview/${file}. Use local.data.json para sobrepor valores.`);
+  const value = freeze(JSON.parse(bytes));
+  if (info) verified.set(absolute, {size: info.size, mtimeMs: info.mtimeMs, sha256: record.sha256, bytes: record.bytes, value});
+  if (verified.size > 4 * MAX_PAGES) verified.delete(verified.keys().next().value);
+  return value;
 }
 function none() {
   return {version: 0, source: {kind: 'demonstration', association: 'unavailable'}, issues: [{code: 'legacy-preview', reason: 'Projeto sem contexto visual capturado. Dados locais não certificam fidelidade.'}], resources: [], assets: {}, pages: [], api: [], map: {}, aliases: {}, platform: {fontSheets: [], themeSheets: []}};
@@ -35,7 +51,7 @@ export async function loadPreview(root, project) {
   let bytes;
   try {bytes = await safeRead(root, 'preview/manifest.json');} catch (error) {if (error.code === 'ENOENT') return none(); throw error;}
   const manifest = JSON.parse(bytes);
-  if (manifest.format !== 'yampi-local-preview' || ![1, 2].includes(manifest.version) || !Number.isFinite(Date.parse(manifest.capturedAt)) || manifest.source?.origin !== project.manifest.context.previewOrigin || !['editor', 'published', 'demonstration'].includes(manifest.source.kind) || !['same-editor', 'published-unverified', 'unavailable'].includes(manifest.source.association) || !Array.isArray(manifest.resources) || manifest.resources.length > MAX_RESOURCES || !Array.isArray(manifest.issues) || manifest.issues.length > 1000) throw new Error('Manifesto visual inválido ou de outra loja.');
+  if (manifest.format !== 'yampi-local-preview' || ![1, 2, 3].includes(manifest.version) || !Number.isFinite(Date.parse(manifest.capturedAt)) || manifest.source?.origin !== project.manifest.context.previewOrigin || !['editor', 'published', 'demonstration'].includes(manifest.source.kind) || !['same-editor', 'published-unverified', 'unavailable'].includes(manifest.source.association) || !Array.isArray(manifest.resources) || manifest.resources.length > MAX_RESOURCES || !Array.isArray(manifest.issues) || manifest.issues.length > 1000) throw new Error('Manifesto visual inválido ou de outra loja.');
   const assets = {}, map = {}, categories = {};
   let total = 0;
   for (const item of manifest.resources) {
@@ -59,13 +75,37 @@ export async function loadPreview(root, project) {
     output.legacyData = data.data;
     output.issues = [...manifest.issues, {code: 'legacy-preview-format', reason: 'Prévia capturada pela versão 0.3.x: parâmetros e ordem das seções podem estar incompletos. Faça uma nova exportação e troque somente preview/ com o atualizador.'}];
   } else {
-    if (!Array.isArray(manifest.pages) || manifest.pages.length > 12) throw new Error('Páginas capturadas inválidas.');
+    const three = manifest.version === 3;
+    if (!Array.isArray(manifest.pages) || manifest.pages.length > (three ? MAX_PAGES : 12) || manifest.pages.filter(page => !page?.stage).length > 12) throw new Error('Páginas capturadas inválidas.');
+    // themeConfig and merchant stored once, named by their SHA-256 (format 3).
+    const shared = new Map();
+    if (three && manifest.shared !== undefined) {
+      if (!Array.isArray(manifest.shared) || manifest.shared.length > MAX_SHARED) throw new Error('Dados compartilhados da prévia inválidos.');
+      for (const item of manifest.shared) {
+        if (!plain(item) || item.file !== `raw/shared/${item.sha256}.json`) throw new Error('Dados compartilhados da prévia inválidos.');
+        const value = await verifiedJson(root, item.file, item, item.file, SHARED_FILE);
+        if (!plain(value)) throw new Error('Dados compartilhados da prévia inválidos.');
+        shared.set(item.sha256, value);
+      }
+    }
     output.pages = [];
+    const ids = new Set();
     for (const page of manifest.pages) {
-      if (!/^page-\d+$/.test(page.id) || !KINDS.has(page.kind) || new URL(page.sourceUrl).origin !== manifest.source.origin) throw new Error('Rota capturada inválida.');
-      const raw = await verifiedJson(root, `raw/${page.id}.json`, page, page.id);
-      if (!plain(raw)) throw new Error('Rota capturada inválida.');
-      output.pages.push({id: page.id, kind: page.kind, context: typeof page.context === 'string' ? page.context : undefined, sourceUrl: page.sourceUrl, raw});
+      if (!/^page-\d+$/.test(page.id) || ids.has(page.id) || !KINDS.has(page.kind) || new URL(page.sourceUrl).origin !== manifest.source.origin || page.stage !== undefined && (!three || !STAGES.has(page.stage))) throw new Error('Rota capturada inválida.');
+      ids.add(page.id);
+      const own = await verifiedJson(root, `raw/${page.id}.json`, page, page.id);
+      if (!plain(own)) throw new Error('Rota capturada inválida.');
+      let raw = own;
+      if (page.shared !== undefined) {
+        if (!three || !plain(page.shared)) throw new Error('Rota capturada inválida.');
+        const parts = {};
+        for (const [key, sha] of Object.entries(page.shared)) {
+          if (!['themeConfig', 'merchant'].includes(key) || !shared.has(sha) || key in own) throw new Error('Dados compartilhados ausentes na página ' + page.id + '.');
+          parts[key] = shared.get(sha);
+        }
+        raw = Object.freeze({...own, ...parts});
+      }
+      output.pages.push({id: page.id, kind: page.kind, context: typeof page.context === 'string' ? page.context : undefined, ...(page.stage ? {stage: page.stage} : {}), sourceUrl: page.sourceUrl, raw});
     }
     if (manifest.api) {
       const recorded = await verifiedJson(root, 'raw/api.json', manifest.api, 'api');
@@ -110,12 +150,33 @@ export function renderContext(local, kind, capture) {
   context.__preview = {source: local.preview.source, capturedAt: local.preview.capturedAt, page: {kind, id: page?.id ?? null, sourceUrl: page?.sourceUrl ?? null, captured: selected.captured}, assetMap: local.preview.map, routes, platform: local.preview.platform};
   return {context, raw, page, captured: selected.captured, expected: expectedSections(raw), issues: selected.issue ? [selected.issue] : []};
 }
-// Captured store paths render locally. Anything else is an explicit 404.
+// Captured store paths render locally. Anything else is an explicit 404. A category, a showcase or
+// a page opens with any order or page of its path (?sort_by=, ?page=); a search opens only for
+// its own question.
 export function routeFor(preview, url) {
-  const target = url.pathname + url.search;
-  const candidates = preview.pages.map(page => ({page, source: new URL(page.sourceUrl)}));
-  const match = candidates.find(c => c.source.pathname + c.source.search === target) ?? candidates.find(c => c.source.pathname === url.pathname && c.source.pathname !== '/');
-  return match?.page;
+  const target = url.pathname + url.search, question = url.searchParams.get('q')?.trim();
+  let byPath;
+  for (const page of preview.pages) {
+    const source = new URL(page.sourceUrl);
+    if (source.pathname !== url.pathname) continue;
+    if (source.pathname + source.search === target) return page;
+    const asked = source.searchParams.get('q');
+    if (asked !== null ? question !== undefined && asked.trim() === question : source.pathname !== '/') byPath ??= page;
+  }
+  return byPath;
+}
+// The captures by kind, for the index and the "not captured" page: counts and a few examples,
+// instead of hundreds of lines.
+const KIND_NAMES = {home: 'Home', category: 'Categorias e vitrines', search: 'Buscas', product: 'Produtos', pages: 'Páginas institucionais', promotion: 'Promoções'};
+export function capturesByKind(preview, examples = 6) {
+  const groups = new Map();
+  for (const page of preview.pages) {
+    const kind = page.context === 'search' ? 'search' : page.kind, source = new URL(page.sourceUrl);
+    const group = groups.get(kind) || {kind, name: KIND_NAMES[kind] || kind, count: 0, examples: []};
+    group.count++; if (group.examples.length < examples) group.examples.push(source.pathname + source.search);
+    groups.set(kind, group);
+  }
+  return [...groups.values()];
 }
 function fontFace(body, map) {
   const declaration = body.match(/(^|;)(\s*src\s*:)([^;]*)/i);

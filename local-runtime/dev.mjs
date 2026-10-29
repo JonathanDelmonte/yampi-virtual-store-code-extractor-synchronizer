@@ -2,10 +2,12 @@ import http from 'node:http';
 import path from 'node:path';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {readProject, safeRead, textFiles, renderPage, validateMarkup, validPath, compileStyles, compileComponents, digest} from './engine.mjs';
-import {loadPreview, loadOverrides, renderContext, routeFor, rewriteCSS, assetPath, resourceMime, checkIntegrity, createRewriter, PLACEHOLDER} from './preview.mjs';
+import {loadPreview, loadOverrides, renderContext, routeFor, capturesByKind, rewriteCSS, assetPath, resourceMime, checkIntegrity, createRewriter, PLACEHOLDER} from './preview.mjs';
 import {themeSheet} from './contract.mjs';
 import {cssParity} from './parity.mjs';
 const escape = text => String(text).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+// One line per kind with its count and a few links: a preview can have hundreds of pages.
+const captureList = preview => capturesByKind(preview).map(group => `<li><strong>${escape(group.name)}</strong>: ${group.count} · ${group.examples.map(href => `<a href="${escape(href)}"><code>${escape(href)}</code></a>`).join(', ')}${group.count > group.examples.length ? ', …' : ''}</li>`).join('');
 const types = {png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', svg: 'image/svg+xml', css: 'text/css; charset=utf-8', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf'};
 const componentOptions = config => ({registerUnlisted: config.components?.registerUnlisted === true, splideCss: config.splideCss === true});
 export async function loadLocal(root) {
@@ -92,10 +94,10 @@ export async function validateLocal(root) {
   const pages = [];
   for (const captured of preview.pages) if (typeof config.pages[captured.kind] !== 'string') throw new Error('Template da página capturada não configurado: ' + captured.kind);
   for (const kind of Object.keys(config.pages)) {
-    const captures = preview.pages.filter(p => p.kind === kind).map(p => p.id);
+    const captures = preview.pages.filter(p => p.kind === kind);
     for (const capture of captures.length ? captures : [undefined]) {
-      const result = renderRoute(local, kind, capture);
-      pages.push({kind, capture: capture ?? null, captured: result.state.page.captured, expectedSections: result.state.expectedSections, renderedSections: result.state.renderedSections, missingSections: result.state.missingSections, warnings: result.state.warnings});
+      const result = renderRoute(local, kind, capture?.id);
+      pages.push({kind, capture: capture?.id ?? null, ...(capture?.stage ? {stage: capture.stage} : {}), captured: result.state.page.captured, expectedSections: result.state.expectedSections, renderedSections: result.state.renderedSections, missingSections: result.state.missingSections, warnings: result.state.warnings});
     }
   }
   const report = {checkedAt: new Date().toISOString(), pages, components: components.warnings, overrides: local.issues, cssParity: cssParity(local), previewIssues: preview.issues.length, visual: 'not-validated'};
@@ -173,7 +175,7 @@ export async function createLocalServer(root) {
       }
       if (url.pathname === '/__local/diagnostic.json') {
         let report = null; try {report = JSON.parse(await safeRead(root, 'preview/report.json'));} catch {/* Older projects have no report. */}
-        send(200, 'application/json', JSON.stringify({code: {integrity: 'checked-on-load', completeness: 'stable-editor-inventory; independent remote inventory not verified'}, configuration: preview.source, contract: report?.contract ?? null, pages: preview.pages.map(p => ({id: p.id, kind: p.kind, context: p.context ?? null, sourceUrl: p.sourceUrl})), uncapturedTemplates: pages.filter(kind => !preview.pages.some(p => p.kind === kind)), assets: {included: preview.resources.length, issues: [...preview.issues, ...runtimeIssues]}, components: (await components(local)).warnings, overrides: local.issues, cssParity: 'npm run check grava .cache/yampi-check.json', compilation: 'checked-on-render; failures return HTTP 422', initialization: 'browser exposes __yampiLocalReady and __yampiLocalState; not inferred from HTTP', visual: 'not-validated', capturedAt: preview.capturedAt, toolVersion: preview.toolVersion ?? null, limits: preview.limits ?? null}));
+        send(200, 'application/json', JSON.stringify({code: {integrity: 'checked-on-load', completeness: 'stable-editor-inventory; independent remote inventory not verified'}, configuration: preview.source, contract: report?.contract ?? null, pages: preview.pages.map(p => ({id: p.id, kind: p.kind, context: p.context ?? null, stage: p.stage ?? null, sourceUrl: p.sourceUrl})), pagesByKind: capturesByKind(preview, 0).map(({kind, count}) => ({kind, count})), uncapturedTemplates: pages.filter(kind => !preview.pages.some(p => p.kind === kind)), assets: {included: preview.resources.length, issues: [...preview.issues, ...runtimeIssues]}, components: (await components(local)).warnings, overrides: local.issues, cssParity: 'npm run check grava .cache/yampi-check.json', compilation: 'checked-on-render; failures return HTTP 422', initialization: 'browser exposes __yampiLocalReady and __yampiLocalState; not inferred from HTTP', visual: 'not-validated', capturedAt: preview.capturedAt, toolVersion: preview.toolVersion ?? null, limits: preview.limits ?? null}));
         return;
       }
       if (url.pathname.startsWith('/tema/assets/')) {
@@ -194,12 +196,11 @@ export async function createLocalServer(root) {
       if (!index && (url.pathname.startsWith('/__') || url.pathname === '/favicon.ico')) {send(404, 'text/plain', 'Rota local não encontrada.'); return;}
       if (!index) {
         note({code: 'route-not-captured', resource: url.pathname, reason: 'Rota da loja sem captura nesta prévia.'});
-        const links = preview.pages.map(p => `<li><a href="${escape(new URL(p.sourceUrl).pathname + new URL(p.sourceUrl).search)}">${escape(p.kind)} · ${escape(new URL(p.sourceUrl).pathname)}</a></li>`).join('');
-        send(404, 'text/html; charset=utf-8', `<!doctype html><meta charset="utf-8"><title>Rota não capturada</title><h1>Rota não capturada nesta prévia</h1><p><code>${escape(url.pathname + url.search)}</code> não foi capturada. A prévia não consulta a loja.</p><ul>${links}</ul><p><a href="/__local/">Voltar ao índice</a></p>`); return;
+        send(404, 'text/html; charset=utf-8', `<!doctype html><meta charset="utf-8"><title>Rota não capturada</title><h1>Rota não capturada nesta prévia</h1><p><code>${escape(url.pathname + url.search)}</code> não foi capturada. A prévia não consulta a loja. Se a página foi criada no painel da Yampi depois da exportação, baixe uma prévia nova na extensão e use <code>npm run previa:trocar</code>.</p><ul>${captureList(preview)}</ul><p><a href="/__local/">Voltar ao índice</a></p>`); return;
       }
-      const captured = preview.pages.map(p => {const source = new URL(p.sourceUrl); return `<li><a href="${escape(source.pathname + source.search)}">${escape(p.kind)}${p.context === 'search' ? ' (busca)' : ''}</a> · <code>${escape(source.pathname + source.search)}</code></li>`;}).join('');
+      const captured = captureList(preview);
       const templates = pages.map(kind => `<li><a href="/preview?page=${encodeURIComponent(kind)}">${escape(kind)}</a>${preview.pages.some(p => p.kind === kind) ? '' : ' · sem captura (cabeçalho e rodapé apenas)'}</li>`).join('');
-      send(200, 'text/html; charset=utf-8', `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Prévia local do tema</title><style>body{font:16px system-ui;max-width:820px;margin:60px auto;padding:24px;color:#20372e}a{color:#20634f}li{margin:12px 0}code{background:#eef2ed;padding:3px 5px}</style><h1>Prévia local do tema</h1><p>Edite em <code>tema/</code> e recarregue para conferir. Contexto: ${escape(initial.preview.source.kind)}; prévia parcial, sem backend. Consulte preview/report.json e <a href="/__local/diagnostic.json">o diagnóstico</a>.</p><h2>Páginas capturadas</h2><ul>${captured || '<li>Nenhuma página capturada.</li>'}</ul><h2>Templates</h2><ul>${templates || '<li>Configure as páginas em local.config.json.</li>'}</ul><p>Use <code>npm run pack</code> para gerar o ZIP de retorno e importe-o na extensão.</p><p>Compatibilidade parcial com Twig e Vue 2. Confira a prévia da Yampi antes de publicar.</p></html>`);
+      send(200, 'text/html; charset=utf-8', `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Prévia local do tema</title><style>body{font:16px system-ui;max-width:820px;margin:60px auto;padding:24px;color:#20372e}a{color:#20634f}li{margin:12px 0}code{background:#eef2ed;padding:3px 5px}</style><h1>Prévia local do tema</h1><p>Edite em <code>tema/</code> e recarregue para conferir. Contexto: ${escape(initial.preview.source.kind)}; prévia parcial, sem backend. Consulte preview/report.json e <a href="/__local/diagnostic.json">o diagnóstico</a>.</p><h2>Páginas capturadas</h2><p>${preview.pages.length} páginas; a lista completa está em <a href="/__local/diagnostic.json">diagnostic.json</a>.</p><ul>${captured || '<li>Nenhuma página capturada.</li>'}</ul><h2>Templates</h2><ul>${templates || '<li>Configure as páginas em local.config.json.</li>'}</ul><p>Use <code>npm run pack</code> para gerar o ZIP de retorno e importe-o na extensão.</p><p>Compatibilidade parcial com Twig e Vue 2. Confira a prévia da Yampi antes de publicar.</p></html>`);
     } catch (error) {send(422, 'text/html; charset=utf-8', '<!doctype html><meta charset="utf-8"><h1>Não foi possível montar a prévia</h1><pre>' + escape(error.message) + '</pre><p>Corrija o arquivo ou adapte as sobreposições em local.data.json e as entradas em local.config.json.</p>');}
   });
   return {server, port: initial.config.port};
@@ -210,7 +211,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     if (process.argv.includes('--integrity')) console.log(JSON.stringify(await checkIntegrity(root), null, 2));
     else if (process.argv.includes('--check')) {
       const report = await validateLocal(root);
-      for (const page of report.pages) console.log(`${page.kind}${page.capture ? ' (' + page.capture + ')' : ''}: ${page.expectedSections === null ? 'dados fictícios' : page.renderedSections + '/' + page.expectedSections + ' seções'}${page.captured ? '' : ' · sem captura'}${page.warnings.length ? ' · ' + page.warnings.length + ' avisos' : ''}`);
+      for (const page of report.pages.filter(item => !item.stage)) console.log(`${page.kind}${page.capture ? ' (' + page.capture + ')' : ''}: ${page.expectedSections === null ? 'dados fictícios' : page.renderedSections + '/' + page.expectedSections + ' seções'}${page.captured ? '' : ' · sem captura'}${page.warnings.length ? ' · ' + page.warnings.length + ' avisos' : ''}`);
+      // The store and product pages: one line per stage and kind, all sections rendered (or the check stopped).
+      const staged = new Map();
+      for (const page of report.pages.filter(item => item.stage)) {const key = (page.stage === 'product' ? 'páginas de produto' : 'páginas da loja') + ' · ' + page.kind; const entry = staged.get(key) || {pages: 0, warnings: 0}; entry.pages++; entry.warnings += page.warnings.length; staged.set(key, entry);}
+      for (const [key, entry] of staged) console.log(`${key}: ${entry.pages} compiladas, todas as seções visíveis${entry.warnings ? ' · ' + entry.warnings + ' avisos' : ''}`);
       for (const warning of report.components) console.log('Aviso: ' + warning.resource + ' — ' + warning.reason);
       console.log(`Associação pelo CSS publicado: ${report.cssParity.association}.`);
       console.log(`Original íntegro; ${report.pages.length} páginas compiladas. Fidelidade visual não verificada. Detalhes em .cache/yampi-check.json.`);
