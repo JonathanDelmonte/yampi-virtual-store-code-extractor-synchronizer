@@ -18,7 +18,8 @@ import type {Decision, JobEvent, JobRequest, JobState, SendInput, Waiting} from 
 // demo page, injected so the rest of the engine runs anywhere (including unit tests).
 export interface ExpandOptions {editorData?: Data; signal?: AbortSignal; wait?: (ms: number) => Promise<void>; onProgress?: (stage: PageStage, done: number, total: number) => void}
 export interface PreviewTools {
-  prepare(snapshot: Snapshot, fetcher: PreviewFetch, options: {editorData?: Data; enabled?: boolean; signal?: AbortSignal}): Promise<PreviewDraft>;
+  // onProgress: the representative pages read so far, of about how many.
+  prepare(snapshot: Snapshot, fetcher: PreviewFetch, options: {editorData?: Data; enabled?: boolean; signal?: AbortSignal; onProgress?: (done: number, total: number) => void}): Promise<PreviewDraft>;
   finish(draft: PreviewDraft, fetcher: PreviewFetch, origins: string[], signal?: AbortSignal, onProgress?: (done: number, total: number) => void): Promise<PreviewBundle>;
   unauthorized(bundle: PreviewBundle): string[];
   // The store's pages and the product pages, after the representative cut.
@@ -36,10 +37,23 @@ export interface EngineHost {
   adapter?: (rpc: RPC) => EditorAdapter;
 }
 export interface JobControl {signal: AbortSignal; decision(waiting: Waiting): Promise<Decision>}
-// Weights: roughly how long one item takes compared with reading one file in the editor.
+// Weights: roughly how many seconds one item takes. A file opened in the editor takes about 0.8 s;
+// straight from the Yampi server, several at a time, a small fraction of that.
+const READ_EDITOR = 0.8, READ_SERVER = 0.06;
+// expect: the usual size of a step that learns its own only when it starts. Its share of the bar is
+// kept from the start, so the theme's files never fill the bar before the storefront's pages.
 const PHASES: Record<JobRequest['kind'], PhaseSpec[]> = {
-  export: [{id: 'inventory', label: 'Listar os arquivos', weight: 2, total: 1}, {id: 'read', label: 'Ler os arquivos', weight: 1}, {id: 'preview', label: 'Capturar a vitrine', weight: 0.6}, {id: 'store', label: 'Páginas da loja', weight: 0.5}, {id: 'products', label: 'Páginas dos produtos', weight: 0.4}, {id: 'zip', label: 'Preparar o ZIP', weight: 6, total: 1}, {id: 'download', label: 'Baixar o ZIP', weight: 3, total: 1}],
-  compare: [{id: 'prepare', label: 'Recarregar o editor', weight: 6, total: 1}, {id: 'inventory', label: 'Listar os arquivos', weight: 2, total: 1}, {id: 'read', label: 'Ler o que mudou', weight: 1}, {id: 'links', label: 'Conferir os links na loja', weight: 0.5}],
+  export: [
+    {id: 'inventory', label: 'Listar os arquivos', weight: 2, total: 1},
+    {id: 'read', label: 'Ler os arquivos', weight: READ_EDITOR, expect: 250},
+    {id: 'sample', label: 'Capturar a vitrine', weight: 1.2, expect: 9},
+    {id: 'preview', label: 'Baixar estilos, fontes e imagens', weight: 0.25, expect: 150},
+    {id: 'store', label: 'Páginas da loja', weight: 0.35, expect: 60},
+    {id: 'products', label: 'Páginas dos produtos', weight: 0.35, expect: 150},
+    {id: 'zip', label: 'Preparar o ZIP', weight: 4, total: 1},
+    {id: 'download', label: 'Baixar o ZIP', weight: 1, total: 1}
+  ],
+  compare: [{id: 'prepare', label: 'Recarregar o editor', weight: 6, total: 1}, {id: 'inventory', label: 'Listar os arquivos', weight: 2, total: 1}, {id: 'read', label: 'Ler o que mudou', weight: READ_EDITOR, expect: 100}, {id: 'links', label: 'Conferir os links na loja', weight: 0.35}],
   send: [{id: 'prepare', label: 'Recarregar o editor', weight: 6, total: 1}, {id: 'preflight', label: 'Conferir a loja', weight: 1}, {id: 'backup', label: 'Guardar o backup', weight: 3, total: 1}, {id: 'create', label: 'Criar arquivos novos', weight: 3.5}, {id: 'upload', label: 'Enviar imagens', weight: 4.5}, {id: 'save', label: 'Salvar e conferir', weight: 7}, {id: 'final', label: 'Conferência final', weight: 1}]
 };
 // Steps whose items are slow enough that every one is worth showing at once.
@@ -78,7 +92,10 @@ function remoteFetch(rpc: RPC, context: Context, signal: AbortSignal): PreviewFe
   return async url => {
     if (signal.aborted) throw new Error('Cancelado.');
     const reply = await rpc({action: 'preview-fetch', preview: {url, context}}) as {encoded: string; type: string; url: string};
-    return {bytes: Uint8Array.from(atob(reply.encoded), c => c.charCodeAt(0)), type: reply.type, url: reply.url};
+    // A plain loop: hundreds of pages of a few hundred KB each, without a call per byte.
+    const binary = atob(reply.encoded), bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return {bytes, type: reply.type, url: reply.url};
   };
 }
 function titleFor(request: JobRequest, store: string): string {
@@ -117,6 +134,7 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     // The next step's size enters the bar in the same report that closes this one.
     if (p.next && tracker.status(p.next.step)) tracker.total(p.next.step, p.next.total);
     if (p.label) tracker.relabel(p.step, p.label);
+    if (p.pace) tracker.reweight(p.step, p.pace === 'server' ? READ_SERVER : READ_EDITOR);
     state.detail = p.phase;
     if (p.path) state.path = p.path; else delete state.path;
     if (advanced && p.path && DONE_TEXT[p.step]) event(DONE_TEXT[p.step], 'ok', p.path);
@@ -183,13 +201,21 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     return baseline;
   }
   async function exportTheme() {
-    if (request.previewOnly && !(request.includePreview && host.preview)) throw new Error('Sem a leitura da vitrine liberada no Chrome, não há prévia nova para baixar.');
+    const storefront = !!(request.includePreview && host.preview);
+    if (request.previewOnly && !storefront) throw new Error('Sem a leitura da vitrine liberada no Chrome, não há prévia nova para baixar.');
+    // Without the storefront, its steps leave the bar at once: it then measures only the theme.
+    if (!storefront) for (const id of ['sample', 'preview', 'store', 'products']) tracker.skip(id);
     const snapshot = request.previewOnly ? await reference() : await capture(adapter, {signal: control.signal, progress, notice});
     let visual: PreviewBundle;
-    if (request.includePreview && host.preview) {
-      step('preview', 'Capturando contexto visual público…');
-      const tools = host.preview, fetcher = remoteFetch(host.rpc, snapshot.context, control.signal), editorData = await raw.visual?.();
-      const draft = await tools.prepare(snapshot, fetcher, {editorData, enabled: true, signal: control.signal});
+    if (storefront) {
+      step('sample', 'Capturando a vitrine');
+      const tools = host.preview!, fetcher = remoteFetch(host.rpc, snapshot.context, control.signal), editorData = await raw.visual?.();
+      const draft = await tools.prepare(snapshot, fetcher, {editorData, enabled: true, signal: control.signal, onProgress: (done, total) => {
+        tracker.total('sample', Math.max(total, done)); tracker.set('sample', done);
+        state.detail = `Capturando a vitrine: ${done} de ${Math.max(total, done)} páginas`; report();
+      }});
+      tracker.finish('sample');
+      step('preview', 'Baixando estilos, fontes e imagens da vitrine');
       let origins = [snapshot.context.previewOrigin];
       // An origin Chrome already allows (asked at the download click, or in an earlier download)
       // needs no question: the worker accepts it. Only the others are asked, once per round.
@@ -205,7 +231,7 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
       let best = {done: 0, total: 0};
       const finish = async () => {
         await allow(origins);
-        state.detail = 'Baixando recursos visuais';
+        state.detail = 'Baixando estilos, fontes e imagens da vitrine';
         return tools.finish(draft, fetcher, origins, control.signal, (done, total) => {
           best = {done: Math.max(best.done, done), total: Math.max(best.total, total, done)};
           tracker.total('preview', best.total); tracker.set('preview', best.done); report();
@@ -224,7 +250,7 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
         state.status = 'running'; delete state.waiting;
         if (decision.action === 'discard') throw new Error('Preparação visual descartada. Nenhum arquivo da Yampi foi alterado.');
         if (decision.action === 'partial') break;
-        tracker.relabel('preview', 'Completar a vitrine com os recursos autorizados');
+        tracker.relabel('preview', 'Completar com as imagens e fontes autorizadas');
         origins = [...new Set([...origins, ...decision.origins])];
         visual = await finish();
       }
@@ -242,7 +268,6 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
       }
       tracker.finish('store'); tracker.finish('products');
     } else {
-      tracker.skip('preview'); tracker.skip('store'); tracker.skip('products');
       visual = demonstration(snapshot.context, request.includePreview ? 'Captura visual indisponível neste ambiente. Código exportado; a prévia usa dados demonstrativos.' : 'Captura visual não autorizada ou desativada. Código exportado; configurações, catálogo de amostra, imagens e fontes visuais não foram capturados.', Object.keys(snapshot.files));
     }
     step('zip', 'Preparando ZIP…');
@@ -263,17 +288,20 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     return {kind: 'export' as const, texts: request.previewOnly ? 0 : Object.keys(exported.files).length, images: request.previewOnly ? 0 : Object.keys(exported.assets || {}).length, pages: visual.pages.length, fileName: name, preview: summary.line, previewDetails: summary.details, ...(summary.warnings.length ? {warnings: summary.warnings} : {}), ...(request.previewOnly ? {previewOnly: true} : {})};
   }
   async function compare() {
-    // With the Yampi server answering, the reading is the server's own and the editor is not
-    // reloaded (Yampi answers a reload of the editor's address with "Acesso restrito").
-    const server = adapter.direct && await adapter.direct.open().then(() => true, error => {if (storeChanged(error)) throw error; return false;});
-    if (server) tracker.skip('prepare');
-    else {step('prepare', 'Recarregando o editor'); await adapter.refresh(); tracker.finish('prepare');}
     // An update reads the whole store: any file the store changed may have to come to the project.
     const whole = !!request.full || request.scope === 'update';
     if (request.scope === 'update') tracker.relabel('read', 'Ler a loja inteira');
+    // What the comparison reads and checks is known from the request: the bar keeps room for it.
+    if (!whole) tracker.expect('read', request.paths?.length ?? 0);
+    const linking = request.scope === 'project' && !!request.links?.length;
+    if (linking) tracker.total('links', request.links!.length); else tracker.skip('links');
+    // With the Yampi server answering, the reading is the server's own and the editor is not
+    // reloaded (Yampi answers a reload of the editor's address with "Acesso restrito").
+    const server = adapter.direct && await adapter.direct.open().then(() => true, error => {if (storeChanged(error)) throw error; return false;});
+    if (server) {tracker.skip('prepare'); tracker.reweight('read', READ_SERVER);}
+    else {step('prepare', 'Recarregando o editor'); await adapter.refresh(); tracker.finish('prepare');}
     const observed = await capture(adapter, {signal: control.signal, progress, notice, ...(server ? {serverOnly: true} : {}), ...(whole ? {} : {only: request.paths || []})});
-    const links = request.scope === 'project' && request.links?.length ? await checkLinks(request.links) : undefined;
-    if (!links) tracker.skip('links');
+    const links = linking ? await checkLinks(request.links!) : undefined;
     await updateWorkspace(expected, workspace => {
       // Kept apart from the send's review: the folder changes only when the user applies it.
       if (request.scope === 'update') {workspace.update = {reading: observed, choices: {}}; return;}
@@ -308,7 +336,7 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
         }
       }
     };
-    const results = await pool(links, async link => {const result = await one(link); tracker.set('links', ++done); report(); return result;});
+    const results = await pool(links, async link => {const result = await one(link); tracker.set('links', ++done); report(); return result;}, 6);
     results.forEach((result, index) => {if (result === 'broken') outcome.broken.push(links[index]); if (result === 'unchecked') outcome.unchecked++; else outcome.checked++;});
     tracker.finish('links');
     if (outcome.broken.length) event(`${count(outcome.broken.length, 'link leva', 'links levam')} a uma rota que não existe na loja`, 'warn');

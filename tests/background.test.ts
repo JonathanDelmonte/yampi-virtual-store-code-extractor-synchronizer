@@ -82,6 +82,20 @@ describe('painel lateral, permissões e isolamento do editor', () => {
     vi.mocked(chromeMock.permissions.contains).mockImplementationOnce(async()=>false);expect((await message(token,{action:'preview-fetch',preview:{url:'https://store-a.invalid/a.svg',context:ctx}})).error).toContain('concedida');expect(fetcher).not.toHaveBeenCalled();
     expect((await message(token,{action:'preview-fetch',preview:{url:'https://store-a.invalid/a.svg',context:ctx}})).ok).toBe(false);expect(fetcher).toHaveBeenCalledTimes(1);
   });
+  test('leituras simultâneas da vitrine dividem a conferência da loja no editor, antes e depois de cada GET',async()=>{
+    const token=await open(),ctx={storeName:'Fictícia A',previewOrigin:'https://store-a.invalid',editorOrigin:'https://app.yampi.com.br'};let current=ctx,looks=0;
+    // A background editor tab answers slowly: every look at its header takes a while.
+    vi.mocked(chromeMock.scripting.executeScript).mockImplementation(async request=>{if(!('args' in request&&request.args))return [{result:true}];looks++;const seen=current;await new Promise(r=>setTimeout(r,20));return [{result:{ok:true,value:seen}}];});
+    const fetcher=vi.fn(async()=>{await new Promise(r=>setTimeout(r,5));return new Response('<svg/>',{headers:{'content-type':'image/svg+xml'}});});vi.stubGlobal('fetch',fetcher);await message(token,{action:'lock',access:'read'});
+    const replies=await Promise.all(Array.from({length:12},(_,i)=>message(token,{action:'preview-fetch',preview:{url:`https://store-a.invalid/${i}.svg`,context:ctx}})));
+    expect(replies.every(reply=>reply.ok)).toBe(true);expect(fetcher).toHaveBeenCalledTimes(12);
+    // Before: two looks per GET (24). Now one look serves every read waiting for it.
+    expect(looks).toBeLessThanOrEqual(4);
+    // The look after a GET always starts after it: a store change during the reads is still caught.
+    fetcher.mockImplementation(async()=>{current={...ctx,storeName:'Fictícia B'};return new Response('<svg/>',{headers:{'content-type':'image/svg+xml'}});});
+    const changed=await Promise.all(Array.from({length:3},(_,i)=>message(token,{action:'preview-fetch',preview:{url:`https://store-a.invalid/b${i}.svg`,context:ctx}})));
+    expect(changed.every(reply=>!reply.ok)).toBe(true);
+  });
   test('painel global desativado: trocar de aba nunca habilita outro painel', async () => {
     expect(chromeMock.sidePanel.setOptions).toHaveBeenCalledWith({enabled: false});
     await open(1);
@@ -295,7 +309,8 @@ describe('operações em segundo plano: o painel pode fechar', () => {
     expect((await message(token, {command: {op: 'read', path: 'templates/home.twig'}}, sender(token, 'doc-new'))).ok).toBe(false);
     expect((await message(token, {action: 'unlock'}, sender(token, 'doc-new'))).ok).toBe(true);
     expect(stored[token].locked).toBe(true);
-    expect(chromeMock.scripting.executeScript).not.toHaveBeenCalled();
+    // Only the operation's own hold of the editor page; nothing the new panel asked reached the editor.
+    expect(vi.mocked(chromeMock.scripting.executeScript).mock.calls.filter(([r]) => r.world === 'MAIN')).toEqual([]);
   });
   test('a execução em segundo plano só age na aba e na operação que recebeu', async () => {
     const {token, id} = await startJob(), other = await open(2);
@@ -308,6 +323,30 @@ describe('operações em segundo plano: o painel pode fechar', () => {
     expect((await fromRunner({runner: id, session: token, command: {op: 'inventory'}}, {...runnerSender(), url: `chrome-extension://${extId}/panel.html?tab=1`})).error).toBe('rejected-sender');
     expect((await fromRunner({runner: id, session: token, command: {op: 'inventory'}}, runnerSender('documento-falso'))).ok).toBe(false);
     expect((await fromRunner({runner: id, session: token, command: {op: 'publish'}})).ok).toBe(false);
+  });
+  test('a aba do editor fica segura contra o congelamento do Chrome enquanto a operação roda', async () => {
+    const {token, id} = await startJob('compare');
+    const holds = () => vi.mocked(chromeMock.scripting.executeScript).mock.calls.map(([r]) => r as {world?: string; args?: unknown[]; target: {tabId: number}}).filter(r => r.world === undefined);
+    await vi.waitFor(() => expect(holds()).toHaveLength(1));
+    expect(holds()[0]).toMatchObject({target: {tabId: 1}, args: ['zirtuno-sync-operacao']});
+    await fromRunner({runner: id, session: token, action: 'job-finish', state: jobState(id, 'completed', 1)});
+    await vi.waitFor(() => expect(holds()).toHaveLength(2));
+    expect(holds()[1]).toMatchObject({target: {tabId: 1}});
+    expect(holds()[1].args).toBeUndefined();
+  });
+  test('o pedido chega inteiro à execução: prévia avulsa e links da comparação', async () => {
+    const token = await open();
+    const links = [{url: 'https://store-a.invalid/colecao', files: ['sections/home/banner.twig']}];
+    expect((await message(token, {action: 'job-start', job: {id: 'job-compare-0003', kind: 'compare', scope: 'project', paths: ['sections/home/banner.twig'], links}, context: shop})).ok).toBe(true);
+    expect(runnerMessages.find(m => m.target === 'runner' && m.action === 'start')).toMatchObject({job: {id: 'job-compare-0003', links}});
+    await fromRunner({runner: 'job-compare-0003', session: token, action: 'job-finish', state: jobState('job-compare-0003', 'completed', 1)});
+    expect((await message(token, {action: 'job-start', job: {id: 'job-export-0004', kind: 'export', includePreview: true, previewOnly: true}, context: shop})).ok).toBe(true);
+    expect(runnerMessages.filter(m => m.target === 'runner' && m.action === 'start').at(-1)).toMatchObject({job: {id: 'job-export-0004', includePreview: true, previewOnly: true}});
+    await fromRunner({runner: 'job-export-0004', session: token, action: 'job-finish', state: jobState('job-export-0004', 'completed', 1)});
+    // A preview-only download needs the storefront; links belong to a comparison.
+    expect((await message(token, {action: 'job-start', job: {id: 'job-export-0005', kind: 'export', previewOnly: true}, context: shop})).error).toBe('Operação inválida.');
+    expect((await message(token, {action: 'job-start', job: {id: 'job-export-0006', kind: 'export', links}, context: shop})).error).toBe('Operação inválida.');
+    expect((await message(token, {action: 'job-start', job: {id: 'job-compare-0007', kind: 'compare', links: [{url: 'javascript:alert(1)', files: []}]}, context: shop})).error).toBe('Operação inválida.');
   });
   test('comparação em segundo plano não pode gravar', async () => {
     const {token, id} = await startJob('compare');

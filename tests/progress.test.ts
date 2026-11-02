@@ -131,6 +131,48 @@ describe('repetição segura de leituras', () => {
     expect(calls).toBe(1);
   });
 });
+describe('etapas que só conhecem o tamanho depois', () => {
+  test('a etapa guarda o seu lugar na barra desde o início; sem isso as anteriores levavam a 99%', () => {
+    const phases = [{id: 'read', label: '', weight: 0.06, expect: 250}, {id: 'products', label: '', weight: 0.35, expect: 150}, {id: 'zip', label: '', weight: 4, total: 1}];
+    const tracker = new ProgressTracker(phases);
+    tracker.start('read', 264); tracker.set('read', 264);
+    // The theme read: about 16 s of the 73 s planned, not the whole bar.
+    expect(tracker.snapshot().fraction).toBeLessThan(0.3);
+    tracker.start('products', 271);
+    const seen: number[] = [];
+    for (let done = 1; done <= 271; done++) {tracker.set('products', done); seen.push(tracker.snapshot().fraction);}
+    expect(seen[46]).toBeLessThan(0.5);
+    expect(seen.every((value, i) => i === 0 || value > seen[i - 1])).toBe(true);
+    expect(seen.at(-1)).toBeLessThan(0.99);
+    tracker.start('zip'); tracker.complete();
+    expect(tracker.snapshot().fraction).toBe(1);
+  });
+  test('ler direto do servidor encolhe a etapa: a barra só avança e o tempo restante recomeça a medir', () => {
+    let now = 0;
+    const tracker = new ProgressTracker([{id: 'read', label: '', weight: 0.8, total: 100}, {id: 'pages', label: '', weight: 0.35, expect: 100}], () => now);
+    tracker.start('read');
+    for (let i = 1; i <= 10; i++) {now += 800; tracker.set('read', i);}
+    const before = tracker.snapshot();
+    expect(before.etaMs).toBeDefined();
+    tracker.reweight('read', 0.06);
+    const after = tracker.snapshot();
+    expect(after.fraction).toBeGreaterThanOrEqual(before.fraction); expect(after.etaMs).toBeUndefined();
+    for (let i = 11; i <= 100; i++) {now += 60; tracker.set('read', i);}
+    expect(tracker.snapshot().fraction).toBeLessThan(0.5);
+    // A step that ends without its size frees the room it held.
+    tracker.finish('pages');
+    expect(tracker.snapshot().phases[1]).toMatchObject({status: 'skipped', total: 0});
+    expect(tracker.snapshot().fraction).toBe(0.99);
+  });
+  test('o tamanho esperado só vale até a etapa saber o seu', () => {
+    const tracker = new ProgressTracker([{id: 'store', label: '', weight: 1, expect: 60}, {id: 'zip', label: '', weight: 1, total: 1}]);
+    expect(tracker.snapshot().phases[0].total).toBe(0);
+    tracker.start('store', 3); tracker.set('store', 3);
+    expect(tracker.snapshot().fraction).toBeCloseTo(0.75, 2);
+    tracker.expect('store', 500);
+    expect(tracker.snapshot().fraction).toBeCloseTo(0.75, 2);
+  });
+});
 describe('100% só no fim', () => {
   test('etapas recomeçadas e totais que mudam não levam a barra a 100% antes de concluir', () => {
     const tracker = new ProgressTracker([{id: 'inventory', label: '', weight: 2, total: 1}, {id: 'read', label: '', weight: 1}, {id: 'preview', label: '', weight: 0.6}, {id: 'zip', label: '', weight: 6, total: 1}, {id: 'download', label: '', weight: 3, total: 1}]);

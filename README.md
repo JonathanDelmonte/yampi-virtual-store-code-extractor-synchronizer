@@ -19,6 +19,20 @@ Corrige duas diferenças que a prévia local escondia: imagens com caminho incom
 
 Projetos já exportados precisam atualizar suas ferramentas com `node scripts/update-project.mjs <projeto>` (revisão) e `--apply` (aplicação com backup), ou usar uma nova exportação. Atualizar a extensão não muda as ferramentas já copiadas no projeto.
 
+### Download, progresso e execução em segundo plano
+
+Corrige o download da loja com a vitrine: a barra chegava a 99% enquanto ainda faltavam páginas (por exemplo, **Páginas dos produtos: 47 de 271**), a captura das páginas era lenta e dependia da aba do editor a cada leitura.
+
+- **Barra que corresponde ao que falta.** As etapas que só descobrem o próprio tamanho ao começar (os arquivos do tema, as imagens e fontes, as páginas da loja e as dos produtos) têm o seu espaço guardado na barra desde o clique. Antes, a barra enchia com o tema e, quando as páginas apareciam, só restava o espaço entre 99% e 100%. Numa simulação com 264 arquivos e 271 produtos, **47 de 271** agora aparece perto de 59%, e a barra anda a cada página.
+- **Pesos pelo tempo real.** Cada etapa pesa o tempo que um item costuma levar: um arquivo lido direto do servidor da Yampi conta uma fração de um arquivo aberto no editor, e a barra se ajusta quando a leitura muda de caminho. O tempo restante recomeça a medir nessa troca.
+- **Capturar a vitrine** passa a contar as páginas de amostra (**Capturando a vitrine: 4 de 9 páginas**), e as leituras públicas e os recursos aparecem em **Baixar estilos, fontes e imagens**. A barra não fica parada nessas etapas.
+- **Mais rápido.** Páginas da loja, páginas de produto, estilos, fontes e imagens são lidos 6 de cada vez (antes, 4). Uma página de produto lida não guarda mais o documento HTML inteiro na memória até o fim da rodada. A loja que pede calma (429, 503) continua fazendo todas as leituras esperarem.
+- **Menos idas à aba do editor.** O worker continua conferindo a loja no editor antes e depois de cada leitura pública, mas uma conferência serve a todas as leituras que esperam por ela. Antes eram duas por página ou imagem; na loja fictícia, 39 conferências para 55 leituras, em vez de 110.
+- **Trocar de aba ou de janela.** O download, a comparação e o envio continuam rodando no documento de segundo plano da extensão. Enquanto a operação roda, a página do editor segura uma trava (Web Lock), e o Chrome não congela uma aba que segura uma. A aba já não era descartada. O teste novo `npm run test:background` baixa a loja fictícia com a aba do editor realmente em segundo plano (temporizadores desacelerados pelo navegador) e confere que o download termina sozinho. As etapas que leem pelo editor, como os arquivos JSON, continuam mais lentas com a aba oculta, porque o navegador desacelera a página.
+- **Prévia nova e links da comparação.** O worker descartava os campos `previewOnly` e `links` do pedido: **Baixar a prévia nova** baixava o tema inteiro de novo, e a comparação não conferia os links. Agora os dois chegam à operação, conferidos.
+
+**Validado só com a loja e a vitrine fictícias.** Testes novos cobrem o caso de 271 produtos, o espaço guardado na barra e as conferências divididas. `npm run test:background` cobre a aba do editor em segundo plano. O tempo numa loja real depende da rede e da Yampi, e o ganho não foi medido numa loja real.
+
 ## Versão 0.10.0
 
 A prévia local passa a abrir as páginas que a vitrine linka. Até a 0.9.1, o download guardava 8 páginas representativas, e o menu, o rodapé, o "Ver tudo" das vitrines, quase todos os produtos e o voltar da página de produto davam "Rota não capturada nesta prévia".
@@ -51,7 +65,7 @@ Corrige o download com a vitrine publicada, que pedia autorização várias veze
 - **Uma pergunta, no clique.** **Baixar ZIP** pede de uma vez a vitrine e os endereços onde a Yampi guarda imagens e fontes (`cdn.yampi.io`, `fonts.googleapis.com`, `fonts.gstatic.com`). O Chrome lembra essa permissão, então os próximos downloads não perguntam de novo.
 - **Sem perguntar o que já está liberado.** Durante a captura, um endereço que o Chrome já permite entra sem pergunta. Só um endereço realmente novo pausa o download, uma vez. As fontes de `fonts.googleapis.com` e `fonts.gstatic.com` são pedidas juntas.
 - **Sem recomeçar.** Depois de autorizar, a etapa continua de onde estava: **Completar a vitrine com os recursos autorizados**. O que já foi capturado vem do cache, e a contagem da etapa nunca volta.
-- **100% só no fim.** Enquanto alguma etapa tiver trabalho pela frente, a barra para em 99%.
+- **100% só no fim.** Enquanto alguma etapa tiver trabalho pela frente, a barra para em 99%. Na 0.10.1, as etapas que ainda não sabem o próprio tamanho guardam o seu espaço, e a barra não fica mais parada em 99% com páginas pela frente.
 
 **Validado só com a vitrine fictícia.** Os testes cobrem as rodadas de autorização e a barra; o download real de uma loja com a 0.9.1 ainda não foi feito.
 
@@ -212,7 +226,7 @@ Preços refletem a data da captura. Carrinho, checkout, pagamentos, formulários
 2. Escolha a pasta do projeto, ou solte-a no painel. Da segunda vez em diante, **Reler “pasta”** faz isso com um clique. Em **Usar um ZIP de retorno** vale o ZIP de `npm run pack`. A comparação começa sozinha.
 3. Confira o resumo: alterados, novos e imagens. O que precisa de você aparece em **Precisa da sua atenção**, com a ação ao lado; **Comparar e escolher** mostra as linhas que mudaram. Se um arquivo usa outro que mudou só na loja, **Ver a mudança** mostra o que mudou; **Usar no projeto** grava a versão da loja nesse arquivo da sua pasta e compara de novo (ou **Copiar**, para colar à mão). **Comparar de novo** relê a pasta.
 4. **Backup da loja em ZIP** vem ligado a cada importação. Você pode desligá-lo só para aquele envio; a confirmação mostra essa escolha. O ZIP contém os textos existentes que serão substituídos, não uma cópia completa da loja. O registro interno com os textos anteriores continua obrigatório para recuperação, inclusive sem ZIP.
-5. Clique em **Enviar N itens** e confirme. Com o backup ligado, o ZIP é guardado e seu download é confirmado antes da primeira mudança. Pode fechar o painel ou trocar de aba: o envio continua, e o ícone mostra o progresso.
+5. Clique em **Enviar N itens** e confirme. Com o backup ligado, o ZIP é guardado e seu download é confirmado antes da primeira mudança. Pode fechar o painel, trocar de aba ou de janela: o envio continua, e o ícone mostra o progresso. Não feche nem navegue a aba do editor.
 6. No fim, **Abrir a prévia** abre o rascunho da Yampi. Se estiver tudo certo, publique na Yampi. Se não, **Desfazer este envio**.
 
 Sem arquivos para enviar ou sem seleção, **Concluir** aparece como botão principal. Durante a revisão com itens selecionados, **Cancelar** fica abaixo de **Enviar**. Ambos encerram a revisão e voltam à tela inicial de **Importar projeto**, sem pasta ou ZIP carregado, para escolher outro projeto. O histórico, os backups e a referência original são preservados; o backup em ZIP volta ligado. Trocar de aba preserva a comparação enquanto ela não for encerrada. **Trocar pasta**, **Comparar de novo**, **Atualizar da loja** e **Versões** são ações secundárias. Retomar um envio interrompido preserva a escolha confirmada daquele envio.

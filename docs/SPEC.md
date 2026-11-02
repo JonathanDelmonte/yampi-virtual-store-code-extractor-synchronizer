@@ -224,9 +224,11 @@ Baixar, comparar e enviar rodam num documento da extensão (`runner.html`, criad
 
 - O worker mantém o bloqueio da aba enquanto a operação roda. Fechar o painel ou trocar de aba não o libera nem interrompe nada; outro painel da mesma aba só acompanha. O estado da operação (`job:<aba>`, no armazenamento da sessão) é a fonte do painel reaberto, do ícone e do aviso de fim.
 - O documento só conversa com o worker. O worker aceita dele apenas comandos da operação em andamento, para a aba que recebeu, e confere o endereço do editor em cada um, como faz com o painel.
+- O pedido passa por `validRequest` no worker, e só os campos conferidos chegam ao documento: `previewOnly` só num download com a vitrine, `links` (até 200, endereços `http(s)`) só numa comparação. Até a 0.10.0, esses dois campos ficavam pelo caminho.
 - Downloads: o documento cria o arquivo; o worker baixa só endereços `blob:` da própria extensão, com nome restrito, e espera o fim do download antes de seguir.
 - **Interromper** para depois do item em andamento. Fechar a aba do editor cancela a operação. Reiniciar ou atualizar a extensão encerra a operação como falha, sem desfazer nada, e o envio pode continuar (acima).
-- A aba não é descartada pelo navegador enquanto a operação roda. Em segundo plano, o navegador desacelera os temporizadores da página; as esperas do editor respondem a mudanças na página, e a operação continua, mais devagar.
+- A aba não é descartada pelo navegador enquanto a operação roda (`autoDiscardable: false`). Desde a 0.10.1, a página do editor também segura uma trava (Web Lock `zirtuno-sync-operacao`, compartilhada, pedida no mundo isolado da extensão) do início ao fim da operação, e de novo depois de cada recarga: o Chrome não congela uma aba em segundo plano que segura uma trava. O fim, a falha e a execução perdida (`reconcile`) soltam a trava.
+- Em segundo plano, o navegador desacelera os temporizadores da página (cerca de uma vez por segundo); as esperas do editor respondem a mudanças na página, e o que passa pelo editor (listar, ler pelo editor, gravar) continua, mais devagar. As etapas da vitrine não dependem da página além da conferência da loja, dividida entre as leituras (abaixo). `scripts/background-e2e.mjs` baixa a loja fictícia com a aba do editor realmente oculta, sem o Playwright conectado, que mantém visível toda página a que está ligado.
 
 A extensão nunca aciona Publicar, Excluir ou Renomear. Salvar no editor muda a prévia da Yampi; os clientes só veem a mudança depois de Publicar, feito à mão ([documentação da Yampi](https://docs.yampi.com.br/editor-codigo/como-fazer/primeiras-edicoes)).
 
@@ -236,7 +238,7 @@ Usa o registro de um envio: o conteúdo enviado passa a ser o original e o anter
 
 ## Prévia: páginas da loja e dos produtos
 
-Desde a 0.10.0, depois do recorte representativo (até 8 páginas, uma de cada tipo primeiro) e dos seus recursos, o download lê mais páginas públicas da vitrine. Usa o mesmo `PreviewFetch` (o worker confere a loja antes e depois de cada GET), a mesma origem e as mesmas permissões, e nada da sessão do editor. `tests/rocket-like.test.ts`, `tests/preview-pages.test.ts`, `tests/jobs.test.ts` e `scripts/preview-e2e.mjs` verificam estas regras com a loja fictícia.
+Desde a 0.10.0, depois do recorte representativo (até 8 páginas, uma de cada tipo primeiro) e dos seus recursos, o download lê mais páginas públicas da vitrine. Usa o mesmo `PreviewFetch` (o worker confere a loja antes e depois de cada GET, abaixo), a mesma origem e as mesmas permissões, e nada da sessão do editor. `tests/rocket-like.test.ts`, `tests/preview-pages.test.ts`, `tests/jobs.test.ts` e `scripts/preview-e2e.mjs` verificam estas regras com a loja fictícia.
 
 - **De onde vêm os caminhos.** De `url_path`, `url`, `link`, `path` e `href` das páginas capturadas, em qualquer profundidade (menu, subcategorias, rodapé, breadcrumbs, banners, promoções), e das leituras públicas gravadas. Do tema exportado: `href`, `link` e `cta-url` com caminho literal nos `.twig` e `.vue`, `'/<slug>/p'` e `slug: '<slug>'` (este, só um palpite). Entram só caminhos da mesma origem feitos de slugs: sem a home, sem extensão de arquivo e sem nada que `publicUrl` recuse (checkout, carrinho, conta, parâmetros de sessão).
 - **Uma captura por caminho.** A chave é o caminho: `?sort_by=` e `?page=` não criam outra captura. A busca é a exceção, uma captura por `?q=`. A prévia local abre a categoria com qualquer ordenação ou página, e a busca só pela pergunta exata.
@@ -247,6 +249,8 @@ Desde a 0.10.0, depois do recorte representativo (até 8 páginas, uma de cada t
 
   Como página da loja, só `category` (categorias, subcategorias, vitrines `/l`, buscas), `pages` e `promotion`; uma página de produto alcançada por um link sem `/p` conta como produto. Como produto, só `product` com `window.data.product.data`.
 - **Orçamento.** `storePages` 200, `storeBytes` 24 MiB e `storeRounds` 4; `productPages` 400 e `productBytes` 16 MiB. Fica à parte de `pages` (8) e dos recursos. Os bytes contam o `data` de cada página e cada `themeConfig` ou `merchant` distinto uma vez, como ficam no ZIP. O que passa vira `store-page-limit` ou `product-page-limit`, com a contagem e exemplos. Um caminho achado só nas páginas da última rodada, com orçamento sobrando, vira `store-page-rounds` ou `product-page-rounds`: não é limite de páginas. Nenhum recurso novo (CSS, fonte, foto) é baixado para essas páginas.
+- **Ritmo.** Desde a 0.10.1, 6 páginas de cada vez (antes, 4), como os recursos e as leituras públicas do recorte. A página lida guarda só o que a prévia usa (`raw`, tipo e notas): o documento HTML analisado é descartado na hora, e não fica na memória até o fim da rodada.
+- **Conferência da loja.** O worker confere o cabeçalho do editor antes e depois de cada GET público (`storeLook`). Antes: vale uma conferência começada há menos de 1 s. Depois: só uma conferência começada depois que o GET terminou, e uma conferência serve a todas as leituras que esperam por ela. Assim, 6 leituras ao mesmo tempo não pedem 12 conferências à aba, que responde mais devagar em segundo plano. Uma loja diferente no editor, numa conferência de depois, para o download com "A loja mudou durante a captura pública".
 - **Falhas.**
   - 429 ou 503: todas as leituras esperam juntas o `Retry-After` (no máximo 60 s; sem o cabeçalho, 5 s vezes a tentativa). O intervalo entre leituras cresce 250 ms por aviso, até 2 s, e encolhe 25 ms por leitura que dá certo. Até 6 tentativas.
   - Falha de rede: até 3 tentativas.
@@ -256,6 +260,16 @@ Desde a 0.10.0, depois do recorte representativo (até 8 páginas, uma de cada t
   - Troca de loja ou cancelamento param o download, como em toda a captura.
 - **Limpeza.** Cada página passa por `sanitizeRaw`, com a mesma lista de bloqueio e o mesmo limite de tamanho das representativas, e recebe por cima o rascunho do editor (`applyEditor`). Notas de limpeza iguais viram uma, com a contagem de páginas.
 - **Relatório.** `stages`, no manifesto e em `report.json > pages.stages`, traz por etapa: quantos caminhos foram achados, quantas páginas entraram por tipo, quantos caminhos ficaram de fora pelo limite e a lista do que ficou de fora, com o motivo (até 200). O painel mostra o progresso como **Páginas da loja: N de M** e **Páginas dos produtos: N de M**; o resultado resume as etapas e lista os links quebrados.
+
+### Progresso do download
+
+Etapas, nesta ordem: **Listar os arquivos**, **Ler os arquivos**, **Capturar a vitrine** (as páginas do recorte), **Baixar estilos, fontes e imagens** (leituras públicas e recursos), **Páginas da loja**, **Páginas dos produtos**, **Preparar o ZIP** e **Baixar o ZIP**. Sem a vitrine, as quatro do meio saem da barra no clique.
+
+- Cada etapa pesa o tempo que um item costuma levar (`PHASES` em `src/jobs/engine.ts`): um arquivo aberto no editor, 0,8 s; lido direto do servidor da Yampi, 0,06 s; uma página da vitrine, 0,35 s. A captura avisa quando a leitura muda de caminho (`pace`), e o peso da etapa muda junto.
+- Uma etapa que só descobre o tamanho ao começar tem um tamanho esperado (`expect`): 250 arquivos, 9 páginas de amostra, 150 recursos, 60 páginas da loja e 150 de produto. O espaço dela fica guardado na barra até ela saber o tamanho real. Sem isso, até a 0.10.0, a barra enchia com o tema e chegava a 99% antes das páginas da loja e dos produtos, e ficava parada ali até o fim.
+- A barra nunca volta: quando um tamanho ou um peso muda, ela fica onde está, e o espaço que resta passa a valer o trabalho que resta. Só mostra 100% depois que a operação termina.
+- O tempo restante usa o ritmo dos últimos 90 s e recomeça a medir quando o peso de uma etapa muda.
+- A comparação guarda o espaço dos caminhos que vai ler e dos links que vai conferir, que vêm no pedido.
 
 ### Formato 3
 

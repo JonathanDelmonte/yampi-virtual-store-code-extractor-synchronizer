@@ -1,5 +1,5 @@
 import type {Command} from './bridge';
-import {assertContext, validateContext} from '../core/model';
+import {assertContext, validateContext, type Context} from '../core/model';
 import {publicUrl} from '../core/preview';
 import {fetchPublicResource} from './public-fetch';
 import {isEditorURL as allowed, GUIDE_TITLE, EDITOR_TITLE} from './toolbar';
@@ -124,18 +124,59 @@ async function refresh(tabId: number): Promise<void> {
     await sleep(250);
   }
 }
+// Every public read of the storefront is checked against the editor's header before and after its
+// GET. Many reads run at once: one look at the header serves every read waiting for it, so the
+// editor tab (slower to answer in the background) never holds each read back twice.
+// before: a look started less than a second ago. after: a look started after the GET ended.
+const FRESH_MS = 1000;
+type Look = {seq: number; at: number; promise: Promise<void>};
+const looks = new Map<string, {running?: Look; last?: Look}>();
+let lookSeq = 0;
+// The editor answered, but not with the store of the capture.
+class EditorRefused extends Error {}
+async function storeLook(tabId: number, expected: Context, fits: (look: Look) => boolean): Promise<void> {
+  const key = `${tabId}\n${JSON.stringify(expected)}`;
+  const entry = looks.get(key) || {};
+  looks.set(key, entry);
+  for (;;) {
+    if (entry.last && fits(entry.last)) return;
+    if (entry.running) {
+      if (fits(entry.running)) return entry.running.promise;
+      await entry.running.promise.catch(() => {});
+      continue;
+    }
+    const look: Look = {seq: ++lookSeq, at: Date.now(), promise: (async () => {
+      const reply = await bridge(tabId, {op: 'context', context: expected});
+      if (!reply?.ok) throw new EditorRefused(reply?.error || 'Sem resposta do editor.');
+      assertContext(expected, validateContext(reply.value));
+    })()};
+    entry.running = look;
+    try {await look.promise; entry.last = look;}
+    catch (error) {delete entry.last; throw error;}
+    finally {if (entry.running === look) delete entry.running;}
+    return;
+  }
+}
 async function execute(token: string, session: Session, message: {action?: string; command?: Command; preview?: {url?: string; origins?: string[]; context?: unknown}}): Promise<unknown> {
-  if (message.action === 'refresh') {await refresh(session.tabId); return null;}
+  if (message.action === 'refresh') {
+    await refresh(session.tabId);
+    // The reload made a new page: it holds the operation's lock again.
+    if (session.job) await holdTab(session.tabId);
+    return null;
+  }
   const previewRequest = message.preview;
   const previewAction = ['preview-allow', 'preview-fetch'].includes(message.action || '');
   const cmd = previewAction ? {op: 'context' as const, context: validateContext(previewRequest?.context)} : message.command as Command;
   if (!cmd || !['context', 'inventory', 'read', 'readAsset', 'visual', 'write', 'create', 'upload', 'links', 'directOpen', 'directRead'].includes(cmd.op)) throw new Error('Comando não permitido.');
   if (previewAction && session.access !== 'read') throw new Error('Captura visual exige uma operação de leitura.');
   if (['write', 'create', 'upload'].includes(cmd.op) && session.access !== 'write') throw new Error('Esta operação permite apenas copiar. Gravação bloqueada.');
-  const reply = await bridge(session.tabId, cmd);
-  if (!reply?.ok) throw new Error(reply?.error || 'Sem resposta do editor.');
-  if (!previewAction) return reply.value;
-  const expected = validateContext(previewRequest?.context); assertContext(expected, validateContext(reply.value));
+  if (!previewAction) {
+    const reply = await bridge(session.tabId, cmd);
+    if (!reply?.ok) throw new Error(reply?.error || 'Sem resposta do editor.');
+    return reply.value;
+  }
+  const expected = validateContext(previewRequest?.context);
+  await storeLook(session.tabId, expected, look => look.at >= Date.now() - FRESH_MS);
   if (message.action === 'preview-allow') {
     const origins = previewRequest?.origins;
     if (!Array.isArray(origins) || origins.length > 32 || origins.some(origin => typeof origin !== 'string' || new URL(publicUrl(origin, origin)).origin !== origin)) throw new Error('Origens da prévia inválidas.');
@@ -146,10 +187,28 @@ async function execute(token: string, session: Session, message: {action?: strin
   const origin = new URL(publicUrl(previewRequest.url, expected.previewOrigin)).origin;
   if (!await chrome.permissions.contains({origins: [origin + '/*']})) throw new Error('Permissão de leitura da vitrine/recurso não concedida.');
   const result = await fetchPublicResource(previewRequest.url, session.previewOrigins || [expected.previewOrigin]);
-  const after = await bridge(session.tabId, {op: 'context', context: expected});
-  if (!after?.ok) throw new Error('A loja mudou durante a captura pública.');
-  assertContext(expected, validateContext(after.value));
+  const mark = ++lookSeq;
+  try {await storeLook(session.tabId, expected, look => look.seq > mark);}
+  catch (error) {throw error instanceof EditorRefused ? new Error('A loja mudou durante a captura pública.') : error;}
   return result;
+}
+// While an operation runs, the editor page holds a Web Lock: Chrome does not freeze a background
+// page that holds one, as it does not discard the tab (autoDiscardable). So the editor keeps
+// answering while the user works in another tab or window. Released when the operation ends.
+const HOLD = 'zirtuno-sync-operacao';
+async function holdTab(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({target: {tabId}, func: (name: string) => {
+    const scope = globalThis as typeof globalThis & {zirtunoRelease?: () => void};
+    if (scope.zirtunoRelease || !navigator.locks) return;
+    const held = new Promise<void>(resolve => {scope.zirtunoRelease = resolve;});
+    void navigator.locks.request(name, {mode: 'shared'}, () => held).catch(() => {});
+  }, args: [HOLD]}).catch(() => {});
+}
+async function releaseTab(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({target: {tabId}, func: () => {
+    const scope = globalThis as typeof globalThis & {zirtunoRelease?: () => void};
+    scope.zirtunoRelease?.(); delete scope.zirtunoRelease;
+  }}).catch(() => {});
 }
 // ---------------------------------------------------------------------------------------------
 // Background jobs: the runner document does the work; this worker owns the editor tab, the lock,
@@ -225,7 +284,12 @@ function validRequest(value: unknown): JobRequest {
   if (request.scope === 'update' && request.kind !== 'compare') throw new Error('Operação inválida.');
   if (request.paths !== undefined && (!Array.isArray(request.paths) || request.paths.length > 6000 || request.paths.some(path => typeof path !== 'string'))) throw new Error('Operação inválida.');
   for (const key of ['resume', 'journalId'] as const) if (request[key] !== undefined && (typeof request[key] !== 'string' || !/^[\w-]{8,64}$/.test(request[key]!))) throw new Error('Operação inválida.');
-  return {id: request.id, kind: request.kind, ...(request.includePreview ? {includePreview: true} : {}), ...(request.scope ? {scope: request.scope} : {}), ...(request.journalId ? {journalId: request.journalId} : {}), ...(request.paths ? {paths: [...request.paths]} : {}), ...(request.full ? {full: true} : {}), ...(request.resume ? {resume: request.resume} : {})};
+  // A preview-only download reads the storefront, never the theme: only with the storefront allowed.
+  if (request.previewOnly !== undefined && (request.kind !== 'export' || request.previewOnly !== true || request.includePreview !== true)) throw new Error('Operação inválida.');
+  // The internal links of the texts a comparison sends, read on the storefront like the preview.
+  const links = request.links;
+  if (links !== undefined && (request.kind !== 'compare' || !Array.isArray(links) || links.length > 200 || links.some(link => !link || typeof link.url !== 'string' || link.url.length > 2048 || !/^https?:\/\//.test(link.url) || !Array.isArray(link.files) || link.files.length > 20 || link.files.some(file => typeof file !== 'string' || file.length > 500)))) throw new Error('Operação inválida.');
+  return {id: request.id, kind: request.kind, ...(request.includePreview ? {includePreview: true} : {}), ...(request.previewOnly ? {previewOnly: true} : {}), ...(request.scope ? {scope: request.scope} : {}), ...(request.journalId ? {journalId: request.journalId} : {}), ...(request.paths ? {paths: [...request.paths]} : {}), ...(request.full ? {full: true} : {}), ...(request.resume ? {resume: request.resume} : {}), ...(links?.length ? {links: links.map(link => ({url: link.url, files: [...link.files]}))} : {})};
 }
 async function startJob(token: string, session: Session, message: {job?: unknown; context?: unknown}): Promise<null> {
   const request = validRequest(message.job), context = validateContext(message.context);
@@ -246,6 +310,7 @@ async function startJob(token: string, session: Session, message: {job?: unknown
     throw error;
   }
   void chrome.tabs.update(session.tabId, {autoDiscardable: false}).catch(() => {});
+  void holdTab(session.tabId);
   return null;
 }
 // A job whose runner is gone (extension reloaded, browser crash) is marked interrupted, and the
@@ -259,6 +324,7 @@ async function reconcile(tabId: number): Promise<JobState | undefined> {
   const interrupted: JobState = {...state, status: 'failed', detail: 'Operação interrompida', error: 'A operação parou porque a extensão foi reiniciada ou atualizada. Nada foi desfeito.', finishedAt: Date.now()};
   await chrome.storage.session.set({[jobKey(tabId)]: interrupted});
   for (const [token, session] of await sessions()) if (session.tabId === tabId && session.job === state.id) await releaseJob(token, state.id);
+  void releaseTab(tabId);
   await showBadge(tabId, interrupted);
   return interrupted;
 }
@@ -295,6 +361,7 @@ async function fromRunner(message: {runner: string; session?: string; action?: s
     if (message.action === 'job-finish') {
       await releaseJob(token, jobId);
       void chrome.tabs.update(session.tabId, {autoDiscardable: true}).catch(() => {});
+      void releaseTab(session.tabId);
       await notifyEnd(session.tabId, state);
     }
     return null;
@@ -484,6 +551,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 chrome.tabs.onRemoved.addListener(async id => {
   panelRevision.delete(id); badgeShown.delete(id);
+  for (const key of looks.keys()) if (key.startsWith(`${id}\n`)) looks.delete(key);
   const state = (await chrome.storage.session.get(jobKey(id)))[jobKey(id)] as JobState | undefined;
   if (state && (state.status === 'running' || state.status === 'waiting')) void toRunner({action: 'cancel', jobId: state.id}).catch(() => {});
   await serialize(async () => {
