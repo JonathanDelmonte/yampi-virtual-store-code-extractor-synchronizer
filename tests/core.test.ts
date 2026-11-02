@@ -58,17 +58,17 @@ describe('comparação entre três versões', () => {
 describe('imagens em subpastas: a Yampi só aceita assets/images', () => {
   const base = {[file]: '<main></main>'};
   test('a imagem vai para assets/images e a referência literal acompanha', () => {
-    const plan = makePlan(snapshot(base), {[file]: `<img src="{{ 'images/hero/capa.png' | assets_url }}"><img src="../images/hero/capa.png">`}, snapshot(base), {'assets/images/hero/capa.png': png(1)});
+    const plan = makePlan(snapshot(base), {[file]: `<img src="{{ '/assets/images/hero/capa.png' | assets_url }}"><img src="../images/hero/capa.png">`}, snapshot(base), {'assets/images/hero/capa.png': png(1)});
     expect(plan.rows.find(r => r.path === 'assets/images/capa.png')).toMatchObject({status: 'upload', source: 'assets/images/hero/capa.png'});
     expect(plan.rows.find(r => r.path === file)).toMatchObject({status: 'update', rewritten: 2, dependsOn: ['assets/images/capa.png']});
-    expect(plan.rows.find(r => r.path === file)?.local).toBe(`<img src="{{ 'images/capa.png' | assets_url }}"><img src="../images/capa.png">`);
+    expect(plan.rows.find(r => r.path === file)?.local).toBe(`<img src="{{ '/assets/images/capa.png' | assets_url }}"><img src="../images/capa.png">`);
   });
   test('nomes repetidos em pastas diferentes não colidem; a imagem que já está na loja não se move', () => {
     const moves = imageMoves({'assets/images/a/x.png': png(1), 'assets/images/b/x.png': png(2), 'assets/images/c/x.png': png(1), 'assets/images/Topo Novo.PNG': png(3), 'assets/images/ja.png': png(4)}, {'assets/images/ja.png': png(4)});
     expect(Object.fromEntries(moves)).toEqual({'assets/images/a/x.png': 'assets/images/x.png', 'assets/images/b/x.png': 'assets/images/b-x.png', 'assets/images/c/x.png': 'assets/images/x.png', 'assets/images/Topo Novo.PNG': 'assets/images/topo-novo.png'});
   });
   test('caminho montado em tempo de execução bloqueia o arquivo, com o motivo', () => {
-    const plan = makePlan(snapshot(base), {[file]: `{{ ('images/hero/' ~ nome) | assets_url }}`}, snapshot(base), {'assets/images/hero/capa.png': png(1)});
+    const plan = makePlan(snapshot(base), {[file]: `{{ ('/assets/images/hero/' ~ nome) | assets_url }}`}, snapshot(base), {'assets/images/hero/capa.png': png(1)});
     expect(plan.rows.find(r => r.path === file)).toMatchObject({status: 'blocked-dependency', reason: expect.stringContaining('images/hero/')});
   });
 });
@@ -162,9 +162,9 @@ describe('envio com preflight, backup e conferência', () => {
     const adapter = new FakeAdapter({[file]: 'a'});
     await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b'}), [file], {...hooks(), backup: async () => {throw new Error('disco cheio');}})).rejects.toThrow('disco'); expect(adapter.writes).toEqual([]);
   });
-  test('falha em persistir impede toda gravação', async () => {
+  test.each([true, false])('falha em persistir impede toda gravação (ZIP: %s)', async backupZip => {
     const adapter = new FakeAdapter({[file]: 'a'});
-    await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b'}), [file], {...hooks(), persist: async () => {throw new Error('quota');}})).rejects.toThrow('quota'); expect(adapter.writes).toEqual([]);
+    await expect(applyPlan(adapter, planFor(adapter, {[file]: 'b'}), [file], {...hooks(), persist: async () => {throw new Error('quota');}}, {backupZip})).rejects.toThrow('quota'); expect(adapter.writes).toEqual([]);
   });
   test('mudança após comparar bloqueia todos os arquivos no preflight', async () => {
     const other = 'templates/product.twig', adapter = new FakeAdapter({[file]: 'a', [other]: 'a'});
@@ -343,7 +343,7 @@ describe('retorno seguro: dependências, envio parcial e espaço em branco', () 
 describe('envio automático: criar, enviar imagens e preencher', () => {
   const list = "<script src='{{ '/components/A.js' | components_url }}'></script>";
   const base = {'elements/scripts/components.twig': list, 'components/A.vue': '<template><p/></template>', [file]: '<main></main>', 'assets/images/readme.md': 'x'};
-  const local = {...base, [file]: `<main><novo-card></novo-card><img src="{{ 'images/hero/capa.png' | assets_url }}"></main>`, 'components/NovoCard.vue': '<template><img src="/x"></template>'};
+  const local = {...base, [file]: `<main><novo-card></novo-card><img src="{{ '/assets/images/hero/capa.png' | assets_url }}"></main>`, 'components/NovoCard.vue': '<template><img src="/x"></template>'};
   const images = {'assets/images/hero/capa.png': png(7)};
   test('tudo em uma operação, com cada passo conferido e o componente novo conferido em components.twig', async () => {
     const adapter = new FakeAdapter(base), h = hooks(), plan = makePlan(snapshot(base), local, snapshot(base), images);
@@ -355,7 +355,7 @@ describe('envio automático: criar, enviar imagens e preencher', () => {
     expect(adapter.created).toEqual(['components/NovoCard.vue']); expect(adapter.uploaded).toEqual(['assets/images/capa.png']);
     expect(adapter.writes).toEqual(['components/NovoCard.vue', file]);
     expect(adapter.files['components/NovoCard.vue']).toBe(local['components/NovoCard.vue']);
-    expect(adapter.files[file]).toContain("'images/capa.png' | assets_url"); expect(adapter.assets['assets/images/capa.png']).toEqual(png(7));
+    expect(adapter.files[file]).toContain("'/assets/images/capa.png' | assets_url"); expect(adapter.assets['assets/images/capa.png']).toEqual(png(7));
     expect(result).toMatchObject({status: 'completed', created: ['components/NovoCard.vue'], uploaded: ['assets/images/capa.png']});
     expect(result.warnings).toBeUndefined(); expect(result.before['components/NovoCard.vue']).toBe(YAMPI_VUE_TEMPLATE);
     expect(h.events.indexOf('backup')).toBeLessThan(h.events.indexOf('persist:running'));

@@ -83,7 +83,7 @@ describe('contrato único entre captura, check, dev e testes', () => {
     const local = [...remote, 'assets/styles/_novo.scss', 'sections/home/nova.twig', 'components/NovoCard.vue', 'assets/images/hero.png'];
     const texts = {
       'assets/styles/main.scss': '@import "old", "novo";\n.a{color:red}',
-      'templates/home.twig': '{% include "sections/home/nova.twig" %}{{ "images/hero.png" | assets_url }}{% include "yampi-internals/head.twig" %}<novo-card></novo-card>{{ get_section_file("a", "home") }}',
+      'templates/home.twig': '{% include "sections/home/nova.twig" %}{{ "/assets/images/hero.png" | assets_url }}{% include "yampi-internals/head.twig" %}<novo-card></novo-card>{{ get_section_file("a", "home") }}',
       'components/Old.vue': '<template><NovoCard/></template><script>import Old from "./Old.vue"; export default {}</script>',
       'elements/scripts/components.twig': "<script src='{{ '/components/Old.js' | components_url }}'></script><script src='{{ '/components/NovoCard.js' | components_url }}'></script>",
       'sections/home/a.twig': '{% include "sections/home/inexistente.twig" %}',

@@ -1,5 +1,5 @@
 import {assertContext, safeSnapshot, validatePaths, writable, sameIgnoringWhitespace, creatableName, freshFile, uploadablePath, yampiImageName, type Assets, type Snapshot, type Files, type Plan, type PlanRow} from './model';
-import {dependencyReport, resolvedReferences} from '../../local-runtime/dependencies.mjs';
+import {dependencyReport, resolvedReferences, productionIssues} from '../../local-runtime/dependencies.mjs';
 import {COMPONENTS_FILE} from '../../local-runtime/contract.mjs';
 import {hasConflictMarks} from './merge';
 import {knownBase, type Known} from './known';
@@ -114,6 +114,10 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
     if (path === COMPONENTS_FILE && (status === 'update' || status === 'conflict')) {status = 'unsupported'; reason = 'A Yampi gera este arquivo sozinha, com os componentes que existem na loja. A extensão não o envia.';}
     if (l !== undefined && (status === 'update' || status === 'create') && hasConflictMarks(l)) {status = 'blocked-dependency'; reason = MARKED;}
     if (leftovers[path] && (status === 'update' || status === 'create')) {status = 'blocked-dependency'; reason =`Usa imagens que vão direto para assets/images por um caminho que a extensão não consegue ajustar (${leftovers[path].join(', ')}). Escreva no código o caminho completo, como 'images/pasta/arquivo.jpg'.`;}
+    if (l !== undefined && (status === 'update' || status === 'create')) {
+      const issues = productionIssues(path, l);
+      if (issues.length) {status = 'blocked-dependency'; reason = issues.join(' ');}
+    }
     return {path, status, base: b, local: l, remote: r, ...(rewritten[path] ? {rewritten: rewritten[path]} : {}), ...(override ? {override} : {}), ...(reason ? {reason} : {}), ...(assumed.has(path) ? {assumed: true} : {}), ...(origin ? {origin} : {})};
   });
   for (const row of rows) if (row.status === 'update' && sameIgnoringWhitespace(row.local!, row.remote!)) row.whitespaceOnly = true;
@@ -125,8 +129,9 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
   // Files that use each other travel together. A dependency that cannot be sent
   // (conflict, block) also blocks the file that uses it.
   const byPath = new Map(rows.map(row => [row.path, row]));
+  const incompatible = new Set(rows.filter(row => row.local !== undefined && productionIssues(row.path, row.local).length).map(row => row.path));
   // The store's components.twig is authoritative (Yampi writes it), so files including it never wait for ours.
-  const changes = (row?: PlanRow) => !!row && row.path !== COMPONENTS_FILE && (row.status === 'create' || row.status === 'upload' || row.local !== undefined && row.remote !== undefined && row.local !== row.remote && !row.whitespaceOnly && !row.image);
+  const changes = (row?: PlanRow) => !!row && row.path !== COMPONENTS_FILE && (incompatible.has(row.path) || row.status === 'create' || row.status === 'upload' || row.image?.local && !equalBytes(row.image.local, row.image.remote) || row.local !== undefined && row.remote !== undefined && row.local !== row.remote && !row.whitespaceOnly && !row.image);
   const uses = new Map(rows.filter(r => r.local !== undefined && (r.status === 'update' || r.status === 'create' || r.status === 'blocked-dependency')).map(row => [row.path, resolvedReferences(row.path, row.local!, localPaths).filter(dep => changes(byPath.get(dep)))]));
   const carried = (row: PlanRow) => row.status === 'update' && !row.whitespaceOnly || row.status === 'create';
   for (let again = true; again;) {

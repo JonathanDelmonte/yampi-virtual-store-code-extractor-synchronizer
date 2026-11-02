@@ -332,6 +332,8 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     tracker.total('upload', rows.filter(row => row.status === 'upload').length);
     tracker.total('save', texts.length); tracker.total('final', texts.length);
     if (previous && continues(previous)) {tracker.skip('preflight'); tracker.skip('backup');}
+    const backupZip = previous ? previous.backupZip !== false : input.backupZip !== false;
+    if (!backupZip) {tracker.skip('backup'); event('Backup em ZIP desativado neste envio; registro de segurança preservado', 'info');}
     const sending = input;
     let stored = false;
     journal = await applyPlan(adapter, plan, input.selected, {
@@ -348,7 +350,7 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
         await host.download(zip, fileName('backup-antes-do-envio', expected.storeName));
         event('Backup guardado e baixado', 'ok');
       }
-    }, {previous, scope: input.scope});
+    }, {previous, scope: input.scope, backupZip});
     for (const warning of journal.warnings || []) event(warning, 'warn');
     return {...sendResult(journal), ...await previewLink()};
   }

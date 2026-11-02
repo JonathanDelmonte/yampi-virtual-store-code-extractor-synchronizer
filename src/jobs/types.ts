@@ -26,7 +26,7 @@ export interface JobRequest {
 }
 // The send itself (plan and choices) is written by the panel before the job starts: too large
 // for a message, and kept so an interrupted send can continue exactly as it was confirmed.
-export interface SendInput {plan: Plan; selected: string[]; scope: Scope; journalId?: string}
+export interface SendInput {plan: Plan; selected: string[]; scope: Scope; journalId?: string; backupZip?: boolean}
 export interface JobEvent {at: number; text: string; path?: string; tone: 'ok' | 'info' | 'warn' | 'error'}
 export interface Waiting {kind: 'origins'; origins: string[]}
 export type Decision = {action: 'allow'; origins: string[]} | {action: 'partial'} | {action: 'discard'};

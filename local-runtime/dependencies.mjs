@@ -1,6 +1,5 @@
 // Return safety shared by the extension and `npm run pack`. A file sent to Yampi
-// must not depend on a file that only exists locally: the extension never
-// creates files, so a partial send could break the published store.
+// must carry its dependencies and use the same paths and names as the platform.
 import {resolveSectionFile, componentList, COMPONENTS_FILE, PAGE_KINDS} from './contract.mjs';
 
 function join(directory, name) {
@@ -13,6 +12,25 @@ function join(directory, name) {
 }
 const dirname = path => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 export const kebab = name => name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/_/g, '-').toLowerCase();
+// Yampi installs these icons after the theme plugins, replacing same-named components.
+// Observed in the platform's public dist/vendor/icons.js on 30/10/2026.
+export const RESERVED_COMPONENTS = new Set(('IconBag IconBuyButton IconCart IconCategoryHighlight IconCollectionsGrid IconComments IconCta IconDelete IconDots IconEye IconEyeSlash IconFooter IconGrid IconHeader IconHighlights IconImage IconImageSlide IconLayoutCenter IconLayoutInline IconLayoutLeft IconNew IconPage IconParagraphCenter IconParagraphLeft IconParagraphRight IconPlus IconQuestion IconShirt IconSocial IconStar IconStarRating IconTextBanners IconTrash IconVideo').split(' ').map(kebab));
+export function assetUrlProblem(value) {
+  return String(value).startsWith('/assets/') ? undefined : 'assets_url precisa do caminho completo a partir do template, como "/assets/images/capa.png". A Yampi concatena o valor literalmente; "images/capa.png" gera um endereço quebrado.';
+}
+export function productionIssues(path, text) {
+  const issues = [];
+  if (path.startsWith('components/') && path.endsWith('.vue') && RESERVED_COMPONENTS.has(kebab(path.split('/').at(-1).slice(0, -4)))) issues.push('Nome reservado pela Yampi: este componente é substituído por um ícone interno. Crie uma cópia com um nome próprio e atualize as tags que a usam.');
+  if (path.endsWith('.twig')) {
+    const source = text.replace(/\{#[\s\S]*?#\}/g, '');
+    const values = [
+      ...source.matchAll(/(["'])([^"'{}]*)\1\s*\|\s*assets_url\b/g),
+      ...source.matchAll(/\(\s*(["'])([^"'{}]*)\1\s*~[^{}\n]*\)\s*\|\s*assets_url\b/g),
+    ];
+    if (values.some(match => assetUrlProblem(match[2]))) issues.push(assetUrlProblem(''));
+  }
+  return issues;
+}
 function sassCandidates(from, name) {
   if (/^(?:[a-z]+:|\/|~)/i.test(name) || /\.css$/.test(name) && /^https?:/.test(name)) return [];
   const relative = join(dirname(from), name);
@@ -41,6 +59,21 @@ export function references(path, text) {
   if (/\.(?:twig|vue)$/.test(path)) {
     for (const m of text.matchAll(/(["'])([^"'{}]+)\1\s*\|\s*assets_url/g)) add('asset', assetCandidates(m[2]), m[2]);
     for (const m of text.matchAll(/\b(?:asset|mix)\(\s*(["'])([^"']+)\1/g)) add('asset', assetCandidates(m[2]), m[2]);
+  }
+  // CSS URLs and image paths in Vue props/Twig data objects also travel with the text.
+  if (/\.(?:twig|vue|s?css)$/.test(path)) {
+    for (const m of text.matchAll(/(["'])((?:\/?assets\/images\/|\/?images\/|\.\.\/images\/)[^"'{}]+\.(?:png|jpe?g|webp|svg))\1/gi)) {
+      const name = m[2].replace(/^\.\.\//, '');
+      add('asset', assetCandidates(name), m[2]);
+    }
+    // A literal image-name table combined with a literal asset prefix (not executable Twig).
+    if (/(["'])\/assets\/images\/\1\s*~/.test(text)) for (const m of text.matchAll(/(["'])([A-Za-z0-9_.-]+\.(?:png|jpe?g|webp|svg))\1/gi)) add('asset', ['assets/images/' + m[2]], m[2]);
+  }
+  if (/\.(?:s?css)$/.test(path)) for (const m of text.matchAll(/url\(\s*(?:(["'])([^"']+)\1|([^\s)]+))\s*\)/gi)) {
+    const name = m[2] || m[3];
+    if (/^(?:[a-z]+:|\/\/|#|\$)/i.test(name) || /[{}]/.test(name)) continue;
+    const target = name.startsWith('/') ? name.slice(1) : join(dirname(path), name);
+    if (target?.startsWith('assets/images/')) add('asset', [target], name);
   }
   if (path.endsWith('.vue')) {
     for (const m of text.matchAll(/\bfrom\s+(["'])([^"']+\.vue)\1/g)) {

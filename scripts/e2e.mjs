@@ -183,7 +183,7 @@ try {
   console.log('E2E: Vue interativo e PNG local conferidos.');
   await writeFile(path.join(project, 'tema/elements/head.twig'), '<meta name="description" content="Editado localmente">\n');
   // A new text in an existing folder and a new image in a subfolder reach the store with no manual step.
-  const newText = '<p>Arquivo novo criado pela extensão</p>\n<img src="{{ \'images/novas/nova.png\' | assets_url }}" alt="">\n';
+  const newText = '<p>Arquivo novo criado pela extensão</p>\n<img src="{{ \'/assets/images/novas/nova.png\' | assets_url }}" alt="">\n';
   const novaPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
   await writeFile(path.join(project, 'tema/templates/new.twig'), newText);
   await mkdir(path.join(project, 'tema/assets/images/novas'), {recursive: true});

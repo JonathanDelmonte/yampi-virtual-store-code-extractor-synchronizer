@@ -123,7 +123,7 @@ describe('referência atrasada: versões conhecidas do projeto', () => {
     expect(makePlan(after.baseline, after.local, {context, capturedAt: '', files: {...d0, [x]: theirs}}).rows.find(item => item.path === x)).toMatchObject({status: 'blocked-dependency', reason: MARKED});
   });
   test('9. texto que só difere da loja nos caminhos de imagem que o envio reescreve: já está na loja', async () => {
-    const folderText = `<img src="{{ 'images/banners/natal.png' | assets_url }}">\n`, storeText = `<img src="{{ 'images/natal.png' | assets_url }}">\n`;
+    const folderText = `<img src="{{ '/assets/images/banners/natal.png' | assets_url }}">\n`, storeText = `<img src="{{ '/assets/images/natal.png' | assets_url }}">\n`;
     const p = await read(await project({[x]: folderText}, {'tema/assets/images/banners/natal.png': png(4)}));
     const store = {...d0, [x]: storeText}, storeImages = {'assets/images/natal.png': png(4)};
     expect(makePlan(p.baseline, p.local, {context, capturedAt: '', files: store, assets: storeImages}, p.localAssets).rows.find(row => row.path === x)?.status).toBe('already-applied');
@@ -159,7 +159,7 @@ describe('npm run versoes:conhecidas', () => {
   test('lista cada versão que o Git teve de cada texto de tema/, com data e texto', async () => {
     temporary = await mkdtemp(path.join(os.tmpdir(), 'zirtuno-known-'));
     const git = (...args: string[]) => {const result = spawnSync('git', ['-C', temporary!, ...args], {encoding: 'utf8'}); if (result.status !== 0) throw new Error(result.stderr);};
-    git('init', '-q'); git('config', 'user.email', 'teste@exemplo.invalid'); git('config', 'user.name', 'Teste'); git('config', 'core.autocrlf', 'false');
+    git('init', '-q'); git('config', 'user.email', 'teste@exemplo.invalid'); git('config', 'user.name', 'Teste'); git('config', 'core.autocrlf', 'false'); git('config', 'commit.gpgsign', 'false');
     await mkdir(path.join(temporary, 'tema/sections/home'), {recursive: true});
     await writeFile(path.join(temporary, 'tema', x), d0[x]); git('add', '.'); git('commit', '-q', '-m', 'D0');
     await writeFile(path.join(temporary, 'tema', x), sentX.replace(/\n/g, '\r\n')); await writeFile(path.join(temporary, 'tema', created), sentCreated); git('add', '.'); git('commit', '-q', '-m', 'D7');

@@ -4,6 +4,7 @@ releases/
 .cache/
 coverage/
 .vitest/
+.claude/settings.local.json
 *.log
 *.zip
 *.env

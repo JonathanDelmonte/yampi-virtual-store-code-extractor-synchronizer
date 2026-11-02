@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {createSynchronousEnvironment, createSynchronousArrayLoader, createSynchronousFilter, createSynchronousFunction} from './twig.mjs';
 import {twigHelpers} from './platform.mjs';
 import {resolveSectionFile, componentList, COMPONENTS_FILE} from './contract.mjs';
+import {assetUrlProblem, productionIssues, resolvedReferences} from './dependencies.mjs';
 import * as sass from 'sass';
 import compiler from 'vue-template-compiler';
 import {compileStyle, compileTemplate} from 'vue/compiler-sfc';
@@ -108,6 +109,8 @@ export function renderPage(files, template, data, config = {}, trace = {sections
   if (!files[template]) throw new Error(`Template não encontrado: ${template}`);
   const localAsset = value => {
     trace.assetsUrl = (trace.assetsUrl || 0) + 1;
+    const problem = assetUrlProblem(value);
+    if (problem) throw new Error(problem);
     const name = String(value).replace(/^\/+/, '').replace(/^assets\//, '');
     return '/tema/' + validPath('assets/' + name).split('/').map(encodeURIComponent).join('/');
   };
@@ -199,9 +202,11 @@ export function compileStyles(files, entries, {style = 'expanded', assets = PLAT
 }
 export function registeredComponents(files, {registerUnlisted = false} = {}) {
   const all = Object.keys(files).filter(p => p.startsWith('components/') && p.endsWith('.vue')).sort();
-  if (files[COMPONENTS_FILE] === undefined) return {components: all, warnings: []};
+  const reserved = all.flatMap(resource => productionIssues(resource, files[resource]).map(reason => ({code: 'reserved-component', resource, reason})));
+  if (files[COMPONENTS_FILE] === undefined) return {components: all, warnings: reserved};
   const listed = new Set(componentList(files[COMPONENTS_FILE]).components), names = new Set(all.map(p => path.posix.basename(p, '.vue')));
   const warnings = [
+    ...reserved,
     ...all.filter(p => !listed.has(path.posix.basename(p, '.vue'))).map(p => ({code: 'component-not-listed', resource: p, reason: `Fora de ${COMPONENTS_FILE}: não será carregado na Yampi${registerUnlisted ? '; registrado localmente por configuração' : ''}.`})),
     ...[...listed].filter(name => !names.has(name)).map(name => ({code: 'component-file-missing', resource: name, reason: `Listado em ${COMPONENTS_FILE} sem arquivo .vue correspondente.`})),
   ];
@@ -209,6 +214,11 @@ export function registeredComponents(files, {registerUnlisted = false} = {}) {
 }
 export async function compileComponents(files, root, {registerUnlisted = false, splideCss = false} = {}) {
   const {components, warnings} = registeredComponents(files, {registerUnlisted});
+  const collisions = new Set(warnings.filter(w => w.code === 'reserved-component').map(w => w.resource));
+  for (const [file, text] of Object.entries(files)) {
+    const used = resolvedReferences(file, text, collisions);
+    if (used.length) throw new Error(`${file}: usa ${used.join(', ')}. Nome reservado pela Yampi: crie um componente com nome próprio e atualize as tags.`);
+  }
   const platformFile = path.join(import.meta.dirname, 'platform-browser.mjs');
   const scripts = new Map(), css = [];
   // The theme compiles its own Splide styles; the library sheet is opt-in.

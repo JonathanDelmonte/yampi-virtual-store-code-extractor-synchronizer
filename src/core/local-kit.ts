@@ -111,7 +111,8 @@ A ferramenta confere a loja, os hashes e o formato, guarda a prévia anterior em
 - A extensão cria os textos novos (.twig, .vue, .scss) em pastas que já existem na loja e envia as imagens novas, sempre pelo próprio editor da Yampi. A Yampi não permite criar pastas: um texto numa pasta nova bloqueia o envio até ser movido. Imagens ficam direto em \`assets/images\`; as de subpastas vão para lá e as referências literais nos arquivos enviados são ajustadas.
 - Um arquivo modificado que inclui, importa ou usa um caminho que não existirá na loja (Sass, Twig, componente Vue ou imagem) fica bloqueado, com o nome dos dois. Arquivos alterados que dependem uns dos outros são enviados juntos, inclusive os novos. Cada arquivo é conferido após recarregar o editor antes do próximo envio.
 - \`elements/scripts/components.twig\` é gerado pela Yampi, que lista cada componente criado pela extensão; ele nunca é enviado. Na prévia local, um \`.vue\` fora dessa lista não é carregado; a prévia avisa e não o registra (use \`"components": {"registerUnlisted": true}\` em \`local.config.json\` apenas para testes locais).
-- \`assets_url\` e \`asset()\` apontam para \`tema/assets/\` na prévia. O caminho de produção não foi verificado.
+- No filtro \`assets_url\`, use o caminho completo: \`'/assets/images/capa.png' | assets_url\`. A Yampi concatena a raiz do template literalmente; \`images/capa.png\` produz uma URL quebrada. A prévia local recusa esse valor em vez de normalizá-lo silenciosamente.
+- Componentes com nomes de ícones internos (como \`IconHeader\`, \`IconFooter\`, \`IconPlus\` e \`IconVideo\`) são substituídos pela Yampi. Use nomes próprios; a comparação e a compilação local apontam a colisão. Preserve os arquivos antigos sem uso se já estiverem na loja.
 - Alterações só de espaço em branco aparecem separadas na comparação e podem ser descartadas.
 
 ## Como editar local.data.json

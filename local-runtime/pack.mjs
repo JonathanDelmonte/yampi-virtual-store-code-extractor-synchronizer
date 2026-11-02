@@ -2,9 +2,13 @@ import path from 'node:path';
 import {writeFile, access} from 'node:fs/promises';
 import {zipSync, strToU8} from 'fflate';
 import {readProject, digest} from './engine.mjs';
-import {dependencyReport} from './dependencies.mjs';
+import {dependencyReport, productionIssues} from './dependencies.mjs';
 export async function packProject(root) {
   const {manifest, baseline, files} = await readProject(root);
+  for (const [name, value] of Object.entries(files)) if (/\.(?:twig|vue)$/.test(name) && (!baseline[name] || digest(value) !== digest(baseline[name]))) {
+    const issues = productionIssues(name, value.toString('utf8'));
+    if (issues.length) throw new Error(`${name}: ${issues.join(' ')}`);
+  }
   const entries = Object.create(null);
   entries['.yampi-sync/manifest.json'] = strToU8(JSON.stringify(manifest, null, 2));
   for (const [name, value] of Object.entries(baseline)) entries['.yampi-sync/baseline/' + name] = value;

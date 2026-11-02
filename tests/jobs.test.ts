@@ -35,6 +35,60 @@ async function prepareSend(local: Record<string, string>, id = 'job-1') {
   return {id, kind: 'send', scope: 'project'} satisfies JobRequest;
 }
 beforeEach(clearLocal);
+describe('backup em ZIP por importação', () => {
+  async function withoutZip() {
+    const request = await prepareSend({...store, [home]: 'novo home', [product]: 'novo product'});
+    const input = (await get<SendInput>(`jobinput:${request.id}`))!;
+    await put(`jobinput:${request.id}`, {...input, backupZip: false});
+    return request;
+  }
+  test('sem ZIP persiste os textos anteriores antes de escrever e permite restaurar', async () => {
+    const editor = new FakeEditor(store), {host: h, downloads} = host(editor);
+    const write = editor.write.bind(editor);
+    editor.write = async (...args) => {
+      expect((await journalHistory(context))[0]).toMatchObject({backupZip: false, before: {[home]: 'home', [product]: 'product'}});
+      await write(...args);
+    };
+    const result = await runJob(await withoutZip(), context, h, control());
+    expect(result.status).toBe('completed');
+    expect(result.phases.find(p => p.id === 'backup')?.status).toBe('skipped');
+    expect(downloads).toEqual([]);
+    const [journal] = await journalHistory(context);
+    expect(await get(`backup:${journal.id}`)).toBeUndefined();
+    expect(await get(`sendplan:${journal.id}`)).toMatchObject({backupZip: false});
+    editor.write = write;
+    const plan = makePlan(snapshot(journal.after), journal.before, snapshot(editor.files));
+    await put('jobinput:restore-no-zip', {plan, selected: journal.selected, scope: 'restore'} satisfies SendInput);
+    expect((await runJob({id: 'restore-no-zip', kind: 'send', scope: 'restore'}, context, h, control())).status).toBe('completed');
+    expect(editor.files[home]).toBe('home');
+    expect(downloads).toHaveLength(1); // A new operation defaults to ZIP again.
+  });
+  test.each([false, true])('retomada preserva a escolha sem ZIP (primeira escrita concluída: %s)', async firstWritten => {
+    const editor = new FakeEditor(store), {host: h, downloads} = host(editor);
+    editor.beforeWrite = path => {if (path === (firstWritten ? product : home)) throw new Error('Interrupção fictícia');};
+    expect((await runJob(await withoutZip(), context, h, control())).status).toBe('failed');
+    const [journal] = await journalHistory(context);
+    editor.beforeWrite = undefined;
+    const result = await runJob({id: 'resume-no-zip', kind: 'send', resume: journal.id}, context, h, control());
+    expect(result.status).toBe('completed');
+    expect(result.phases.find(p => p.id === 'backup')?.status).toBe('skipped');
+    expect(downloads).toEqual([]);
+    expect(editor.writes).toEqual([home, product]);
+    expect((await journalHistory(context))[0]).toMatchObject({backupZip: false, before: {[home]: 'home', [product]: 'product'}});
+  });
+  test('sem ZIP ainda bloqueia uma alteração posterior à comparação', async () => {
+    const editor = new FakeEditor(store), {host: h, downloads} = host(editor);
+    const request = await withoutZip(); editor.files[home] = 'mudou na loja';
+    expect((await runJob(request, context, h, control())).status).toBe('failed');
+    expect(editor.writes).toEqual([]); expect(downloads).toEqual([]);
+  });
+  test('sem ZIP ainda bloqueia outra loja', async () => {
+    const editor = new FakeEditor(store), {host: h} = host(editor);
+    const request = await withoutZip(); editor.ctx.storeName = 'Outra loja fictícia';
+    expect((await runJob(request, context, h, control())).status).toBe('failed');
+    expect(editor.writes).toEqual([]); expect(editor.reads).toEqual([]);
+  });
+});
 describe('operações em segundo plano', () => {
   test('envio completo: progresso por etapa, backup baixado, registro e referência atualizada', async () => {
     const editor = new FakeEditor(store), {host: h, reports, downloads} = host(editor);

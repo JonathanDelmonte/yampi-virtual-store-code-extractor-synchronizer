@@ -7,7 +7,7 @@ import type {Files, Snapshot} from '../src/core/model';
 const snapshot = (files: Files): Snapshot => ({context, capturedAt: '2026-01-01T00:00:00Z', files});
 const home = 'templates/home.twig', image = 'assets/images/capa.png';
 const store = {[home]: '<main></main>\n'};
-const local = {[home]: `<main><img src="{{ 'images/capa.png' | assets_url }}"></main>\n`};
+const local = {[home]: `<main><img src="{{ '/assets/images/capa.png' | assets_url }}"></main>\n`};
 describe('imagens novas fora do envio, a menos que o usuário ligue', () => {
   test('desligado: a imagem fica no projeto, com o motivo, e o texto que a usa espera, explicado', () => {
     const plan = makePlan(snapshot(store), local, snapshot(store), {[image]: png(1)}, {uploads: false});

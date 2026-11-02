@@ -142,13 +142,13 @@ describe('comparação que lê só o que o projeto mudou', () => {
     expect(plan.rows.find(r => r.path === home)?.status).toBe('update');
   });
   test('imagem nova em subpasta: o texto que a usa e os dois nomes possíveis entram na leitura', () => {
-    const local = {...store, [card]: "<img src=\"{{ 'images/hero/capa.png' | assets_url }}\">"};
+    const local = {...store, [card]: "<img src=\"{{ '/assets/images/hero/capa.png' | assets_url }}\">"};
     const paths = changedPaths(snapshot(store), {...store, [card]: store[card]}, {'assets/images/hero/capa.png': png(2)});
     expect(paths).toEqual(['assets/images/capa.png', 'assets/images/hero-capa.png']);
     expect(changedPaths(snapshot(store), local, {'assets/images/hero/capa.png': png(2)})).toContain(card);
   });
   test('texto que só muda pela referência ajustada também é lido', () => {
-    const text = "<img src=\"{{ 'images/hero/capa.png' | assets_url }}\">", base2 = {...store, [card]: text};
+    const text = "<img src=\"{{ '/assets/images/hero/capa.png' | assets_url }}\">", base2 = {...store, [card]: text};
     expect(changedPaths(snapshot(base2), base2, {'assets/images/hero/capa.png': png(2)})).toContain(card);
   });
 });

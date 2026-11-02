@@ -163,6 +163,14 @@ describe('ambiente local portátil', () => {
     expect(Object.keys(entries).every(p => p.startsWith('tema/') || p.startsWith('.yampi-sync/baseline/') || p === '.yampi-sync/manifest.json')).toBe(true);
     expect(result.local['templates/home.twig']).toBe('<h1>Editado</h1>\n'); expect(result.baseline).toEqual(demoSnapshot);
   });
+  test('pack recusa caminho de imagem incompatível ou componente reservado antes de gerar o retorno', async () => {
+    const root = await project();
+    await writeFile(path.join(root, 'tema/templates/home.twig'), `{{ 'images/capa.png' | assets_url }}`);
+    await expect(packProject(root)).rejects.toThrow('/assets/images/capa.png');
+    await writeFile(path.join(root, 'tema/templates/home.twig'), '<main/>');
+    await writeFile(path.join(root, 'tema/components/IconHeader.vue'), '<template><div><slot/></div></template>');
+    await expect(packProject(root)).rejects.toThrow('Nome reservado');
+  });
   test('pack aponta arquivo modificado que inclui arquivo novo', async () => {
     const root = await project();
     await mkdir(path.join(root, 'tema/sections/home'), {recursive: true});

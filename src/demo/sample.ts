@@ -12,7 +12,7 @@ export const demoSnapshot: Snapshot = {
     'elements/head.twig': '<meta name="description" content="Exemplo fictício">\n',
     'elements/header/head.twig': '<header>Outro arquivo com o mesmo nome</header>\n',
     'sections/home/main_banner.twig': '<section><h1>{{ section.params.title }}</h1><p>{{ merchantData.manifest.name }}</p></section>\n',
-    'templates/home.twig': '<main>{% include "sections/home/main_banner.twig" %}<example label="Clique para testar"></example><img src="{{ "images/example.png" | assets_url }}" alt="Imagem fictícia"></main>\n',
+    'templates/home.twig': '<main>{% include "sections/home/main_banner.twig" %}<example label="Clique para testar"></example><img src="{{ "/assets/images/example.png" | assets_url }}" alt="Imagem fictícia"></main>\n',
     'templates/long.twig': Array.from({length: 2000}, (_, i) => `<p>Linha ${i + 1} · conteúdo de teste 🎮</p>`).join('\n') + '\n'
   }
 };

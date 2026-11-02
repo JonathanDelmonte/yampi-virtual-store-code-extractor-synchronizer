@@ -2,6 +2,7 @@ import {assertContext, safeFiles, safeSnapshot, imagePath, writable, validatePat
 import {missingNewTexts, selectionIssues} from './planner';
 import {DIRECT_BATCH, DIRECT_MIN, STORE_CHANGED, directKind, directSamples, storeChanged} from './direct';
 import {COMPONENTS_FILE as COMPONENTS} from '../../local-runtime/contract.mjs';
+import {productionIssues, resolvedReferences} from '../../local-runtime/dependencies.mjs';
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 type Hooks = {signal?: AbortSignal; progress?: (p: Progress) => void};
 function check(signal?: AbortSignal) {if (signal?.aborted) throw new Error('Cancelado. Os arquivos já salvos não foram desfeitos.');}
@@ -137,6 +138,8 @@ export interface SendOptions {
   // checked against the store first, and anything changed by someone else stops the send.
   previous?: Journal;
   scope?: Journal['scope'];
+  // Defaults on for every new send; resuming preserves the journal's original choice.
+  backupZip?: boolean;
 }
 const initialContent = (path: string) => path.endsWith('.vue') ? YAMPI_VUE_TEMPLATE : '';
 // The Yampi server itself says what each file holds: the same GET the editor makes to open one,
@@ -166,8 +169,8 @@ async function fromServer(adapter: Adapter, store: string, paths: string[]): Pro
 }
 const add = (list: string[], path: string) => {if (!list.includes(path)) list.push(path);};
 const drop = (list: string[], path: string) => {const index = list.indexOf(path); if (index >= 0) list.splice(index, 1);};
-// Changes come only after the backup, so a record that shows one was backed up. A record without
-// any starts again, with a new preflight and backup: a failed backup also ends as `stopped`.
+// Changes come only after the safety record and, when enabled, the ZIP backup. A record without
+// any starts again, with a new preflight and the same backup choice: a failed backup is `stopped`.
 export const continues = (journal: Journal) => !!(journal.verified.length || journal.created?.length || journal.uploaded?.length || journal.issued?.length || journal.pending);
 export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[], hooks: SendHooks, options: SendOptions = {}): Promise<Journal> {
   if (!selected.length || new Set(selected).size !== selected.length) throw new Error('Selecione arquivos sem duplicatas.');
@@ -181,8 +184,22 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
       row.status === 'create' && writable(path) && !row.image && row.local !== undefined && row.remote === undefined ||
       row.status === 'upload' && !!row.image?.local && !row.image.remote);
     if (!eligible) throw new Error(`Arquivo não elegível para envio: ${path}`);
+    const issues = row.local === undefined ? [] : productionIssues(path, row.local);
+    if (issues.length) throw new Error(`${path}: ${issues.join(' ')} Compare novamente depois de corrigir o projeto.`);
     return row;
   });
+  // Saved plans from older versions have no compatibility blocks or coupled dependencies.
+  // Walk their local sources again, including unchanged includes and components.
+  const sources = new Map(plan.rows.filter(row => row.local !== undefined).map(row => [row.path, row.local!]));
+  const checked = new Set<string>(), pending = [...selected];
+  while (pending.length) {
+    const path = pending.pop()!;
+    if (checked.has(path) || !sources.has(path)) continue;
+    checked.add(path);
+    const text = sources.get(path)!, issues = productionIssues(path, text);
+    if (issues.length) throw new Error(`${path}: ${issues.join(' ')} Compare novamente depois de corrigir o projeto.`);
+    pending.push(...resolvedReferences(path, text, sources.keys()));
+  }
   // Files that use each other are sent together or not at all.
   const partial = selectionIssues(plan, selected);
   if (partial.length) throw new Error('Envio parcial bloqueado: ' + partial.map(p => `${p.path} precisa ir junto com ${p.requires}`).join('; ') + '. Selecione os arquivos juntos.');
@@ -237,10 +254,13 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
   const created = journal.created!, uploaded = journal.uploaded!, issued = journal.issued!;
   try {
     if (snapshot) {
+      journal.backupZip = previous ? previous.backupZip !== false : options.backupZip !== false;
       await hooks.persist(journal);
-      emit('backup', 'Guardando o backup', 0, 1);
-      await hooks.backup(snapshot, journal); // Must persist successfully BEFORE a change. Covers existing selected texts.
-      emit('backup', 'Guardando o backup', 1, 1);
+      if (journal.backupZip) {
+        emit('backup', 'Guardando o backup', 0, 1);
+        await hooks.backup(snapshot, journal); // Persist and download BEFORE a change when enabled.
+        emit('backup', 'Guardando o backup', 1, 1);
+      }
       journal.status = 'running';
     }
     await hooks.persist(journal);

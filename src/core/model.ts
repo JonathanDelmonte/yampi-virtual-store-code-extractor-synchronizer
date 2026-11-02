@@ -67,6 +67,8 @@ export interface Journal {
   status: 'prepared' | 'running' | 'completed' | 'stopped';
   selected: string[]; verified: string[]; pending?: string; error?: string;
   before: Files; after: Files;
+  // Only the optional ZIP is skipped. The before/after safety record always persists.
+  backupZip?: boolean;
   // Files the extension created (their "before" is the content Yampi gave them) and images it uploaded,
   // both confirmed after a reload. issued: created or uploaded but not yet confirmed.
   created?: string[]; uploaded?: string[]; warnings?: string[]; issued?: string[];
