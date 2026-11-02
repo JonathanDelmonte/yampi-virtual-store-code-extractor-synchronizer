@@ -1,5 +1,26 @@
 # Validação
 
+## Saída da revisão e backup opcional, em 31/10/2026
+
+- **Painel em Chromium** (`npm run test:panel`): sem seleção e sem alterações, **Concluir** é a ação principal; com seleção, **Enviar** mantém o destaque e **Cancelar** fica secundário. Ambos encerram a revisão e voltam à tela inicial de **Importar projeto**, sem pasta ou ZIP carregado, inclusive após reabrir o painel. A referência, o histórico e os backups são preservados. Comparar e trocar pasta usam botões secundários. Revisão conferida nos temas claro e escuro, sem rolagem lateral em 300, 360 e 560 px.
+- **Backup por envio** (`tests/jobs.test.ts`): desligar o ZIP elimina sua geração e download, mas o registro com os textos anteriores é persistido antes de escrever. A restauração continua funcionando; a retomada preserva a escolha, inclusive quando parou antes de escrever o primeiro arquivo. Conflitos posteriores e outra loja continuam bloqueados.
+- **Integridade** (`tests/core.test.ts`): falha ao persistir o registro impede gravações com ou sem ZIP. Envios antigos e novos sem escolha explícita continuam exigindo o ZIP.
+- **Fluxo completo fictício**: confirmação mostra a opção desligada, um texto é salvo e conferido, nenhum ZIP é baixado e o histórico informa que ele foi dispensado. Nova importação, nova comparação e volta à aba reativam o backup. Tanto concluir o resultado do envio quanto encerrar a revisão sem alterações volta diretamente à escolha de pasta ou ZIP na importação.
+
+Validação exclusivamente fictícia. Nenhuma gravação ou teste destas alterações foi feito em loja real.
+
+## Compatibilidade do tema na 0.10.1, em 30/10/2026
+
+Uma prévia real foi inspecionada somente para leitura. O filtro `assets_url` concatenava `images/arquivo.png` diretamente ao nome do template; a URL respondia 404. O caminho completo `/assets/images/arquivo.png` encontrou a imagem enviada (HTTP 200, PNG). O módulo público `dist/vendor/icons.js` registra ícones como `IconHeader`, `IconFooter`, `IconPlus` e `IconVideo` depois dos plugins do tema. Na página, componentes homônimos foram substituídos pelos ícones internos. Isso explica conteúdo que existia na pasta e no recibo, mas não aparecia na prévia.
+
+Os testes novos usam exclusivamente exemplos fictícios: bloqueio de caminhos literais e montados incompatíveis; colisões com ícones e propagação para consumidores; compilação local; recusa de plano antigo antes do backup ou de qualquer gravação; dependências em CSS, Vue e tabelas literais Twig; seleção conjunta com imagens novas; imagem existente alterada sem suporte de substituição; recusa do ZIP de retorno incompatível. A configuração de testes restringe a execução a `tests/`, excluindo cópias antigas em `.cache/`, e o teste de Git desliga assinatura somente no repositório temporário fictício.
+
+`npm ci`, `npm run check` e `npm run package` passaram com Node 24: 369 testes em 27 arquivos, typecheck, build e pacote local. `npm run test:e2e` passou no editor fictício, incluindo criação de texto, imagem com caminho completo, backup, conferência no servidor, execução em segundo plano e proteção na restauração. Nenhuma requisição desse E2E alcançou a Yampi. As cópias de testes em `.cache/` não entram nessa contagem.
+
+Com autorização específica do proprietário, um projeto real foi corrigido somente no disco: versão dos textos guardada e conferida antes das mudanças; prefixos de imagens corrigidos; quatro componentes criados com nomes próprios, preservando os antigos; fundo da vitrine protegido do CSS legado; serviço antigo de chat omitido nas páginas que já usam o novo. As 385 páginas da captura própria desse projeto compilaram com suas ferramentas existentes. Na home local, cabeçalho e rodapé renderizaram, os três planos PS Plus responderam à troca de console, e as imagens de `tema/assets/images` já carregadas não apresentaram falha. A comparação offline com a referência prevê 21 edições e quatro criações, sem imagens novas ou bloqueios. Isso não substitui a comparação com a loja atual nem a conferência real depois do reenvio. Nenhum conteúdo desse projeto foi copiado para este repositório.
+
+Não houve gravação, publicação, exclusão ou renomeação na loja real. As correções não garantem paridade visual nem cobrem todo código dinâmico, configurações do painel ou scripts de terceiros. Atualizar a extensão não atualiza as ferramentas de projetos já exportados.
+
 ## Páginas da loja e dos produtos na 0.10.0, em 29/10/2026
 
 Pedido: a prévia de uma loja real tinha 7 páginas, e menu, rodapé, "Ver tudo", quase todos os produtos e o voltar da página de produto davam "Rota não capturada". Tudo abaixo usa só a loja e o editor fictícios. `npm run check` passou com 609 testes em 43 arquivos.

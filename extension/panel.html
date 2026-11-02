@@ -59,7 +59,7 @@
       </div>
       <div id="pick-tools" class="tools-slot">
         <div id="project-tools" class="project-tools" hidden>
-          <p class="links"><button id="update-project" class="link" disabled>Atualizar da loja</button><button id="open-versions" class="link" disabled>Versões</button></p>
+          <div class="secondary-actions"><button id="update-project" class="button secondary" disabled>Atualizar da loja</button><button id="open-versions" class="button secondary" disabled>Versões</button></div>
           <p id="project-tools-note" class="aside" hidden>Para atualizar da loja e guardar versões, escolha a pasta do projeto, não o ZIP.</p>
         </div>
       </div>
@@ -71,7 +71,7 @@
       </section>
       <label class="file-fallback">Pasta do projeto<input id="folder" type="file" webkitdirectory multiple></label>
       <details class="help"><summary>O que a extensão encontra na pasta?</summary><dl class="folder-guide"><div><dt><code>tema/</code></dt><dd>Textos e imagens do projeto que você editou.</dd></div><div><dt><code>.yampi-sync/</code></dt><dd>A referência original para comparar com o estado atual da loja.</dd></div></dl><p>Dependências, ferramentas, documentação e a prévia local ficam fora do envio. Você também pode escolher só <code>tema/</code> se o original desta loja já estiver guardado na extensão.</p></details>
-      <details class="help"><summary>Como funciona o envio?</summary><ol class="help-steps"><li>Escolha a pasta ou o ZIP e confira os arquivos comparados.</li><li>Revise conflitos e selecione o que deseja enviar. A loja de destino aparece na confirmação.</li><li>A extensão guarda e baixa o backup antes de gravar, e confere o conteúdo após recarregar o editor.</li><li>Confira em <strong>Ver prévia</strong> na Yampi. Publicar continua sendo uma ação sua.</li></ol><p>Criações e imagens usam os controles do editor, sem criar pastas. O envio para no primeiro erro e preserva o registro do que já foi feito.</p></details>
+      <details class="help"><summary>Como funciona o envio?</summary><ol class="help-steps"><li>Escolha a pasta ou o ZIP e confira os arquivos comparados.</li><li>Revise conflitos e selecione o que deseja enviar. A loja de destino aparece na confirmação.</li><li>O backup em ZIP vem ativado e pode ser desligado só nesta importação. O registro de segurança é sempre guardado antes de gravar, e cada item é conferido após recarregar o editor.</li><li>Confira em <strong>Ver prévia</strong> na Yampi. Publicar continua sendo uma ação sua.</li></ol><p>Criações e imagens usam os controles do editor, sem criar pastas. O envio para no primeiro erro e preserva o registro do que já foi feito.</p></details>
     </section>
 
     <section id="review" class="view" aria-label="Revisão" hidden>
@@ -82,6 +82,8 @@
       </div>
       <label id="images-option" class="option" hidden><span class="option-text"><strong>Enviar imagens novas</strong><span id="images-option-text">Desligado: as imagens novas ficam só no projeto.</span></span><span class="toggle"><input type="checkbox" id="send-images"><span aria-hidden="true"></span></span></label>
       <div id="attention" class="attention" hidden><h2 id="attention-title">Precisa da sua decisão</h2><ul id="attention-list"></ul></div>
+      <label id="backup-option" class="option"><span class="option-text"><strong>Backup da loja em ZIP</strong><span id="backup-option-text">Guarda e baixa os textos que serão substituídos. Ativado a cada importação.</span></span><span class="toggle"><input type="checkbox" id="backup-zip" checked aria-describedby="backup-option-text"><span aria-hidden="true"></span></span></label>
+      <div id="review-actions" class="action-slot"></div>
       <details id="all-files" class="help files">
         <summary id="files-summary">Ver os arquivos</summary>
         <div class="file-tools">
@@ -99,9 +101,8 @@
         <div id="moves" hidden><p id="moves-title" class="aside"></p><ul id="moves-list" class="paths"></ul></div>
         <p id="reference-detail" class="aside"></p>
       </details>
-      <p class="links"><button id="compare" class="link" disabled>Comparar de novo</button><button id="pick-other" class="link">Trocar a pasta</button></p>
+      <div class="secondary-actions"><button id="compare" class="button secondary" disabled>Comparar de novo</button><button id="pick-other" class="button secondary">Trocar pasta</button></div>
       <div id="review-tools" class="tools-slot"></div>
-      <div id="review-actions" class="action-slot"></div>
     </section>
 
     <section id="update-view" class="view" aria-label="Atualizar a pasta do projeto" hidden>
@@ -155,6 +156,7 @@
       <button id="reload-folder" class="button primary" hidden><span id="reload-folder-label">Reler a pasta e comparar</span></button>
       <button id="pick-folder" class="button primary" hidden>Escolher a pasta</button>
       <button id="apply" class="button primary" hidden disabled><span id="apply-label">Enviar</span></button>
+      <button id="leave-review" class="button" hidden>Cancelar</button>
       <button id="apply-update" class="button primary" hidden disabled>Atualizar a pasta</button>
       <button id="cancel-update" class="button" hidden>Voltar</button>
       <button id="resume" class="button primary" hidden>Continuar de onde parou</button>
@@ -177,13 +179,13 @@
       <p>A restauração compara de novo antes de gravar e protege alterações feitas depois do envio. Nada é restaurado automaticamente.</p>
       <details class="help local-data"><summary>Gerenciar dados locais</summary><p>Remove desta extensão os originais, o projeto e os backups guardados. Os ZIPs já baixados e os arquivos da loja são preservados.</p><button id="clear" class="link danger">Apagar dados locais da extensão</button></details>
     </div>
-    <p class="about"><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer"><img src="brand/zirtuno-logo.png" alt="" width="16" height="16">Zirtuno Sync <span class="version">0.10.0</span></a><span>Ferramenta independente. Sem telemetria. Nunca exclui, renomeia nem publica.</span></p>
+    <p class="about"><a class="maker" href="https://www.instagram.com/zirtuno/" target="_blank" rel="noopener noreferrer"><img src="brand/zirtuno-logo.png" alt="" width="16" height="16">Zirtuno Sync <span class="version">0.10.1</span></a><span>Ferramenta independente. Sem telemetria. Nunca exclui, renomeia nem publica.</span></p>
   </div>
   <div id="confirm-panel" class="sheet" role="dialog" aria-modal="true" aria-labelledby="confirm-title" hidden>
     <h2 id="confirm-title" class="sheet-title">Enviar para <span id="target-store"></span>?</h2>
     <p id="confirm-counts" class="sheet-lede"></p>
     <ul class="points">
-      <li>Um backup do que vai mudar é baixado antes.</li>
+      <li id="confirm-backup">Um backup do que vai mudar é baixado antes.</li>
       <li>Cada item é conferido na Yampi. No primeiro erro, o envio para.</li>
       <li>Nada é publicado. Você publica na Yampi.</li>
     </ul>

@@ -111,6 +111,7 @@ function currentView(): View {
   return 'export';
 }
 function go(next: Route): void {
+  if (next !== route) $<HTMLInputElement>('backup-zip').checked = true;
   notice = undefined; route = next;
   if (job && !active(job) && job.id === liveJob) dismissJob();
   render();
@@ -142,7 +143,10 @@ function reviewHead(): Head {
   const compared = reading ? `Comparado com ${store} ${since(reading.capturedAt)}.` : '';
   if (scope === 'restore' && restoreJournal) return {title: selected.size ? `Restaurar ${plural(selected.size, 'item', 'itens')}` : 'Nada para restaurar', detail: `Envio de ${dateTime(restoreJournal.startedAt)}. Só volta o que continua igual ao que foi enviado.`};
   if (missingNewTexts(plan!).length) return {title: 'Ajuste o projeto antes de enviar', detail: compared};
-  if (!selected.size) return {title: plan!.rows.some(row => row.status === 'conflict' || row.status === 'blocked-dependency') ? 'Nada pronto para enviar' : 'Nada para enviar', detail: plan!.rows.some(row => row.status === 'conflict') ? compared : `A loja já tem tudo o que o projeto mudou. ${compared}`};
+  if (!selected.size) {
+    if (plan!.rows.some(sendable)) return {title: 'Nenhum arquivo selecionado', detail: `Marque os arquivos que deseja enviar ou conclua para escolher outro projeto. ${compared}`};
+    return {title: plan!.rows.some(row => row.status === 'conflict' || row.status === 'blocked-dependency') ? 'Nada pronto para enviar' : 'Nada para enviar', detail: plan!.rows.some(row => row.status === 'conflict') ? compared : `A loja já tem tudo o que o projeto mudou. ${compared}`};
+  }
   return {title: `${selected.size} ${selected.size === 1 ? 'alteração pronta' : 'alterações prontas'}`, detail: compared};
 }
 function updateHead(): Head {
@@ -302,8 +306,8 @@ function renderDock(view: View): void {
   if (view === 'offline') show.push('retry');
   if (['export', 'pick', 'review'].includes(view) && resumable) show.push('resume');
   if (view === 'export') show.push('export');
-  if (view === 'pick') show.push(...(remembered && canPickFolders() ? ['reload-folder', 'pick-folder'] : ['pick-folder']));
-  if (view === 'review') show.push('apply');
+  if (view === 'pick') show.push(...(workspace?.project && remembered && canPickFolders() ? ['reload-folder', 'pick-folder'] : ['pick-folder']));
+  if (view === 'review') show.push(...(selected.size ? ['apply', 'leave-review'] : ['leave-review']));
   if (view === 'update') show.push('apply-update', 'cancel-update');
   // While waiting for the user's choice, the choices are on screen; "stop" would only repeat them.
   if (view === 'job' && (busy ? !!controller : job?.status === 'running')) show.push('cancel');
@@ -313,7 +317,9 @@ function renderDock(view: View): void {
     if (job.kind === 'send' && job.status !== 'completed' && resumable) show.push('resume');
     show.push('finish');
   }
-  for (const id of ['retry', 'export', 'reload-folder', 'pick-folder', 'apply', 'apply-update', 'cancel-update', 'resume', 'open-preview', 'show-file', 'cancel', 'finish']) $(id).hidden = !show.includes(id);
+  for (const id of ['retry', 'export', 'reload-folder', 'pick-folder', 'apply', 'leave-review', 'apply-update', 'cancel-update', 'resume', 'open-preview', 'show-file', 'cancel', 'finish']) $(id).hidden = !show.includes(id);
+  $('leave-review').textContent = selected.size ? 'Cancelar' : 'Concluir';
+  $('leave-review').classList.toggle('primary', !selected.size);
   // "Choose a folder" is the main action unless the last folder can simply be read again.
   $('pick-folder').classList.toggle('primary', !show.includes('reload-folder'));
   $('pick-folder').textContent = show.includes('reload-folder') ? 'Outra' : 'Escolher a pasta';
@@ -340,6 +346,12 @@ function controls(): void {
   const working = busy || active(job) || settling;
   $('export').toggleAttribute('disabled', working || !connected);
   $('include-preview').toggleAttribute('disabled', working);
+  $('backup-zip').toggleAttribute('disabled', working);
+  $('leave-review').toggleAttribute('disabled', working);
+  $('backup-option').hidden = !plan || !selected.size;
+  $('backup-option-text').textContent = $<HTMLInputElement>('backup-zip').checked
+    ? 'Guarda e baixa os textos que serão substituídos. Ativado a cada importação.'
+    : 'Sem ZIP só nesta importação. O registro de segurança dos textos continua guardado na extensão.';
   for (const id of ['preview-allow', 'preview-partial', 'preview-discard']) $(id).toggleAttribute('disabled', busy);
   for (const id of ['pick-folder', 'pick-other', 'reload-folder', 'folder', 'baseline', 'clear', 'demo-local', 'mode-import', 'mode-export', 'go-import']) $(id).toggleAttribute('disabled', working);
   historyPicker.setDisabled(working);
@@ -361,7 +373,7 @@ function controls(): void {
   $('open-versions').toggleAttribute('disabled', working || !folderReady);
   $('apply-update').toggleAttribute('disabled', working || !updatePlan || !projectFolder());
   for (const id of ['cancel-update', 'send-images', 'save-version', 'version-name', 'restore-all', 'diff-restore', 'diff-choose-marks', 'diff-choose-mine', 'diff-choose-store']) $(id).toggleAttribute('disabled', working);
-  $('download-backup').toggleAttribute('disabled', busy || !journal);
+  $('download-backup').toggleAttribute('disabled', busy || !journal || journal.backupZip === false);
   $('download-journal').toggleAttribute('disabled', busy || !journal);
   $('download-receipt-menu').toggleAttribute('disabled', busy || !journal?.verified.length);
   if (remembered) $('reload-folder-label').textContent = `Reler “${remembered.name}”`;
@@ -392,11 +404,36 @@ document.querySelector('.operation-tabs')!.addEventListener('keydown', event => 
   const id = key === 'Home' ? 'mode-export' : key === 'End' ? 'mode-import' : current.id === 'mode-export' ? 'mode-import' : 'mode-export';
   $<HTMLButtonElement>(id).focus(); $<HTMLButtonElement>(id).click();
 });
-$('finish').addEventListener('click', () => go(job?.kind === 'send' && job.status !== 'completed' ? 'send' : 'export'));
+$('finish').addEventListener('click', () => {
+  if (job?.kind === 'send' && job.status === 'completed') {finishImport(); return;}
+  go(job?.kind === 'send' ? 'send' : 'export');
+});
+$('leave-review').addEventListener('click', finishImport);
+function finishImport(): void {
+  if (!context || busy || active(job) || settling) return;
+  const target = context;
+  clearTimeout(saving);
+  void run('Encerrando a revisão', async () => {
+    workspace = await updateWorkspace(target, value => {
+      delete value.project; delete value.review; delete value.restore; delete value.update;
+    });
+    plan = undefined; updatePlan = undefined; restoreJournal = undefined; versions = undefined;
+    selected.clear(); scope = 'project'; interruptedReference = false;
+    closeAll();
+    for (const id of ['baseline', 'folder', 'search']) $<HTMLInputElement>(id).value = '';
+    $<HTMLSelectElement>('filter').value = 'changes';
+    $<HTMLDetailsElement>('all-files').open = false;
+    $<HTMLInputElement>('backup-zip').checked = true;
+    $('zip-name').textContent = 'Nenhum ZIP selecionado';
+    go('send');
+  });
+}
+$('backup-zip').addEventListener('change', controls);
 // The editor's own "Ver prévia" link, read at the end of the send.
 function previewUrl(): string | undefined {return job?.result?.kind === 'send' ? job.result.preview : undefined;}
 // --- Workspace and plan -------------------------------------------------------------------------
 async function loadStoreData(): Promise<void> {
+  $<HTMLInputElement>('backup-zip').checked = true;
   if (!context) return;
   workspace = await loadWorkspace(context);
   history = await journalHistory(context);
@@ -1077,6 +1114,7 @@ async function recordSendInFolder(): Promise<void> {
   }
 }
 async function compare(full = false): Promise<void> {
+  $<HTMLInputElement>('backup-zip').checked = true;
   const base = workspace?.baseline, project = workspace?.project;
   if (!base || !project) throw new Error('Carregue a exportação original e a pasta editada.');
   closeSheet('confirm-panel');
@@ -1239,21 +1277,24 @@ $('apply').addEventListener('click', () => {
   const created = rows.filter(r => r.status === 'create').length, images = rows.filter(r => r.status === 'upload').length, texts = rows.length - images;
   $('target-store').textContent = plan.context.storeName;
   $('confirm-counts').textContent = `${list([texts ? `${plural(texts, 'arquivo', 'arquivos')}${created ? ` (${created} ${created === 1 ? 'novo' : 'novos'})` : ''}` : '', images ? plural(images, 'imagem nova', 'imagens novas') : ''])}.`;
+  $('confirm-backup').textContent = $<HTMLInputElement>('backup-zip').checked
+    ? 'Um backup dos textos que vão mudar é guardado e baixado antes.'
+    : 'Backup em ZIP desativado só neste envio. O registro de segurança dos textos será guardado na extensão.';
   openSheet('confirm-panel');
 });
 $('cancel-send').addEventListener('click', () => {closeSheet('confirm-panel'); $('apply').focus();});
 $('confirm-send').addEventListener('click', () => {
   if (!plan) return;
-  const current = plan, chosen = [...selected], sendScope = scope, journalId = restoreJournal?.id;
+  const current = plan, chosen = [...selected], sendScope = scope, journalId = restoreJournal?.id, backupZip = $<HTMLInputElement>('backup-zip').checked;
   // With write access, the send is also recorded in the project folder; refusing changes nothing in the send.
   const folder = projectFolder();
   if (folder) void permitted(folder, true, 'readwrite').catch(() => false);
   closeSheet('confirm-panel');
   void run('Preparando o envio', async () => {
     const id = newId();
-    await put(`jobinput:${id}`, {plan: current, selected: chosen, scope: sendScope, ...(sendScope === 'restore' && journalId ? {journalId} : {})} satisfies SendInput);
+    await put(`jobinput:${id}`, {plan: current, selected: chosen, scope: sendScope, backupZip, ...(sendScope === 'restore' && journalId ? {journalId} : {})} satisfies SendInput);
     // The comparison is used up: another send always starts from a new one.
-    plan = undefined;
+    plan = undefined; $<HTMLInputElement>('backup-zip').checked = true;
     await startJob({id, kind: 'send', scope: sendScope, ...(sendScope === 'restore' && journalId ? {journalId} : {})});
   });
 });
@@ -1268,6 +1309,7 @@ $('open-preview').addEventListener('click', () => {
 // --- History and recovery ---------------------------------------------------------------------------
 function journalInfo(): void {
   $('journal-info').textContent = journal ? `${journal.verified.length + (journal.uploaded?.length || 0)} de ${journal.selected.length} itens conferidos. ${journal.status === 'completed' ? 'Concluído' : 'Interrompido'} em ${dateTime(journal.startedAt)}.${journal.scope === 'restore' ? ' Foi uma restauração.' : ''}` : 'Nenhum envio nesta instalação.';
+  if (journal?.backupZip === false) $('journal-info').textContent += ' Backup em ZIP desativado neste envio; registro de segurança preservado.';
   $('journal-error').hidden = !journal?.error;
   $('journal-error').textContent = journal?.error || '';
 }
@@ -1351,7 +1393,7 @@ if (isDemo) $('demo-local').addEventListener('click', () => void run('Carregando
   sample['templates/home.twig'] += '<!-- Página inicial revisada -->\n';
   sample['assets/styles/global/main.scss'] += 'body { background: white; }\n';
   sample['assets/images/readme.md'] += 'Mudança não suportada\n';
-  sample['templates/new.twig'] = '<p>Novo</p>\n<img src="{{ \'images/demo/nova.png\' | assets_url }}" alt="">\n';
+  sample['templates/new.twig'] = '<p>Novo</p>\n<img src="{{ \'/assets/images/demo/nova.png\' | assets_url }}" alt="">\n';
   const assets: Assets = {...base.assets, 'assets/images/demo/nova.png': base.assets?.['assets/images/example.png'] || new Uint8Array()};
   await adoptProject({baseline: base, local: sample, localAssets: assets}, {name: 'Alterações fictícias', kind: 'demo'});
 }));

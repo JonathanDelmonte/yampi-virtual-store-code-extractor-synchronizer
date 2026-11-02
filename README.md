@@ -6,6 +6,19 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
+## Versão 0.10.1 — compatibilidade antes do envio
+
+Corrige duas diferenças que a prévia local escondia: imagens com caminho incompleto no filtro `assets_url` e componentes com nomes de ícones internos da Yampi. A versão está preparada neste código; o link de download acima continua apontando para a última release publicada.
+
+- **Imagens.** Use `{{ '/assets/images/capa.png' | assets_url }}`. A Yampi concatena o valor à raiz do template: `images/capa.png` gera um endereço quebrado. A comparação bloqueia os literais incompatíveis, inclusive prefixos em concatenações; a prévia local recusa também valores calculados incompatíveis, e `pack` recusa textos alterados com o problema.
+- **Componentes.** Nomes como `IconHeader`, `IconFooter`, `IconPlus` e `IconVideo` pertencem aos ícones da plataforma, carregados depois dos componentes do tema. Eles podem substituir o componente e descartar seu conteúdo. Use nomes próprios. A comparação bloqueia componentes alterados com esses nomes e seus consumidores; a compilação local recusa usos dos nomes reservados. Arquivos antigos sem uso podem ser preservados.
+- **Dependências de imagem.** Caminhos em objetos Twig, propriedades Vue, URLs CSS e tabelas literais de nomes combinadas com `/assets/images/` entram na proteção de dependências. Um texto também espera uma imagem existente alterada que a Yampi não permite substituir.
+- **Planos antigos.** A gravação repete a conferência de compatibilidade antes de qualquer ação, inclusive ao continuar um envio antigo. Corrija a pasta e compare de novo.
+
+**Validação:** os defeitos de URL e de nomes reservados foram confirmados por leitura de uma prévia real em 30/10/2026; uma imagem enviada foi encontrada no caminho completo. As correções da ferramenta são testadas com exemplos e editor fictícios. Nenhuma correção de tema foi enviada à loja real nesta validação. A conferência dos arquivos selecionados, mesmo em 100%, continua sem certificar aparência, animações, configurações do painel ou scripts externos. [Validação](docs/VALIDACAO.md).
+
+Projetos já exportados precisam atualizar suas ferramentas com `node scripts/update-project.mjs <projeto>` (revisão) e `--apply` (aplicação com backup), ou usar uma nova exportação. Atualizar a extensão não muda as ferramentas já copiadas no projeto.
+
 ## Versão 0.10.0
 
 A prévia local passa a abrir as páginas que a vitrine linka. Até a 0.9.1, o download guardava 8 páginas representativas, e o menu, o rodapé, o "Ver tudo" das vitrines, quase todos os produtos e o voltar da página de produto davam "Rota não capturada nesta prévia".
@@ -198,8 +211,13 @@ Preços refletem a data da captura. Carrinho, checkout, pagamentos, formulários
 1. No editor de código da Yampi, clique no ícone e escolha **Importar projeto**.
 2. Escolha a pasta do projeto, ou solte-a no painel. Da segunda vez em diante, **Reler “pasta”** faz isso com um clique. Em **Usar um ZIP de retorno** vale o ZIP de `npm run pack`. A comparação começa sozinha.
 3. Confira o resumo: alterados, novos e imagens. O que precisa de você aparece em **Precisa da sua atenção**, com a ação ao lado; **Comparar e escolher** mostra as linhas que mudaram. Se um arquivo usa outro que mudou só na loja, **Ver a mudança** mostra o que mudou; **Usar no projeto** grava a versão da loja nesse arquivo da sua pasta e compara de novo (ou **Copiar**, para colar à mão). **Comparar de novo** relê a pasta.
-4. Clique em **Enviar N itens** e confirme. O backup é baixado antes da primeira mudança. Pode fechar o painel ou trocar de aba: o envio continua, e o ícone mostra o progresso.
-5. No fim, **Abrir a prévia** abre o rascunho da Yampi. Se estiver tudo certo, publique na Yampi. Se não, **Desfazer este envio**.
+4. **Backup da loja em ZIP** vem ligado a cada importação. Você pode desligá-lo só para aquele envio; a confirmação mostra essa escolha. O ZIP contém os textos existentes que serão substituídos, não uma cópia completa da loja. O registro interno com os textos anteriores continua obrigatório para recuperação, inclusive sem ZIP.
+5. Clique em **Enviar N itens** e confirme. Com o backup ligado, o ZIP é guardado e seu download é confirmado antes da primeira mudança. Pode fechar o painel ou trocar de aba: o envio continua, e o ícone mostra o progresso.
+6. No fim, **Abrir a prévia** abre o rascunho da Yampi. Se estiver tudo certo, publique na Yampi. Se não, **Desfazer este envio**.
+
+Sem arquivos para enviar ou sem seleção, **Concluir** aparece como botão principal. Durante a revisão com itens selecionados, **Cancelar** fica abaixo de **Enviar**. Ambos encerram a revisão e voltam à tela inicial de **Importar projeto**, sem pasta ou ZIP carregado, para escolher outro projeto. O histórico, os backups e a referência original são preservados; o backup em ZIP volta ligado. Trocar de aba preserva a comparação enquanto ela não for encerrada. **Trocar pasta**, **Comparar de novo**, **Atualizar da loja** e **Versões** são ações secundárias. Retomar um envio interrompido preserva a escolha confirmada daquele envio.
+
+O botão **Concluir** no resultado de um envio também retorna à tela inicial de **Importar projeto**. A saída da revisão e o envio com ZIP desligado foram validados apenas no editor fictício, incluindo a retomada e a restauração. Não foram testados em loja real.
 
 | Situação | Resultado |
 |---|---|

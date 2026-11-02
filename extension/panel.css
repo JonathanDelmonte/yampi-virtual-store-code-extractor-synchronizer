@@ -115,6 +115,13 @@ body[data-connection="error"] .light { background: var(--danger); }
 /* --- Buttons ---------------------------------------------------------------------------------- */
 .button { display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 10px 16px; border: 0; border-radius: 12px; background: transparent; box-shadow: inset 0 0 0 1px var(--rule-strong); color: var(--ink); font-size: 14.5px; font-weight: 650; line-height: 1.2; text-align: center; cursor: pointer; transition: background-color .15s var(--ease), transform .12s var(--ease); }
 .button:active:enabled { transform: scale(.985); }
+.secondary-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.secondary-actions .button.secondary { flex: 1 1 auto; min-height: 40px; padding: 9px 12px; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--rule); color: var(--ink-2); font-size: 13px; font-weight: 550; }
+.secondary-actions .button.secondary:disabled { color: var(--faint); }
+#review-actions .dock-actions { flex-direction: column; }
+#review-actions .button { width: 100%; }
+#review-actions .button.primary { min-height: 50px; }
+#backup-option:has(input:not(:checked)) { box-shadow: 0 0 0 1px var(--rule-strong); }
 .button:disabled { cursor: not-allowed; color: var(--faint); }
 .button.primary { background: var(--signal); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), inset 0 0 0 .5px rgba(0, 60, 70, .25); color: var(--on-signal); }
 .button.primary:disabled { background: var(--sunken); box-shadow: none; color: var(--faint); }
@@ -127,6 +134,7 @@ body[data-connection="error"] .light { background: var(--danger); }
 @media (hover: hover) and (pointer: fine) {
   .button:hover:enabled { background: rgba(17, 18, 19, .04); }
   .button.primary:hover:enabled { background: var(--signal-hover); }
+  .secondary-actions .button.secondary:hover:enabled { background: var(--sunken); box-shadow: inset 0 0 0 1px var(--rule-strong); }
   .link:hover:enabled { text-decoration-color: currentColor; }
   .bar-button:hover { background: rgba(17, 18, 19, .06); }
   .tile:hover:enabled { box-shadow: 0 0 0 1px var(--rule-strong); }
@@ -207,7 +215,7 @@ body[data-tone="error"] #status { color: var(--danger); }
 .notice { margin: 0 0 18px; padding: 12px 14px; border-radius: 12px; background: rgba(178, 40, 31, .07); color: var(--ink-2); font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .notice strong { display: block; color: var(--danger); }
 @media (prefers-color-scheme: dark) { .notice { background: rgba(240, 125, 112, .10); } }
-.view { display: grid; gap: 14px; }
+.view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .aside { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .aside:empty { display: none; }
 .safe { margin: 0; padding-left: 10px; border-left: 2px solid var(--ok); color: var(--ink-2); font-size: 13px; line-height: 1.5; }

@@ -77,6 +77,7 @@ Um arquivo enviado não pode depender de um arquivo que não existirá na loja. 
 - Uma dependência que não existirá bloqueia quem a usa (`blocked-dependency`, com os dois nomes).
 - Um texto que só a loja mudou (`remote-only`) ou que está em conflito também bloqueia os arquivos alterados que o usam: eles foram escritos contra a versão do projeto. O painel diz qual arquivo mudou e onde, e mostra a mudança. A versão da loja vai para o projeto só quando o usuário pede: **Usar no projeto** grava na pasta lembrada, ou **Copiar** para colar à mão. Para trazer todas as mudanças da loja de uma vez, **Atualizar da loja** (veja "Atualização do projeto").
 - Arquivos alterados que se usam vão juntos; um envio parcial é recusado antes de gravar.
+- Desde a 0.10.1, `assets_url` exige valores a partir de `/assets/`, sem correção silenciosa na prévia local. Componentes alterados com nomes dos ícones internos da Yampi ficam bloqueados, assim como seus consumidores alterados. A gravação repete essa conferência para não continuar planos antigos incompatíveis. CSS, propriedades Vue e tabelas literais de imagens também entram nas dependências; expressões arbitrárias continuam sem execução no analisador.
 
 ## Escrita na pasta do projeto
 
@@ -197,7 +198,7 @@ Desde a 0.8.0, imagens novas só entram no envio quando o usuário liga **Enviar
 1. Somente linhas `update`, `create` e `upload` da comparação confirmada, sem duplicatas e com os arquivos acoplados juntos. Texto novo que a Yampi não permite criar bloqueia todo o envio.
 2. Confirmação explícita, com o nome da loja à vista.
 3. Os textos existentes selecionados são relidos na loja (pelo servidor da Yampi, ou pelo editor recarregado quando o servidor não responde) e precisam estar como na comparação, e os caminhos novos precisam continuar livres. Qualquer diferença interrompe antes de gravar.
-4. O registro (`prepared`) e o backup dos textos existentes são gravados no IndexedDB, e o download do backup é confirmado. Sem os dois, nada é gravado.
+4. O registro (`prepared`), com os textos anteriores e posteriores, é sempre persistido no IndexedDB antes de qualquer gravação. **Backup da loja em ZIP** vem ligado por padrão em cada importação: quando ligado, o ZIP dos textos existentes selecionados também é persistido e seu download é confirmado antes de gravar. O usuário pode desligar só o ZIP para aquele envio; a confirmação e o histórico mostram a escolha, sem remover o registro de segurança nem as proteções de conflito e restauração. Envios antigos sem essa opção continuam exigindo o ZIP.
 5. Cada etapa termina conferida antes da seguinte, nesta ordem:
    1. criar os textos novos pelo **Adicionar arquivo**, cada um listado pelo editor antes do próximo; depois, uma recarga e a conferência de que todos existem com o conteúdo inicial da Yampi;
    2. enviar as imagens pelo envio de imagens do editor, do mesmo jeito; depois, uma recarga e a conferência dos bytes de cada uma;
@@ -213,7 +214,7 @@ Um item criado ou enviado e ainda não conferido fica em `issued`, até a confer
 
 **Continuar de onde parou** aparece para o último envio não concluído da loja que guardou o plano confirmado (`sendplan:<registro>`). Usa a mesma seleção; outra é recusada.
 
-- Se o registro não mostra nenhuma alteração (nada conferido, criado, enviado, em `issued` ou em `pending`), o envio recomeça do passo 3, com nova conferência e novo backup, no mesmo registro. Um backup que falhou também termina como `stopped`, por isso a decisão vem do que foi feito, não do estado.
+- Se o registro não mostra nenhuma alteração (nada conferido, criado, enviado, em `issued` ou em `pending`), o envio recomeça do passo 3, com nova conferência e novo backup quando habilitado, no mesmo registro. A retomada preserva a escolha de ZIP confirmada para o envio. Um backup que falhou também termina como `stopped`, por isso a decisão vem do que foi feito, não do estado.
 - Senão, continua. O que já foi conferido não é refeito. Um texto novo ou uma imagem que já está na loja é conferido no seu grupo, não criado de novo; um texto novo já preenchido pela execução anterior conta como criado. Antes de salvar cada texto restante, a versão da loja é lida: igual à do projeto, conta como conferido; igual à de antes do envio, é salvo; diferente das duas, o envio para sem gravar.
 - Cada continuação é anotada em `resumedAt`. A conferência final relê todos os textos, inclusive os da execução anterior.
 

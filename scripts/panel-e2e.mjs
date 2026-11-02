@@ -32,8 +32,23 @@ try {
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message)); page.setDefaultTimeout(45000);
   const shot = name => page.screenshot({path: path.join(evidence, name + '.png'), fullPage: true, animations: 'disabled', style: '#demo-notice, #fixture { display: none !important; }'});
   const headerShot = name => page.locator('#topbar').screenshot({path: path.join(evidence, name + '.png'), animations: 'disabled'});
+  async function importStart() {
+    await page.waitForFunction(() => document.body.dataset.view === 'pick');
+    assert.equal(await page.locator('#mode-import').getAttribute('aria-selected'), 'true');
+    assert.equal(await page.locator('#export-section').isVisible(), false);
+    assert.equal(await page.locator('#dropzone').isVisible(), true);
+    assert.equal(await page.locator('#project-card').isVisible(), false);
+    assert.equal(await page.locator('#pick-folder').textContent(), 'Escolher a pasta');
+    assert.equal(await page.locator('#reload-folder').isVisible(), false);
+    assert.equal(await page.locator('#zip-name').textContent(), 'Nenhum ZIP selecionado');
+    assert.equal(await page.locator('#backup-zip').isChecked(), true);
+  }
   async function fits(label) {
     const layout = await page.evaluate(() => ({viewport: innerWidth, document: document.documentElement.scrollWidth}));
+    if (layout.document > layout.viewport) {
+      const overflow = await page.locator('body *').evaluateAll(nodes => nodes.filter(node => node.getBoundingClientRect().right > innerWidth).map(node => ({tag: node.tagName, id: node.id, class: node.className, right: node.getBoundingClientRect().right})).slice(0, 20));
+      console.log('Elementos com excesso de largura:', overflow);
+    }
     assert.ok(layout.document <= layout.viewport, label + ': rolagem lateral ' + JSON.stringify(layout));
   }
   await page.goto(origin + '/demo.html?demo=1');
@@ -147,9 +162,47 @@ try {
   assert.match(await page.locator('#summary').textContent(), /1 item para enviar/);
   assert.equal(await page.locator('#zip-name').textContent(), 'retorno-yampi-ficticio.zip');
   assert.equal(await page.locator('#review #apply').count(), 1);
+  assert.equal(await page.locator('#backup-zip').isChecked(), true);
+  await page.locator('#backup-zip').uncheck();
+  await page.locator('#apply').click();
+  assert.match(await page.locator('#confirm-backup').textContent(), /desativado só neste envio/);
+  await page.locator('#cancel-send').click();
+  assert.equal(await page.locator('#backup-zip').isChecked(), false, 'Voltar da confirmação preserva a escolha desta importação.');
   await page.locator('#all-files > summary').click();
   await page.locator('#rows .file-row').first().waitFor();
   assert.match(await page.locator('#rows').textContent(), /head.twig/);
+  await page.locator('#select-none').click();
+  assert.equal(await page.locator('#apply').isVisible(), false, 'Sem seleção, não exibe um botão de envio desativado.');
+  assert.equal(await page.locator('#leave-review').getAttribute('class'), 'button primary');
+  assert.equal(await page.locator('#leave-review').textContent(), 'Concluir');
+  assert.equal(await page.locator('#backup-option').isVisible(), false);
+  await shot('sem-selecao-dark');
+  await page.locator('#leave-review').click();
+  await importStart();
+  await shot('importacao-reiniciada-dark');
+  // The ended review must stay cleared when the panel reopens, even after a pending selection save.
+  await page.reload();
+  await page.waitForFunction(() => document.body.dataset.view === 'export');
+  await page.locator('#mode-import').click(); await importStart();
+  await page.locator('#baseline').setInputFiles(returning);
+  await page.waitForFunction(() => document.body.dataset.view === 'review' && !document.querySelector('#apply').disabled);
+  assert.equal(await page.locator('#leave-review').textContent(), 'Cancelar');
+  assert.equal(await page.locator('#leave-review').getAttribute('class'), 'button');
+  await page.locator('#backup-zip').uncheck();
+  await page.locator('#leave-review').click(); await importStart();
+  await page.locator('#baseline').setInputFiles(returning);
+  await page.waitForFunction(() => document.body.dataset.view === 'review' && !document.querySelector('#apply').disabled);
+  assert.equal(await page.locator('#backup-zip').isChecked(), true);
+  await page.locator('#backup-zip').uncheck();
+  await page.locator('#compare').click();
+  await page.waitForFunction(() => document.body.dataset.view === 'review');
+  assert.equal(await page.locator('#backup-zip').isChecked(), true, 'Uma nova comparação reativa o backup.');
+  for (const colorScheme of ['dark', 'light']) {
+    await page.emulateMedia({colorScheme});
+    for (const width of [300, 360, 560]) {await page.setViewportSize({width, height: 900}); await fits('revisão ' + colorScheme + ' ' + width);}
+    await page.setViewportSize({width: 360, height: 900}); await shot('revisao-' + colorScheme);
+  }
+  await page.emulateMedia({colorScheme: 'dark'});
   await shot('revisao-dark');
   await page.getByRole('tab', {name: 'Baixar arquivos'}).click();
   await page.getByRole('tab', {name: 'Importar projeto'}).click();
@@ -215,9 +268,40 @@ try {
   await page.waitForFunction(() => document.body.dataset.view === 'review');
   const operations = await page.locator('#fixture-frame').evaluate(frame => frame.contentWindow.fictitiousOperations);
   assert.deepEqual(operations, {dispatch: 0, save: 0, forbidden: 0, add: 0}, 'Navegação, exportação e comparação não podem gravar.');
+  // The optional ZIP choice must reach the runner, not just change the confirmation text.
+  if (await page.locator('#menu-sheet').isVisible()) await page.locator('#close-menu').click();
+  const unexpectedDownloads = []; page.on('download', download => unexpectedDownloads.push(download.suggestedFilename()));
+  await page.locator('#backup-zip').uncheck();
+  await page.locator('#apply').click(); await page.locator('#confirm-send').click();
+  await page.waitForFunction(() => document.body.dataset.view === 'result' && document.querySelector('#status').textContent === 'Envio concluído', null, {timeout: 30000}).catch(async error => {
+    await shot('erro-envio'); console.log(await page.locator('#operation-panel').innerText()); throw error;
+  });
+  assert.equal(await page.locator('#done-saved').textContent(), '1');
+  const savedText = await page.locator('#fixture-frame').evaluate(frame => JSON.parse(frame.contentWindow.sessionStorage.getItem('fixture-files'))['elements/head.twig']);
+  assert.equal(savedText, new TextDecoder().decode(entries['tema/elements/head.twig']));
+  assert.deepEqual(unexpectedDownloads, [], 'Sem ZIP, nenhum backup é baixado.');
+  await page.locator('#menu').click();
+  await page.locator('#history').click(); await page.keyboard.press('Home'); await page.keyboard.press('Enter');
+  assert.match(await page.locator('#journal-info').textContent(), /Backup em ZIP desativado neste envio/);
+  assert.equal(await page.locator('#download-backup').isDisabled(), true);
+  await page.locator('#close-menu').click();
+  await page.locator('#finish').click(); await importStart();
+  await page.locator('#baseline').setInputFiles(returning);
+  await page.waitForFunction(() => document.body.dataset.view === 'review' && document.querySelector('#status').textContent === 'Nada para enviar');
+  assert.equal(await page.locator('#backup-zip').isChecked(), true, 'Um novo ZIP importado reativa o backup.');
+  assert.equal(await page.locator('#leave-review').getAttribute('class'), 'button primary');
+  await shot('sem-alteracoes-dark');
+  await page.locator('#leave-review').click();
+  await importStart();
+  await page.locator('#menu').click();
+  assert.match(await page.locator('#journal-info').textContent(), /Backup em ZIP desativado neste envio/, 'Encerrar a revisão preserva o histórico do envio.');
+  assert.equal(await page.locator('#restore').isDisabled(), false);
+  await page.locator('#close-menu').click();
+  const finalOperations = await page.locator('#fixture-frame').evaluate(frame => frame.contentWindow.fictitiousOperations);
+  assert.equal(finalOperations.forbidden, 0); assert.equal(finalOperations.add, 0);
   assert.deepEqual(foreign, []); assert.deepEqual(errors, []);
-  await writeFile(path.join(evidence, 'report.json'), JSON.stringify({fictionalOnly: true, viewports, connectionHeader: true, longStoreNames: true, keyboardTabs: true, zipImported: true, reviewPreserved: true, inlineActions: true, historyPicker: true, historyStoreIsolation: true, selectedBackupCorrect: true, mutations: 0, errors}, null, 2) + '\n');
-  console.log('Painel aprovado: abas, ZIP, comparação, progresso e temas; histórico estilizado com teclado, Escape e clique fora; menu e seleção preservados; backup correto do envio escolhido; isolamento de lojas. Zero gravações ou acessos a loja real.');
+  await writeFile(path.join(evidence, 'report.json'), JSON.stringify({fictionalOnly: true, viewports, connectionHeader: true, longStoreNames: true, keyboardTabs: true, zipImported: true, reviewPreserved: true, inlineActions: true, historyPicker: true, historyStoreIsolation: true, selectedBackupCorrect: true, backupZipOptional: true, backupDefaultReset: true, emptyReviewExit: true, fictionalSaves: 1, errors}, null, 2) + '\n');
+  console.log('Painel aprovado: navegação, temas, revisão vazia, confirmação e envio sem ZIP, backup reativado por importação, histórico e isolamento. Uma gravação no editor fictício; nenhum acesso a loja real.');
 } finally {
   await browser.close(); await new Promise(resolve => server.close(resolve));
   assert.ok(temporary.startsWith(path.resolve(os.tmpdir()) + path.sep + 'yampi-panel-fictional-'));
