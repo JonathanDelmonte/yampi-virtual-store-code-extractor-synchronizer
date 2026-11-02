@@ -33,7 +33,7 @@ export async function capture(adapter: ReadAdapter, hooks: CaptureHooks = {}): P
   const paths = wanted ? inventory.filter(path => wanted.has(path)) : inventory;
   hooks.progress?.({done: 1, total: 1, path: '', phase: listing, step: 'inventory', next: {step: 'read', total: paths.length}});
   const texts = new Map<string, string>(), images = new Map<string, Uint8Array>();
-  let total = 0, phase = 'Lendo arquivos', label: string | undefined;
+  let total = 0, phase = 'Lendo arquivos', label: string | undefined, pace: Progress['pace'];
   const has = (path: string) => texts.has(path) || images.has(path);
   const keep = (path: string, value: string | Uint8Array) => {
     if (typeof value === 'string') {
@@ -42,8 +42,8 @@ export async function capture(adapter: ReadAdapter, hooks: CaptureHooks = {}): P
       texts.set(path, value); total += size;
     } else {images.set(path, value); total += value.length;}
     if (total > MAX_TOTAL_BYTES) throw new Error('O tema ultrapassa o limite de 32 MiB.');
-    hooks.progress?.({done: texts.size + images.size, total: paths.length, path, phase, step: 'read', ...(label ? {label} : {})});
-    label = undefined;
+    hooks.progress?.({done: texts.size + images.size, total: paths.length, path, phase, step: 'read', ...(label ? {label} : {}), ...(pace ? {pace} : {})});
+    label = undefined; pace = undefined;
   };
   const throughEditor = async (path: string): Promise<string | Uint8Array> => {
     if (!imagePath(path)) return adapter.read(path);
@@ -60,7 +60,7 @@ export async function capture(adapter: ReadAdapter, hooks: CaptureHooks = {}): P
     hooks.notice?.(`${text} (${reason(error)}). ${fast ? 'O restante' : 'Tudo'} será lido pelo editor, arquivo por arquivo.`, fast ? 'warn' : 'info');
     store = undefined;
     // Nothing came straight from the server: the step keeps its usual wording.
-    if (!fast) {phase = 'Lendo arquivos'; label = undefined;}
+    if (!fast) {phase = 'Lendo arquivos'; label = undefined; pace = 'editor';}
   };
   if (direct && (candidates.length >= DIRECT_MIN || hooks.serverOnly && candidates.length)) {
     try {store = opened = await direct.open();} catch (error) {giveUp(error, 'Leitura direta indisponível');}
@@ -86,7 +86,7 @@ export async function capture(adapter: ReadAdapter, hooks: CaptureHooks = {}): P
   if (pending.length) {
     if (hooks.serverOnly) hooks.notice?.('Arquivos lidos direto do servidor da Yampi, sem recarregar o editor.', 'ok');
     else hooks.notice?.(`Leitura direta conferida com o editor em ${confirmed.size} ${confirmed.size === 1 ? 'tipo de arquivo' : 'tipos de arquivo'}. O restante vem do servidor da Yampi, vários de uma vez.`, 'ok');
-    phase = 'Lendo arquivos direto da Yampi'; label = 'Ler os arquivos direto da Yampi';
+    phase = 'Lendo arquivos direto da Yampi'; label = 'Ler os arquivos direto da Yampi'; pace = 'server';
   }
   while (store && pending.length) {
     cancelled();
@@ -105,7 +105,7 @@ export async function capture(adapter: ReadAdapter, hooks: CaptureHooks = {}): P
   }
   // Through the editor, file by file: everything without the direct reading, or what it left.
   const remaining = paths.filter(path => !has(path));
-  if (fast && remaining.length) {phase = 'Lendo arquivos pelo editor'; label = 'Ler os arquivos pelo editor';}
+  if (fast && remaining.length) {phase = 'Lendo arquivos pelo editor'; label = 'Ler os arquivos pelo editor'; pace = 'editor';}
   for (const [index, path] of remaining.entries()) {
     cancelled();
     // The editor bridge checks the store on every command; this also covers other adapters.

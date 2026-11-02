@@ -61,7 +61,9 @@ export type ReadAdapter = Pick<Adapter, 'context' | 'inventory' | 'read' | 'read
 // step: a stable id for the phase (the label in phase can change with the wording).
 // next: the size of the following step, known now (the file list sets the number of reads), so
 // the bar measures the whole job from the start. label: new wording for the step.
-export interface Progress {done: number; total: number; path: string; phase: string; step?: string; next?: {step: string; total: number}; label?: string}
+// pace: how the step's items are being read (straight from the Yampi server or through the editor),
+// which changes how long each one takes.
+export interface Progress {done: number; total: number; path: string; phase: string; step?: string; next?: {step: string; total: number}; label?: string; pace?: 'server' | 'editor'}
 export interface Journal {
   version: 1; id: string; context: Context; startedAt: string;
   status: 'prepared' | 'running' | 'completed' | 'stopped';

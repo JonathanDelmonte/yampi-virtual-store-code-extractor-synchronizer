@@ -20,6 +20,10 @@ Uma linha por armadilha; o detalhe fica no documento indicado.
 - A referência da pasta (manifesto + `baseline/`) muda sempre junto, com `referencia-pendente.json` gravado antes; o leitor aceita os dois estados enquanto a marcação existir, mas as ferramentas locais não a conhecem. → `docs/SPEC.md`, "Atualização do projeto".
 - Texto com marcações de conflito nunca vai para a loja, e uma nova atualização não o junta de novo (`marked`) nem avança a referência dele. → `docs/SPEC.md`, "Atualização do projeto".
 - A barra só mostra 100% quando todas as etapas terminaram; etapas que recomeçam reportam a contagem pelo máximo já visto. → `src/core/progress.ts`.
+- Etapa que só descobre o tamanho ao começar precisa de `expect` em `PHASES`: sem ele, as anteriores enchem a barra e ela fica em 99% até o fim (0.10.0, 47 de 271 produtos). → `src/core/progress.ts`.
+- Campo novo em `JobRequest` precisa passar por `validRequest` no worker, ou não chega à execução: até a 0.10.0, `previewOnly` e `links` ficavam pelo caminho. → `src/browser/background.ts`.
+- A conferência da loja depois de um GET público tem de começar depois dele; uma conferência serve a todas as leituras que esperam. → `src/browser/background.ts`, `storeLook`.
+- O Playwright mantém visível e acordada toda página a que está conectado: para testar a aba do editor em segundo plano, ele se desconecta antes. → `scripts/background-e2e.mjs`.
 - O download pede no clique a vitrine e as origens comuns de imagens e fontes; origem já permitida no Chrome não gera pergunta. → `src/jobs/engine.ts`, `exportTheme`.
 - Versões guardam só textos, cada um uma vez pelo SHA-256; imagens nunca entram. → `docs/SPEC.md`, "Versões".
 - Reescrever a referência mantém a versão do manifesto da pasta: ferramentas exportadas antes da versão 3 só aceitam 1 e 2. → `docs/SPEC.md`, "Atualização do projeto".

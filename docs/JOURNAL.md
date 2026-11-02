@@ -216,3 +216,26 @@ Decisões:
 Não feito: os scripts de referência também gravavam, para cada produto, uma leitura `catalog/products/<slug>` montada com a página. Não foi reproduzido, porque seria uma resposta da API inventada a partir de outra fonte. As seções que pedem um produto pelo slug continuam com as leituras planejadas pela captura.
 
 Ainda sem validação real: nenhuma loja real foi acessada. O formato das páginas de busca, promoção e vitrine `/l` segue o descrito pelo proprietário e foi reproduzido na loja fictícia.
+
+## 02/11/2026 — Barra parada em 99%, download lento e aba em segundo plano (0.10.1)
+
+Relato do proprietário ao baixar uma loja real com a vitrine: a barra mostrava 99% com **Páginas dos produtos: 47 de 271**, **Preparar o ZIP** e **Baixar o ZIP** ainda pela frente, e o download demorava muito. Pediu também a garantia de que a extensão continue funcionando ao trocar de aba ou de janela.
+
+Causas:
+- As etapas que só descobrem o tamanho ao começar (páginas da loja, páginas dos produtos, recursos) não tinham espaço na barra. Ela enchia com o tema, parava em 99% (regra da 0.9.1) e, quando as páginas apareciam, o reancoramento dava a elas só o espaço entre 99% e 100%.
+- Os pesos eram de antes da leitura direta: 264 arquivos lidos em segundos valiam mais que 271 páginas de produto.
+- Cada leitura pública pedia duas conferências da loja à aba do editor, uma antes e outra depois do GET: mais de mil execuções de script na aba num download grande, mais lentas com a aba em segundo plano.
+- 4 leituras de cada vez, e cada página de produto guardava o documento HTML analisado até o fim da rodada.
+- O worker descartava `previewOnly` e `links` do pedido: **Baixar a prévia nova** lia o tema inteiro de novo, e a comparação não conferia os links.
+
+Decisões:
+- Tamanho esperado por etapa (`expect`), pesos em segundos por item e troca de peso quando a leitura passa a ser direta. A barra continua sem voltar e sem 100% antes do fim.
+- **Capturar a vitrine** passa a contar as páginas de amostra; as leituras públicas entram na contagem de **Baixar estilos, fontes e imagens**.
+- Conferência da loja dividida entre as leituras: a de antes vale por 1 s, a de depois começa sempre depois do GET.
+- 6 leituras de cada vez nas páginas e nos recursos, sem guardar o documento analisado.
+- Trava (Web Lock) na página do editor durante a operação, para o Chrome não congelar a aba.
+- `validRequest` passa a conferir e repassar `previewOnly` e `links`.
+
+Não feito: a leitura pelo editor (arquivos JSON, amostras, envio) continua mais lenta com a aba oculta, porque o navegador desacelera os temporizadores da página e a espera de estabilidade depende deles. Mudar essa espera mexeria na integridade da cópia sem validação no editor real.
+
+Ainda sem validação real: o tempo numa loja real, o efeito da trava no congelamento de abas em cada configuração do Chrome (economia de energia, memória) e a conferência dos links numa loja real.

@@ -21,7 +21,13 @@ const STORE_KINDS = new Set<PageKind>(['category', 'pages', 'promotion']);
 const NETWORK = /Failed to fetch|NetworkError|network|timed? ?out|timeout|ECONNRESET|socket|Sem resposta|Receiving end|Could not establish/i;
 // A store change stops the whole export, as everywhere else.
 const FATAL = /loja (?:de destino )?mudou|Cancelad/i;
-interface Outcome {route: Route; read?: ReadPage; error?: string; status?: number; redirected?: boolean}
+// The page as kept until its round ends: without the parsed document, which a few hundred
+// product pages would otherwise hold in memory together.
+type Kept = Omit<ReadPage, 'doc'>;
+interface Outcome {route: Route; read?: Kept; error?: string; status?: number; redirected?: boolean}
+// Pages read at once, as many as a browser opens to one host; a store that asks for calm (429,
+// 503) slows every read down through the pacer.
+const PARALLEL = 6;
 const bytes = (value: unknown) => value === undefined ? 0 : new TextEncoder().encode(JSON.stringify(value)).length;
 const path = (url: string) => {const parsed = new URL(url); return parsed.pathname + parsed.search;};
 const empty = (): StageSummary => ({found: 0, captured: 0, byKind: {}, left: 0, skipped: []});
@@ -55,7 +61,7 @@ export async function expandPreview(visual: PreviewBundle, files: Files, fetcher
   async function read(route: Route, expected: PageKind): Promise<Outcome> {
     for (let attempt = 1; ; attempt++) {
       check(); await pacer.turn();
-      try {const page = await readPage(route.url, fetcher, limits, expected, options.editorData); pacer.ok(); return {route, read: page};}
+      try {const {doc: _doc, ...page} = await readPage(route.url, fetcher, limits, expected, options.editorData); pacer.ok(); return {route, read: page};}
       catch (error) {
         const message = error instanceof Error ? error.message : String(error), failure = fetchFailure(message);
         if (FATAL.test(message)) throw error;
@@ -83,7 +89,7 @@ export async function expandPreview(visual: PreviewBundle, files: Files, fetcher
     skip(stage, route, reason, outcome.error || reason);
   };
   let next = bundle.pages.reduce((max, page) => Math.max(max, Number(page.id.slice(5)) + 1), 0);
-  const accept = (stage: PageStage, route: Route, page: ReadPage): boolean => {
+  const accept = (stage: PageStage, route: Route, page: Kept): boolean => {
     const count = bundle.pages.filter(item => item.stage === stage).length, budget = cost(page.raw);
     if (count >= (stage === 'store' ? limits.storePages : limits.productPages) || spent[stage] + budget.total > (stage === 'store' ? limits.storeBytes : limits.productBytes)) {skip(stage, route, LIMIT); return false;}
     budget.commit(); spent[stage] += budget.total;
@@ -102,7 +108,7 @@ export async function expandPreview(visual: PreviewBundle, files: Files, fetcher
       const outcome = await read(route, stage === 'product' ? 'product' : 'category');
       progress[stage].done++; options.onProgress?.(stage, progress[stage].done, progress[stage].total);
       return outcome;
-    });
+    }, PARALLEL);
     check();
     // Pages enter in the order of the links, whatever order the reads finished in.
     for (const outcome of outcomes) {

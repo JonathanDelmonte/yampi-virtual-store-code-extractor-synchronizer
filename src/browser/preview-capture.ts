@@ -184,7 +184,7 @@ function applyEditor(raw: RawPage, editor: Data | undefined): RawPage {
   const sections = (Array.isArray(raw.themeConfig?.sections) ? raw.themeConfig!.sections : []).map(s => plain(s) && edges.has(String(s.section_alias)) ? edges.get(String(s.section_alias)) : s);
   return {...raw, themeConfig: {...raw.themeConfig, theme: config.theme, sections} as Data};
 }
-export async function preparePreview(snapshot: Snapshot, fetcher: PreviewFetch, options: {limits?: Partial<PreviewLimits>; editorData?: Data; enabled?: boolean; signal?: AbortSignal} = {}): Promise<PreviewDraft> {
+export async function preparePreview(snapshot: Snapshot, fetcher: PreviewFetch, options: {limits?: Partial<PreviewLimits>; editorData?: Data; enabled?: boolean; signal?: AbortSignal; onProgress?: (done: number, total: number) => void} = {}): Promise<PreviewDraft> {
   const paths = Object.keys(snapshot.files), themeAssets = themeAssetPaths(snapshot.files);
   const bundle = demonstration(snapshot.context, options.enabled === false ? 'Captura visual desativada ou sem permissão.' : 'A vitrine não expõe contexto estático compatível.', paths);
   bundle.limits = previewLimits(options.limits);
@@ -200,7 +200,7 @@ export async function preparePreview(snapshot: Snapshot, fetcher: PreviewFetch, 
     if (options.signal?.aborted) throw new Error('Captura de prévia cancelada.');
     fetched.add(url);
     try {
-      const read = await readPage(url, fetcher, bundle.limits, expected, options.editorData), {raw, doc} = read;
+      const read = await readPage(url, fetcher, bundle.limits, expected, options.editorData).finally(() => options.onProgress?.(fetched.size, Math.max(bundle.limits.pages + 1, fetched.size))), {raw, doc} = read;
       if (read.editor) bundle.source = {kind: 'editor', origin: snapshot.context.previewOrigin, association: 'same-editor'};
       const found = candidates(raw, url);
       for (const kind of ['category', 'product', 'pages', 'promotion'] as const) remember(kind, found[kind]);
@@ -286,6 +286,9 @@ export function mergeIssues(issues: PreviewIssue[]): PreviewIssue[] {
   return output.map(({count, ...issue}) => count > 1 ? {...issue, reason: `${issue.reason} (${count} páginas)`} : issue);
 }
 const unauthorized = 'Origem não autorizada para leitura.';
+// Public reads at once (CSS, fonts and images from CDNs, the store's public API): as many as a
+// browser opens to one host. Results are still taken in the order they were asked.
+const PARALLEL = 6;
 export function unauthorizedOrigins(bundle: PreviewBundle): string[] {
   return [...new Set(bundle.issues.filter(i => ['asset-unavailable', 'api-unavailable'].includes(i.code) && i.reason === unauthorized && i.resource).map(i => new URL(i.resource!).origin))];
 }
@@ -297,11 +300,13 @@ export async function finishPreview(draft: PreviewDraft, fetcher: PreviewFetch, 
   bundle.resources = []; bundle.assets = {}; bundle.aliases = {}; bundle.api = []; bundle.platform = {...bundle.platform, fontSheets: [], themeSheets: []};
   const get = async (url: string) => {if (!allowedOrigins.includes(new URL(url).origin)) throw new Error(unauthorized); const cached = cache.get(url); if (cached) return cached; const response = await fetcher(url); return response;};
   const removed = new Set(bundle.removedKeys), candidates = new Map(draft.resources.map(c => [c.url, c]));
-  let apiBytes = 0, done = 0;
+  let apiBytes = 0, done = 0, apiDone = 0;
+  // The step counts the public reads and then the resources, of about how many are left.
+  const tell = (ahead: number) => onProgress?.(apiDone + done, draft.api.length + Math.min(bundle.limits.resources, done + ahead));
   // Public reads first: their bodies reveal banner and product images.
-  for (let i = 0; i < draft.api.length; i += 4) {
+  for (let i = 0; i < draft.api.length; i += PARALLEL) {
     check();
-    const batch = draft.api.slice(i, i + 4), results = await Promise.all(batch.map(async request => {try {return {response: await get(request.url)};} catch (error) {return {error};}}));
+    const batch = draft.api.slice(i, i + PARALLEL), results = await Promise.all(batch.map(async request => {try {return {response: await get(request.url)};} catch (error) {return {error};}}));
     check();
     batch.forEach((request, index) => {
       try {
@@ -317,6 +322,7 @@ export async function finishPreview(draft: PreviewDraft, fetcher: PreviewFetch, 
         for (const item of found.values()) if (!candidates.has(item.url)) candidates.set(item.url, {...item, source: 'api', priority: /banner/.test(request.path) ? 3 : 4});
       } catch (e) {bundle.issues.push({code: 'api-unavailable', resource: request.url, reason: (e as Error).message});}
     });
+    apiDone += batch.length; tell(draft.resources.length);
   }
   // One variant per underlying image: the rendered one (src/preload/srcset), else data.
   const rank = (c: ResourceCandidate) => (c.source === 'html' ? 0 : 10) + (c.attribute === 'src' ? 0 : c.attribute === 'preload' ? 1 : c.attribute === 'srcset' ? 2 : 3) + (/zoom|large|original/i.test(c.key || '') ? 5 : 0);
@@ -336,7 +342,7 @@ export async function finishPreview(draft: PreviewDraft, fetcher: PreviewFetch, 
   while (queue.length) {
     check();
     const batch: ResourceCandidate[] = [];
-    while (queue.length && batch.length < 4) {
+    while (queue.length && batch.length < PARALLEL) {
       const item = queue.shift()!;
       if (seen.has(item.url)) continue; seen.add(item.url);
       if (item.category === 'image') {const key = underlyingImage(item.url); if (captured.has(key)) {bundle.aliases[item.url] = capturedUrl.get(key)!; continue;}}
@@ -380,7 +386,7 @@ export async function finishPreview(draft: PreviewDraft, fetcher: PreviewFetch, 
         bundle.resources.push({url: item.url, path: file, type: response.type, bytes: bytes.length, sha256: sha, category, priority: item.priority});
         map.set(item.url, '/preview/' + file);
       } catch (e) {bundle.issues.push({code: 'asset-unavailable', resource: item.url, reason: (e as Error).message});}
-      onProgress?.(++done, Math.min(bundle.limits.resources, done + queue.length));
+      ++done; tell(queue.length);
     }
   }
   const omitted = Object.entries(skipped);

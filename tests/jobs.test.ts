@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import {beforeEach, describe, test, expect} from 'vitest';
+import {beforeEach, describe, test, expect, vi} from 'vitest';
 import {unzipSync} from 'fflate';
 import {runJob, type EngineHost} from '../src/jobs/engine';
 import type {Decision, JobRequest, JobState, SendInput} from '../src/jobs/types';
@@ -137,10 +137,10 @@ describe('operações em segundo plano', () => {
     expect(final.status).toBe('completed'); expect(downloads).toHaveLength(1);
     const fractions = reports.map(r => r.fraction);
     expect(fractions.every((value, i) => i === 0 || value >= fractions[i - 1])).toBe(true);
-    // Before the first read, only the listing counts: about 2 of 51 units, never 18%.
+    // Before the first read, only the listing counts: about 2 s of 39, never 18%.
     const listed = reports.filter(r => r.phases.find(p => p.id === 'read')!.done === 0);
     expect(listed.length).toBeGreaterThan(0);
-    expect(Math.max(...listed.map(r => r.fraction))).toBeLessThan(0.05);
+    expect(Math.max(...listed.map(r => r.fraction))).toBeLessThan(0.06);
     expect(reports.some(r => r.phases.find(p => p.id === 'inventory')!.status === 'active')).toBe(true);
     expect(reports.some(r => r.phases.find(p => p.id === 'read')!.label === 'Ler os arquivos direto da Yampi')).toBe(true);
     expect(final.events.some(e => e.tone === 'ok' && e.text.startsWith('Leitura direta conferida com o editor em 1 tipo de arquivo'))).toBe(true);
@@ -255,6 +255,42 @@ describe('páginas da loja, prévia avulsa e links do envio', () => {
     expect(counts.every((value, index) => index === 0 || value >= counts[index - 1])).toBe(true);
     expect(final.result).toMatchObject({kind: 'export', warnings: ['Link quebrado na loja: A loja responde HTTP 404: /colecao-encerrada não existe. Linkado em elements/atalhos.twig.']});
     expect((final.result as {previewDetails: string}).previewDetails).toContain('Páginas da loja: 3 (2 categorias ou vitrines, 1 institucional); 1 de fora: /colecao-encerrada (HTTP 404: link quebrado). Páginas dos produtos: 2 (2 produtos); nenhuma de fora.');
+  });
+  test('271 páginas de produto: a barra fica longe de 99% enquanto faltam produtos e anda a cada página', async () => {
+    // The reported case: a theme read straight from the server, the storefront's resources, 30 store
+    // pages and 271 product pages, learned only after the store pages.
+    const files: Record<string, string> = Object.fromEntries(Array.from({length: 264}, (_, i) => [`sections/home/s${i}.twig`, `seção ${i}`]));
+    const editor = Object.assign(new FakeEditor(files), {direct: {
+      open: async () => 'loja-ficticia',
+      read: async (paths: string[]) => ({files: Object.fromEntries(paths.map(path => [path, files[path]])), assets: {}, rest: []})
+    }});
+    const {host: h, reports} = host(editor);
+    allowing(h);
+    h.preview = {
+      prepare: async (_snapshot, _fetch, options) => {for (let done = 1; done <= 9; done++) options.onProgress?.(done, 9); return {} as never;},
+      finish: async (_draft, _fetch, _origins, _signal, onProgress) => {for (let done = 1; done <= 120; done++) onProgress?.(done, 120); return published();},
+      unauthorized: () => [],
+      expand: async (visual, _files, _fetch, options) => {
+        for (let done = 0; done <= 30; done++) options.onProgress?.('store', done, 30);
+        for (let done = 0; done <= 271; done++) options.onProgress?.('product', done, 271);
+        return visual;
+      }
+    };
+    // Reports leave at most every 150 ms: a clock that moves on each look lets every one of them out.
+    let clock = Date.now();
+    const time = vi.spyOn(Date, 'now').mockImplementation(() => clock += 200);
+    const final = await runJob({id: 'baixar-271', kind: 'export', includePreview: true}, context, h, control()).finally(() => time.mockRestore());
+    expect(final.status).toBe('completed'); expect(final.fraction).toBe(1);
+    const fractions = reports.map(r => r.fraction);
+    expect(fractions.every((value, index) => index === 0 || value >= fractions[index - 1])).toBe(true);
+    const at = (done: number) => reports.find(r => r.detail === `Páginas dos produtos: ${done} de 271`)!.fraction;
+    // Every step before the products leaves room for them: never 99% with 224 pages to go.
+    expect(at(47)).toBeLessThan(0.75);
+    expect(at(0)).toBeGreaterThan(0.3);
+    expect(at(100)).toBeGreaterThan(at(47)); expect(at(200)).toBeGreaterThan(at(100)); expect(at(270)).toBeGreaterThan(at(200));
+    expect(reports.filter(r => r.status === 'running').every(r => r.fraction < 0.99 || r.phases.every(p => p.status !== 'active' || p.id === 'zip' || p.id === 'download'))).toBe(true);
+    expect(reports.some(r => r.detail === 'Capturando a vitrine: 4 de 9 páginas')).toBe(true);
+    expect(final.phases.map(p => [p.id, p.status])).toEqual([['inventory', 'done'], ['read', 'done'], ['sample', 'done'], ['preview', 'done'], ['store', 'done'], ['products', 'done'], ['zip', 'done'], ['download', 'done']]);
   });
   test('prévia avulsa: só preview/, a partir da referência guardada, sem ler o tema nem mudar a referência', async () => {
     await updateWorkspace(context, workspace => {workspace.baseline = snapshot(store); workspace.lineage = {exportedAt: snapshot(store).capturedAt, journals: []};});

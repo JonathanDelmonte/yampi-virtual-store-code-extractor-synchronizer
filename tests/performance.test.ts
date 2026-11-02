@@ -7,10 +7,10 @@ import {demoSnapshot,demoImage} from '../src/demo/sample';
 const bytes=(text:string)=>new TextEncoder().encode(text);
 const draft=(urls:string[]):PreviewDraft=>{const bundle=demonstration(demoSnapshot.context,'Fictício');bundle.issues=[];return {bundle,resources:urls.map(url=>({url,priority:/.css$/.test(url)?1:4,category:/.css$/.test(url)?'css':'image',source:'html'})),api:[],documents:new Map(),themeAssets:[]};};
 describe('extração mais rápida com os mesmos limites e originais',()=>{
-  test('recursos públicos têm no máximo quatro GETs simultâneos e mantêm ordem e hashes',async()=>{
-    let active=0,peak=0;const urls=Array.from({length:9},(_,i)=>`https://cdn.invalid/${i}.svg`);
+  test('recursos públicos têm no máximo seis GETs simultâneos e mantêm ordem e hashes',async()=>{
+    let active=0,peak=0;const urls=Array.from({length:13},(_,i)=>`https://cdn.invalid/${i}.svg`);
     const result=await finishPreview(draft(urls),async url=>{active++;peak=Math.max(peak,active);await new Promise(r=>setTimeout(r,5));active--;return {url,type:'image/svg+xml',bytes:bytes(`<svg><title>${url}</title></svg>`)};},['https://cdn.invalid']);
-    expect(peak).toBe(4);expect(result.resources.map(r=>r.url)).toEqual(urls);expect(result.issues).toEqual([]);await expect(previewEntries(result)).resolves.toBeDefined();
+    expect(peak).toBe(6);expect(result.resources.map(r=>r.url)).toEqual(urls);expect(result.issues).toEqual([]);await expect(previewEntries(result)).resolves.toBeDefined();
   });
   test('segunda autorização reutiliza bytes válidos sem perder URLs originais ou fontes do CSS',async()=>{
     const css='https://cdn.invalid/a.css',font='https://font.invalid/a.woff2';const input=draft([css]);input.bundle.pages=[{id:'page-0',kind:'home',sourceUrl:demoSnapshot.context.previewOrigin+'/',raw:{merchant:{logo_url:'https://cdn.invalid/logo.svg'}}}];
@@ -37,8 +37,8 @@ describe('extração mais rápida com os mesmos limites e originais',()=>{
   });
   test('cancelamento aguarda os GETs emitidos e não começa outra rodada',async()=>{
     const control=new AbortController(),releases:(()=>void)[]=[],calls:string[]=[];
-    const promise=finishPreview(draft(Array.from({length:8},(_,i)=>`https://cdn.invalid/${i}.svg`)),async url=>{calls.push(url);await new Promise<void>(r=>releases.push(r));return {url,type:'image/svg+xml',bytes:bytes('<svg/>')};},['https://cdn.invalid'],control.signal);
-    const outcome=promise.then(()=>true,error=>error.message);await vi.waitFor(()=>expect(calls).toHaveLength(4));control.abort();let settled=false;void outcome.then(()=>{settled=true;});await Promise.resolve();expect(settled).toBe(false);releases.forEach(r=>r());expect(await outcome).toContain('cancelada');expect(calls).toHaveLength(4);
+    const promise=finishPreview(draft(Array.from({length:12},(_,i)=>`https://cdn.invalid/${i}.svg`)),async url=>{calls.push(url);await new Promise<void>(r=>releases.push(r));return {url,type:'image/svg+xml',bytes:bytes('<svg/>')};},['https://cdn.invalid'],control.signal);
+    const outcome=promise.then(()=>true,error=>error.message);await vi.waitFor(()=>expect(calls).toHaveLength(6));control.abort();let settled=false;void outcome.then(()=>{settled=true;});await Promise.resolve();expect(settled).toBe(false);releases.forEach(r=>r());expect(await outcome).toContain('cancelada');expect(calls).toHaveLength(6);
   });
   test('ZIP armazena PNG sem recompressão e mantém baseline/importação byte a byte',async()=>{
     const zip=await encodeSnapshot(demoSnapshot),methods:Record<string,number>={};unzipSync(zip,{filter:file=>{methods[file.name]=file.compression;return false;}});

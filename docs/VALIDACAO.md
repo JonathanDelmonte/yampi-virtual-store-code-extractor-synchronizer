@@ -1,5 +1,19 @@
 # Validação
 
+## Barra, ritmo e aba em segundo plano na 0.10.1, em 02/11/2026
+
+Relato: num download real com a vitrine, a barra mostrava 99% com **Páginas dos produtos: 47 de 271**, e o download era lento. Tudo abaixo usa só o editor e a vitrine fictícios. `npm run check` passou com 358 testes em 26 arquivos.
+
+- **Reprodução e correção da barra** (`tests/jobs.test.ts`, `tests/progress.test.ts`): um download simulado com 264 arquivos lidos direto do servidor, 120 recursos, 30 páginas da loja e 271 de produto. Com 47 de 271 produtos, a barra mostra cerca de 59%; com 0, 51%; com 270, 97%. Ela anda a cada página, nunca volta e só chega a 100% no fim. A etapa que termina sem saber o tamanho libera o espaço que guardava, e trocar o peso da leitura (servidor ou editor) não faz a barra voltar.
+- **Conferências divididas** (`tests/background.test.ts`): 12 leituras públicas ao mesmo tempo, com o editor demorando a responder, pedem no máximo 4 conferências da loja (antes, 24). Uma loja diferente no editor durante os GETs ainda faz as leituras falharem.
+- **Pedido inteiro** (`tests/background.test.ts`): `previewOnly` e `links` chegam à execução; prévia avulsa sem a vitrine, `links` fora de uma comparação e endereço que não é `http(s)` são recusados.
+- **Trava da aba** (`tests/background.test.ts`): o início da operação pede a trava na aba do editor, no mundo isolado; o fim a solta.
+- **Leituras simultâneas** (`tests/performance.test.ts`): no máximo 6 GETs de recursos ao mesmo tempo, na ordem pedida; o cancelamento espera os 6 emitidos e não começa outra leva.
+- **Aba do editor em segundo plano, extensão real** (`npm run test:background`): Chromium sem as opções do Playwright que mantêm as abas acordadas. Depois do clique em **Baixar ZIP** com a vitrine, o Playwright se desconecta e outra aba vem para a frente. A aba do editor ficou oculta o tempo todo, com os temporizadores desacelerados (4 de 10 ms levaram 2,7 s). Sem a leitura direta, os 11 arquivos foram lidos pelo editor nessa aba, e o download terminou sozinho em 44 s, com 8 páginas no recorte, 9 da loja e 11 de produto. A trava ficou na página durante a operação e foi solta no fim. Foram 39 conferências da loja para 55 leituras públicas (antes, 110). A barra só avançou e ficou abaixo de 99% enquanto faltavam páginas.
+- **Extensão real** (`npm run test:direct`, `test:panel`, `test:update`, `test:preview`, `test:compression`): passaram. A leitura direta de 121 arquivos fictícios levou 10,2 s, e pelo editor, 96,6 s, com ZIPs iguais. `test:e2e` passou do download à restauração com mudança externa e parou na conferência do heartbeat do painel (um a cada 20 s), como o código da 0.10.0 (`6919dac`), sem as mudanças desta versão, no mesmo ambiente. Por isso, a parte final dele (download com a vitrine fictícia no painel) não rodou aqui; `test:background` cobre esse caminho.
+
+Sem validação real: o tempo de um download numa loja real, o efeito da trava no congelamento de abas em cada configuração do Chrome e a conferência dos links numa loja real.
+
 ## Páginas da loja e dos produtos na 0.10.0, em 29/10/2026
 
 Pedido: a prévia de uma loja real tinha 7 páginas, e menu, rodapé, "Ver tudo", quase todos os produtos e o voltar da página de produto davam "Rota não capturada". Tudo abaixo usa só a loja e o editor fictícios. `npm run check` passou com 609 testes em 43 arquivos.
