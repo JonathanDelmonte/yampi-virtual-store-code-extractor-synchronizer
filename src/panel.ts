@@ -4,7 +4,7 @@ import {publicUrl, PREVIEW_ORIGINS} from './core/preview';
 import {BrowserAdapter, type RPC} from './browser/adapter';
 import {PanelConnection} from './browser/panel-connection';
 import {zipInWorker} from './browser/zip-client';
-import {decodeProject, readProjectDirectory, readProjectEntries, type Project} from './core/archive';
+import {decodeProject, readProjectDirectory, readProjectEntries, type LooseTheme, type Project} from './core/archive';
 import {makePlan, missingNewTexts, selectionIssues, sendable, IMAGES_OFF} from './core/planner';
 import {changedPaths, remoteFromCapture} from './core/compare';
 import {sendRoutes} from './core/preview-links';
@@ -1067,12 +1067,12 @@ $('show-file').addEventListener('click', () => {
 let interruptedReference = false;
 // compareAfter: compare with the store at once (reading a project); off when only refreshing what
 // the folder has, after the extension itself wrote to it.
-async function adoptProject(project: Project | {local: Files; localAssets: Assets}, source: {name: string; kind: 'folder' | 'zip' | 'demo'}, full = false, compareAfter = true): Promise<void> {
+async function adoptProject(project: Project | LooseTheme, source: {name: string; kind: 'folder' | 'zip' | 'demo'}, full = false, compareAfter = true): Promise<void> {
   let target = context;
   if ('baseline' in project) {
     if (connected && context) assertContext(project.baseline.context, context);
     target = project.baseline.context;
-  } else if (!workspace?.baseline) throw new Error('Esta pasta não tem a exportação original (.yampi-sync/). Escolha a pasta extraída do ZIP baixado pela extensão, ou baixe o tema antes.');
+  } else if (!workspace?.baseline) throw new Error('Esta pasta tem só o tema, sem o original da loja (.yampi-sync/), e a extensão ainda não guardou o original desta loja. Em Baixar arquivos, baixe os arquivos da loja e escolha esta pasta de novo: a comparação usa essa cópia como original.');
   if (!target) throw new Error('Conecte ao editor para carregar este projeto.');
   const chosen = 'baseline' in project ? chooseBaseline(workspace, project.baseline) : undefined;
   workspace = await updateWorkspace(target, value => {

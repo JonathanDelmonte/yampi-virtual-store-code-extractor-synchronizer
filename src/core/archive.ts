@@ -76,7 +76,24 @@ function unzipSafe(data: Uint8Array): Record<string, Uint8Array> {
 }
 const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
 function text(data: Uint8Array): string {return decoder.decode(data);}
-async function decodeEntries(input: Record<string, Uint8Array>): Promise<Project> {
+// What a theme folder may hold that the Yampi editor does not, which keeps only texts and PNG,
+// JPEG, WebP or SVG images. System files are left out quietly; other binary files (3D models,
+// videos, fonts) with a note. A theme text that does not read as text stops the reading instead:
+// leaving it out would send the rest without it.
+const SYSTEM_FILE = /^(?:\..*|thumbs\.db|desktop\.ini)$/i;
+const THEME_TEXT = /\.(?:twig|vue|scss|css|js|json|md)$/i;
+const systemFile = (path: string) => SYSTEM_FILE.test(path.split('/').at(-1)!);
+const foreign = (path: string) => !imagePath(path) && !THEME_TEXT.test(path);
+function asText(data: Uint8Array): string | undefined {
+  try {const value = text(data); return value.includes('\u0000') ? undefined : value;} catch {return undefined;}
+}
+function leftOutNotes(paths: string[]): string[] {
+  if (!paths.length) return [];
+  const names = paths.slice(0, 4).join(', ') + (paths.length > 4 ? ` e mais ${paths.length - 4}` : '');
+  const why = 'a Yampi guarda só textos e imagens PNG, JPEG, WebP ou SVG.';
+  return [paths.length === 1 ? `${names} ficou de fora: ${why}` : `${paths.length} arquivos ficaram de fora (${names}): ${why}`];
+}
+async function decodeEntries(input: Record<string, Uint8Array>, left: string[] = []): Promise<Project> {
   const manifests = Object.keys(input).filter(p => p === metaPath || p.endsWith('/' + metaPath));
   if (manifests.length !== 1) throw new Error('Use um único projeto exportado por esta extensão, com .yampi-sync/manifest.json.');
   const prefix = manifests[0].slice(0, -metaPath.length);
@@ -124,7 +141,7 @@ async function decodeEntries(input: Record<string, Uint8Array>): Promise<Project
   safeSnapshot({...baseline, files: edited.files, assets: edited.assets});
   // The project's own versions, never trusted blindly: a bad list or receipt is named and left out.
   let known: Known = {};
-  const notes: string[] = [], why = (error: unknown) => error instanceof Error ? error.message : String(error);
+  const notes: string[] = leftOutNotes([...left, ...edited.left]), why = (error: unknown) => error instanceof Error ? error.message : String(error);
   if (archive[KNOWN_FILE]) {try {known = mergeKnown(known, parseKnownFile(JSON.parse(text(archive[KNOWN_FILE]))));} catch (error) {notes.push(`${KNOWN_FILE} ficou de fora: ${why(error)}`);}}
   for (const path of Object.keys(archive).filter(p => p.startsWith(RECEIPTS + '/') && p.endsWith('.json')).sort()) {
     try {
@@ -150,25 +167,38 @@ function validPending(value: unknown): Pick<PendingReference, 'current' | 'next'
   if (!p || p.format !== 'zirtuno-sync-referencia' || p.version !== 1 || !Array.isArray(p.current) || p.current.length > MAX_FILES) throw new Error('Registro de atualização interrompida inválido. Não apague .yampi-sync/: baixe a loja de novo em outra pasta e compare.');
   return {current: p.current, next: validManifest(p.next)};
 }
-function readThemeEntries(entries: [string, Uint8Array][]): {files: Files; assets: Assets} {
-  const files: [string, string][] = [], assets: Assets = Object.create(null);
+function readThemeEntries(entries: [string, Uint8Array][]): {files: Files; assets: Assets; left: string[]} {
+  const files: [string, string][] = [], assets: Assets = Object.create(null), left: string[] = [];
   for (const [path, value] of entries) {
+    if (systemFile(path)) continue;
     validatePath(path);
-    if (imagePath(path)) assets[path] = value;
-    else files.push([path, text(value).replace(/\r\n?/g, '\n')]);
+    if (imagePath(path)) {assets[path] = value; continue;}
+    const content = asText(value);
+    if (content !== undefined) files.push([path, content.replace(/\r\n?/g, '\n')]);
+    else if (foreign(path)) left.push(path);
+    else throw new Error(`${path} não pôde ser lido como texto UTF-8. Salve o arquivo em UTF-8 e escolha a pasta de novo.`);
   }
-  return {files: safeFiles(files), assets};
+  return {files: safeFiles(files), assets, left};
 }
 export async function decodeProject(data: Uint8Array): Promise<Project> {return decodeEntries(unzipSafe(data));}
 // One file of a project folder, from a folder picker, drag and drop or a test: its path inside the
 // chosen folder and a way to read it, so only the files that matter are ever read.
 export interface ProjectEntry {path: string; size: number; read(): Promise<Uint8Array>}
+// A theme read without the export's reference (.yampi-sync/): compared with the original the
+// extension keeps for the store. notes: files left out, and why.
+export interface LooseTheme {local: Files; localAssets: Assets; notes?: string[]}
 export function isProjectFile(path: string, project: boolean): boolean {
   return project ? path.startsWith('tema/') || path.startsWith('.yampi-sync/baseline/') || path === metaPath || path === PENDING || path === KNOWN_FILE || path.startsWith(RECEIPTS + '/') && path.endsWith('.json') : ROOTS.has(path.split('/')[0]);
 }
-export async function readProjectEntries(source: ProjectEntry[], onProgress?: (done: number, total: number) => void): Promise<Project | {local: Files; localAssets: Assets}> {
-  const project = source.some(f => f.path === metaPath);
-  const relevant = project ? source.filter(f => isProjectFile(f.path, true)) : source;
+export async function readProjectEntries(source: ProjectEntry[], onProgress?: (done: number, total: number) => void): Promise<Project | LooseTheme> {
+  const project = source.some(f => f.path === metaPath), left: string[] = [];
+  const relevant = source.filter(({path, size}) => {
+    if (project && !isProjectFile(path, true) || systemFile(path)) return false;
+    const inTheme = !project ? path : path.startsWith('tema/') ? path.slice(5) : undefined;
+    // Larger than a theme text or image may be, and neither: never read, the Yampi would not take it.
+    if (inTheme !== undefined && size > MAX_FILE_BYTES && foreign(inTheme)) {left.push(inTheme); return false;}
+    return true;
+  });
   const entries: Record<string, Uint8Array> = Object.create(null);
   let total = 0, count = 0;
   for (const {path, size} of relevant) {
@@ -185,12 +215,13 @@ export async function readProjectEntries(source: ProjectEntry[], onProgress?: (d
     onProgress?.(index + 1, relevant.length);
   }
   if (!relevant.length) throw new Error('Pasta vazia.');
-  if (project) return decodeEntries(entries);
+  if (project) return decodeEntries(entries, left);
   const edited = readThemeEntries(Object.entries(entries));
   safeSnapshot({context: {storeName: 'Validação local', previewOrigin: 'https://local.invalid', editorOrigin: 'https://local.invalid'}, capturedAt: new Date().toISOString(), files: edited.files, assets: edited.assets});
-  return {local: edited.files, localAssets: edited.assets};
+  const notes = leftOutNotes([...left, ...edited.left]);
+  return {local: edited.files, localAssets: edited.assets, ...(notes.length ? {notes} : {})};
 }
-export async function readProjectDirectory(files: FileList | File[], onProgress?: (done: number, total: number) => void): Promise<Project | {local: Files; localAssets: Assets}> {
+export async function readProjectDirectory(files: FileList | File[], onProgress?: (done: number, total: number) => void): Promise<Project | LooseTheme> {
   return readProjectEntries(Array.from(files).map(file => ({path: (file.webkitRelativePath || file.name).split('/').slice(1).join('/'), size: file.size, read: async () => new Uint8Array(await file.arrayBuffer())})), onProgress);
 }
 export async function readDirectory(files: FileList | File[]): Promise<Files> {

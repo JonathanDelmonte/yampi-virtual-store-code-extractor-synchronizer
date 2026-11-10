@@ -81,4 +81,26 @@ describe('leitura da pasta do projeto', () => {
     const theme = await folderEntries(folder(tree('tema', {[hero]: 'a\n'})));
     expect(theme.entries.map(entry => entry.path)).toEqual([hero]);
   });
+  // Projects started from an earlier copy of the store keep the theme in theme/, without .yampi-sync/.
+  const started = {[`theme/${hero}`]: 'a\n', 'theme/templates/home.twig': 'home', 'package.json': '{}', 'node_modules/x/index.js': 'ignorado', 'docs/README.md': 'ignorado'};
+  test('projeto com theme/ no lugar de tema/: lê só o tema', async () => {
+    const {name, entries} = await folderEntries(folder(tree('loja-ficticia', started)));
+    expect(name).toBe('loja-ficticia');
+    expect(entries.map(entry => entry.path).sort()).toEqual([hero, 'templates/home.twig']);
+  });
+  test('tema/ e theme/ na mesma pasta: não escolhe sozinho', async () => {
+    const both = tree('loja', {...started, [`tema/${hero}`]: 'b\n'});
+    await expect(folderEntries(folder(both))).rejects.toThrow('tema/ e theme/');
+  });
+  test('pasta sem tema explica o que escolher', async () => {
+    await expect(folderEntries(folder(tree('documentos', {'notas/a.md': 'x', 'package.json': '{}'})))).rejects.toThrow('Não encontrei um tema');
+    // A theme/ that is not a theme (no assets/, components/...) is not taken for one.
+    await expect(folderEntries(folder(tree('site', {'theme/cores.json': '{}'})))).rejects.toThrow('Não encontrei um tema');
+  });
+  test('trazer a versão da loja grava no arquivo de theme/ que já existe', async () => {
+    const root = tree('loja', started);
+    await replaceThemeFile(folder(root), hero, 'a\n', 'loja\n');
+    expect(new TextDecoder().decode(read(root, `theme/${hero}`))).toBe('loja\n');
+    expect(root.entries.has('tema')).toBe(false);
+  });
 });

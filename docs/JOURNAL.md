@@ -239,3 +239,21 @@ Decisões:
 Não feito: a leitura pelo editor (arquivos JSON, amostras, envio) continua mais lenta com a aba oculta, porque o navegador desacelera os temporizadores da página e a espera de estabilidade depende deles. Mudar essa espera mexeria na integridade da cópia sem validação no editor real.
 
 Ainda sem validação real: o tempo numa loja real, o efeito da trava no congelamento de abas em cada configuração do Chrome (economia de energia, memória) e a conferência dos links numa loja real.
+
+## 10/11/2026 — Pasta com o tema em theme/ recusada (0.10.2)
+
+Relato do proprietário: ao escolher a pasta do projeto de uma loja real em **Importar projeto**, o painel dizia "Não encontrei um projeto exportado nesta pasta".
+
+Causas, reproduzidas com o código da extensão sobre a pasta real, só com leitura:
+- O projeto tinha começado de uma cópia da loja anterior à extensão: o tema fica em `theme/`, sem `.yampi-sync/`. A extensão procurava o tema só na própria pasta e em `tema/`, e projetos exportados só um nível abaixo.
+- Escolhendo `theme/` direto, a leitura parava com "The encoded data was not valid for encoding utf-8": um modelo 3D (`.glb`) do tema era lido como texto.
+
+Decisões:
+- `theme/` vale como `tema/` para o tema solto. Com os dois na mesma pasta, a extensão recusa em vez de escolher.
+- Binários que não são imagens PNG, JPEG, WebP ou SVG ficam de fora com um aviso que os nomeia (a Yampi não os guarda; um acima de 2 MiB nem é lido). Arquivos do sistema, sem aviso. Um texto do tema que não é UTF-8 continua parando a leitura, agora com o nome do arquivo: deixá-lo de fora enviaria o resto sem ele.
+- Sem o original da loja guardado na extensão, a mensagem diz para usar **Baixar arquivos** antes.
+- `AGENTS.md` não mudou: a escrita num tema solto (só **Usar no projeto**, num arquivo que já existe) já acontecia na pasta do tema lida.
+
+Não feito: o seletor de arquivos alternativo (sem a API de pastas) continua exigindo a pasta do tema, e o ZIP de retorno continua recusando arquivos acima de 2 MiB.
+
+Ainda sem validação real: a leitura no painel do Chrome e a comparação dessa pasta com a loja; nada foi enviado.

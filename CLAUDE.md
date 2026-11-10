@@ -37,4 +37,5 @@ Uma linha por armadilha; o detalhe fica no documento indicado.
 - O worker devolve à captura só a mensagem do erro: o status HTTP e o `Retry-After` do download público vão no texto e voltam por `fetchFailure`. → `src/browser/public-fetch.ts`.
 - `host.wait` espera no máximo 10 s por chamada: as esperas de um 429 vão em blocos. → `src/core/pacer.ts`.
 - Na prévia formato 3, o arquivo de uma página pode não ter `themeConfig` nem `merchant`: estão em `raw/shared/<sha256>.json`, indicados por `shared` no manifesto. → `docs/SPEC.md`, "Formato 3".
+- Projetos começados de uma cópia anterior à extensão guardam o tema em `theme/`, sem `.yampi-sync/`: entram como tema solto, comparados com o original do último download, e binários que não são imagem ficam de fora com aviso. → `docs/SPEC.md`, "Leitura da pasta do projeto".
 - Mudou uma ferramenta de `local-runtime/`? O hash anterior precisa estar em `scripts/runtime-versions.json`, ou `update-project.mjs` recusa os projetos exportados antes como "ferramenta modificada". → `scripts/update-project.mjs`.

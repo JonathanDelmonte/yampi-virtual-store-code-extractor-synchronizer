@@ -1,5 +1,16 @@
 # Validação
 
+## Pasta com o tema em theme/ na 0.10.2, em 10/11/2026
+
+Relato: o painel recusava a pasta de um projeto real com o tema em `theme/` e sem `.yampi-sync/`.
+
+- **Reprodução, sem escrita** (simulação descartável, fora do repositório): `folderEntries` e `readProjectEntries`, com handles de pasta sobre o disco. Antes: na raiz, a mensagem relatada; em `theme/`, erro de UTF-8 num modelo 3D. Depois: nas duas, o tema inteiro lido como tema solto, com o modelo 3D de fora e nomeado no aviso.
+- **Pasta** (`tests/folder.test.ts`): `theme/` lido como tema solto sem ler `node_modules`, `package.json` ou documentação; `tema/` e `theme/` juntos recusados; pasta sem tema e `theme/` sem pastas de tema recusados com a explicação; **Usar no projeto** grava só no arquivo existente de `theme/`.
+- **Leitura** (`tests/project.test.ts`): binário que não é imagem fica de fora com aviso, inclusive num projeto exportado; arquivos do sistema, sem aviso; binário acima de 2 MiB nunca é lido; Twig que não é UTF-8 ou tem NUL para a leitura com o nome do arquivo.
+- **Conjunto** (Node 24): `npm run package` passou no typecheck, nos 390 testes de 27 arquivos e no build, e gerou `releases/zirtuno-sync-yampi/` na 0.10.2. `npm run test:panel` passou no Chromium com o editor fictício.
+
+Sem validação real: a leitura no painel do Chrome, a comparação com a loja e qualquer envio.
+
 ## Integração das alterações locais e remotas, em 02/11/2026
 
 Com Node 24, `npm ci` e `npm run check` passaram; o código integrado passou nos 382 testes de 27 arquivos, no typecheck e no build. Os scripts `panel-e2e.mjs`, `e2e.mjs` e `background-e2e.mjs` também passaram no Chromium: revisão e envio sem ZIP, envio com backup, proteção de conflito na restauração, heartbeat e download com a vitrine fictícia. O download com o editor em segundo plano terminou em 43,9 s, com 55 leituras públicas e 39 conferências da loja. Os testes usam exclusivamente exemplos, editor e vitrine fictícios; nenhuma requisição alcançou uma loja real. Os registros anteriores abaixo descrevem as validações de cada conjunto antes desta integração.

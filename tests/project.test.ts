@@ -43,6 +43,30 @@ describe('projeto executável e retorno completo', () => {
     const result = await readProjectDirectory([picked('templates/home.twig', strToU8('a\r\nb\r')), picked(imagePath, demoImage)]);
     expect(result.local['templates/home.twig']).toBe('a\nb\n'); expect(result.localAssets[imagePath]).toEqual(demoImage);
   });
+  test('deixa de fora, com aviso, binários que a Yampi não guarda; arquivos do sistema, sem aviso', async () => {
+    const binary = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0xff, 0xfe]);
+    const result = await readProjectDirectory([picked('templates/home.twig', strToU8('a')), picked('assets/models/cena.glb', binary), picked('assets/.DS_Store', binary), picked('Thumbs.db', binary), picked(imagePath, demoImage)]);
+    expect(Object.keys(result.local)).toEqual(['templates/home.twig']);
+    expect(result.localAssets[imagePath]).toEqual(demoImage);
+    expect('notes' in result && result.notes).toEqual(['assets/models/cena.glb ficou de fora: a Yampi guarda só textos e imagens PNG, JPEG, WebP ou SVG.']);
+  });
+  test('binário grande que a Yampi não guarda nem chega a ser lido', async () => {
+    const video = {name: 'intro.mp4', webkitRelativePath: 'projeto/assets/videos/intro.mp4', size: 3 * 1024 * 1024, arrayBuffer: async () => {throw new Error('Nunca é lido');}} as unknown as File;
+    const result = await readProjectDirectory([picked('templates/home.twig', strToU8('a')), video]);
+    expect(Object.keys(result.local)).toEqual(['templates/home.twig']);
+    expect('notes' in result && result.notes?.[0]).toContain('assets/videos/intro.mp4 ficou de fora');
+  });
+  test('texto do tema que não é UTF-8 para a leitura e diz qual é', async () => {
+    await expect(readProjectDirectory([picked('sections/hero.twig', new Uint8Array([0x61, 0xe9, 0x62]))])).rejects.toThrow('sections/hero.twig não pôde ser lido como texto UTF-8');
+    await expect(readProjectDirectory([picked('sections/hero.twig', new Uint8Array([0x61, 0x00]))])).rejects.toThrow('sections/hero.twig');
+  });
+  test('projeto exportado com binário em tema/: compara o resto e avisa', async () => {
+    const entries = unzipSync(await encodeSnapshot(clone()));
+    entries['tema/assets/models/cena.glb'] = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 0x00, 0xff]);
+    const result = await decodeProject(zipSync(entries));
+    expect(result.local).toEqual(demoSnapshot.files);
+    expect(result.notes).toEqual(['assets/models/cena.glb ficou de fora: a Yampi guarda só textos e imagens PNG, JPEG, WebP ou SVG.']);
+  });
   test('aceita ZIP criado ao compactar a pasta externa do projeto', async () => {
     const entries = unzipSync(await encodeSnapshot(clone(), true));
     const wrapped = Object.fromEntries(Object.entries(entries).map(([p, b]) => ['MinhaLoja/' + p, b]));
@@ -77,7 +101,7 @@ describe('projeto executável e retorno completo', () => {
   test('manifesto versão 3 registra ferramenta, tema, quebras de linha, ignorados e prévia; versão 2 continua legível', async () => {
     const source = clone(); source.files['templates/sem-final.twig'] = 'a\r\nb';
     const entries = unzipSync(await encodeSnapshot(source, true)), m = JSON.parse(new TextDecoder().decode(entries['.yampi-sync/manifest.json']));
-    expect(m).toMatchObject({version: 3, tool: {name: 'yampi-code-sync', version: '0.10.1'}, theme: {state: 'unknown', source: 'unavailable'}, skipped: [{path: 'logs/'}], preview: {manifest: 'preview/manifest.json', format: 3}});
+    expect(m).toMatchObject({version: 3, tool: {name: 'yampi-code-sync', version: '0.10.2'}, theme: {state: 'unknown', source: 'unavailable'}, skipped: [{path: 'logs/'}], preview: {manifest: 'preview/manifest.json', format: 3}});
     expect(m.files.find((f: {path: string}) => f.path === 'templates/home.twig')).toMatchObject({eol: 'lf', finalNewline: true});
     expect(m.files.find((f: {path: string}) => f.path === 'templates/sem-final.twig')).toMatchObject({eol: 'crlf', finalNewline: false});
     expect(m.files.find((f: {path: string}) => f.path === imagePath).eol).toBeUndefined();

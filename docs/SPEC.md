@@ -79,6 +79,14 @@ Um arquivo enviado não pode depender de um arquivo que não existirá na loja. 
 - Arquivos alterados que se usam vão juntos; um envio parcial é recusado antes de gravar.
 - Desde a 0.10.1, `assets_url` exige valores a partir de `/assets/`, sem correção silenciosa na prévia local. Componentes alterados com nomes dos ícones internos da Yampi ficam bloqueados, assim como seus consumidores alterados. A gravação repete essa conferência para não continuar planos antigos incompatíveis. CSS, propriedades Vue e tabelas literais de imagens também entram nas dependências; expressões arbitrárias continuam sem execução no analisador.
 
+## Leitura da pasta do projeto
+
+A pasta escolhida é, nesta ordem: um projeto exportado (`.yampi-sync/manifest.json`, tema em `tema/`); a própria pasta do tema (com `assets/`, `components/`, `elements/`, `sections/` ou `templates/`); uma pasta com o tema em `tema/` ou, desde a 0.10.2, em `theme/`, sem `.yampi-sync/`; ou uma pasta com um único projeto exportado dentro. `tema/` e `theme/` juntos são recusados: a extensão não adivinha qual foi editado. `theme/` cobre os projetos começados de uma cópia da loja anterior à extensão.
+
+Um tema sem `.yampi-sync/` (tema solto) é comparado com o original desta loja guardado na extensão, o do último **Baixar arquivos**; sem ele, a leitura para e pede o download. Esse original é a loja de hoje, não a cópia da qual o projeto partiu: uma mudança feita na loja entre as duas aparece como diferença da pasta.
+
+Do tema entram textos e as imagens PNG, JPEG, WebP ou SVG de `assets/`. Outros binários (modelos 3D, vídeos, fontes) ficam de fora com um aviso que os nomeia, e não são lidos se passam de 2 MiB; arquivos do sistema (ocultos, `Thumbs.db`, `desktop.ini`) ficam de fora sem aviso. Um texto do tema (Twig, Vue, SCSS, CSS, JS, JSON, Markdown) que não é UTF-8 para a leitura e diz qual é: deixá-lo de fora enviaria o resto sem ele.
+
 ## Escrita na pasta do projeto
 
 A extensão grava na pasta do projeto só pela API de pastas do Chrome, e só os caminhos que `projectPath` aceita: `tema/` e, em `.yampi-sync/`, `manifest.json`, `baseline/`, `versoes/` e `referencia-pendente.json`. Ferramentas, `package.json`, `preview/`, `node_modules` e caminhos com `..` são recusados antes de chegar ao disco. O navegador grava cada arquivo num temporário e o troca ao fechar: nenhum arquivo fica pela metade.
@@ -86,7 +94,7 @@ A extensão grava na pasta do projeto só pela API de pastas do Chrome, e só os
 - **Permissão no clique.** Atualizar a pasta, salvar uma versão, trazer arquivos de uma versão e **Usar no projeto** pedem a escrita no próprio clique; sem ela, nada é gravado. O registro de um envio na pasta só acontece se a escrita já estiver liberada (o clique em **Enviar agora** a pede): nunca há pedido fora de um clique.
 - **Como foi lido.** Todo arquivo de `tema/` que a extensão troca ou remove precisa estar como na leitura que o usuário revisou, lido como o projeto é lido, com quebras de linha `\n`. Se mudou, nada é gravado.
 - Um texto gravado sobre um arquivo existente mantém as quebras de linha `\r\n` e a marca de ordem de bytes desse arquivo.
-- **Usar no projeto** troca só um arquivo de `tema/` que já existe e que só a loja mudou. A atualização e a recuperação de versões criam e removem arquivos de `tema/` (e pastas dentro dele), sempre depois da revisão; nunca fora de `tema/`.
+- **Usar no projeto** troca só um arquivo de `tema/` que já existe e que só a loja mudou. Num tema solto, é um arquivo que já existe na pasta do tema lida (a própria pasta, `tema/` ou `theme/`); atualizar, juntar e guardar versões pedem `.yampi-sync/`. A atualização e a recuperação de versões criam e removem arquivos de `tema/` (e pastas dentro dele), sempre depois da revisão; nunca fora de `tema/`.
 - Depois de cada escrita, a pasta é relida.
 
 ## Atualização do projeto

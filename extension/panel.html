@@ -51,7 +51,7 @@
     </section>
 
     <section id="import-section" class="view" aria-label="Escolher o projeto" hidden>
-      <div id="dropzone" class="dropzone"><p>Seu projeto, do computador para a loja</p><span>Solte a pasta inteira aqui ou escolha abaixo.</span><small>Use a pasta extraída do ZIP, com tema/ e .yampi-sync/.</small></div>
+      <div id="dropzone" class="dropzone"><p>Seu projeto, do computador para a loja</p><span>Solte a pasta inteira aqui ou escolha abaixo.</span><small>Use a pasta do projeto, com tema/ (ou theme/) e .yampi-sync/.</small></div>
       <div id="project-card" class="project" hidden>
         <p class="project-name"><strong id="project-name"></strong></p>
         <p id="local-info" class="aside">Nenhum projeto escolhido.</p>
@@ -70,7 +70,7 @@
         <div class="zip-guidance"><p id="zip-generate">Gere o arquivo no projeto com <code>npm run pack</code>.</p><p id="zip-help">Você revisa a comparação antes de confirmar qualquer envio.</p></div>
       </section>
       <label class="file-fallback">Pasta do projeto<input id="folder" type="file" webkitdirectory multiple></label>
-      <details class="help"><summary>O que a extensão encontra na pasta?</summary><dl class="folder-guide"><div><dt><code>tema/</code></dt><dd>Textos e imagens do projeto que você editou.</dd></div><div><dt><code>.yampi-sync/</code></dt><dd>A referência original para comparar com o estado atual da loja.</dd></div></dl><p>Dependências, ferramentas, documentação e a prévia local ficam fora do envio. Você também pode escolher só <code>tema/</code> se o original desta loja já estiver guardado na extensão.</p></details>
+      <details class="help"><summary>O que a extensão encontra na pasta?</summary><dl class="folder-guide"><div><dt><code>tema/</code></dt><dd>Textos e imagens do projeto que você editou.</dd></div><div><dt><code>.yampi-sync/</code></dt><dd>A referência original para comparar com o estado atual da loja.</dd></div></dl><p>Dependências, ferramentas, documentação e a prévia local ficam fora do envio. Você também pode escolher só o tema, ou um projeto que o guarda em <code>theme/</code>, se o original desta loja já estiver guardado na extensão (depois de <strong>Baixar arquivos</strong>). Modelos 3D, vídeos e fontes ficam de fora: a Yampi guarda só textos e imagens.</p></details>
       <details class="help"><summary>Como funciona o envio?</summary><ol class="help-steps"><li>Escolha a pasta ou o ZIP e confira os arquivos comparados.</li><li>Revise conflitos e selecione o que deseja enviar. A loja de destino aparece na confirmação.</li><li>O backup em ZIP vem ativado e pode ser desligado só nesta importação. O registro de segurança é sempre guardado antes de gravar, e cada item é conferido após recarregar o editor.</li><li>Confira em <strong>Ver prévia</strong> na Yampi. Publicar continua sendo uma ação sua.</li></ol><p>Criações e imagens usam os controles do editor, sem criar pastas. O envio para no primeiro erro e preserva o registro do que já foi feito.</p></details>
     </section>
 

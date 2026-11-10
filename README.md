@@ -6,6 +6,16 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
+## Versão 0.10.2 — projeto com o tema em `theme/`
+
+Um projeto que guarda o tema em `theme/`, e não em `tema/`, sem `.yampi-sync/` (como os começados de uma cópia da loja anterior à extensão), era recusado com "Não encontrei um projeto exportado nesta pasta". A versão está preparada neste código; o link de download acima continua apontando para a última release publicada.
+
+- **`theme/` como `tema/`.** Ao escolher a pasta do projeto, a extensão procura o tema na própria pasta, em `tema/` e em `theme/`. Sem `.yampi-sync/`, ele é lido como tema solto e comparado com o original desta loja guardado na extensão, o do último **Baixar arquivos**; sem esse original, o painel pede o download antes. Com `tema/` e `theme/` na mesma pasta, o painel pede a pasta do tema editado, sem escolher sozinho.
+- **Sem o original do projeto, revise cada arquivo.** O tema solto é comparado com a loja de hoje. Uma mudança que a loja recebeu depois da cópia da qual o projeto partiu aparece como diferença da pasta, e enviá-la desfaz essa mudança.
+- **Arquivos que a Yampi não guarda.** Modelos 3D, vídeos, fontes e outros binários que não são imagens PNG, JPEG, WebP ou SVG ficam de fora, com um aviso que os nomeia; antes, um `.glb` parava a leitura com um erro de UTF-8. Arquivos do sistema (ocultos, `Thumbs.db`, `desktop.ini`) ficam de fora sem aviso. Um texto do tema (Twig, Vue, SCSS, CSS, JS, JSON, Markdown) que não é UTF-8 continua parando a leitura, agora com o nome do arquivo.
+
+**Validação:** testes com pastas fictícias, e a leitura (sem escrita) da pasta de um projeto real no computador com o código da extensão e uma simulação do seletor de pastas sobre o disco: antes, o erro relatado; depois, o tema inteiro lido, com um modelo 3D de fora. Ainda sem validação no painel real e sem envio para a loja.
+
 ## Versão 0.10.1 — compatibilidade antes do envio
 
 Corrige duas diferenças que a prévia local escondia: imagens com caminho incompleto no filtro `assets_url` e componentes com nomes de ícones internos da Yampi. A versão está preparada neste código; o link de download acima continua apontando para a última release publicada.

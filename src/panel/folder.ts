@@ -38,17 +38,26 @@ async function isTheme(folder: Folder): Promise<boolean> {
   return false;
 }
 type Found = {path: string; file: File};
+// A bare theme sits in the folder itself or in one of these: tema/ in the projects the extension
+// exports, theme/ in projects started from an earlier copy of the store.
+const THEME_FOLDERS = ['tema', 'theme'];
 // Where the project is in the chosen folder: the folder itself, a folder holding exactly one
-// project, or a bare theme (the folder or its tema/). Reading and writing resolve it the same way.
+// project, or a bare theme (the folder, its tema/ or its theme/). Reading and writing resolve it the same way.
 async function locate(root: Folder): Promise<{project?: Folder; theme?: Folder; name: string}> {
   if (await isProject(root)) return {project: root, theme: await child(root, 'tema', 'directory') as Folder | undefined, name: root.name};
-  const tema = await child(root, 'tema', 'directory') as Folder | undefined;
-  const theme = await isTheme(root) ? root : tema && await isTheme(tema) ? tema : undefined;
-  if (theme) return {theme, name: root.name};
+  if (await isTheme(root)) return {theme: root, name: root.name};
+  const themes: Folder[] = [];
+  for (const name of THEME_FOLDERS) {
+    const folder = await child(root, name, 'directory') as Folder | undefined;
+    if (folder && await isTheme(folder)) themes.push(folder);
+  }
+  // Never a guess between two themes: the one sent must be the one the user edited.
+  if (themes.length > 1) throw new Error('Esta pasta tem tema/ e theme/. Escolha a pasta do tema que você editou.');
+  if (themes.length) return {theme: themes[0], name: root.name};
   const projects: Folder[] = [];
   for await (const entry of root.values()) if (entry.kind === 'directory' && !SKIP.has(entry.name) && await isProject(entry as Folder)) projects.push(entry as Folder);
   if (projects.length > 1) throw new Error(`Esta pasta tem ${projects.length} projetos (${projects.map(p => p.name).slice(0, 4).join(', ')}). Escolha a pasta de um deles.`);
-  if (!projects.length) throw new Error('Não encontrei um projeto exportado nesta pasta. Escolha a pasta extraída do ZIP, a que contém tema/ e .yampi-sync/.');
+  if (!projects.length) throw new Error('Não encontrei um tema nesta pasta. Escolha a pasta do projeto, com tema/ (ou theme/) e .yampi-sync/, ou a própria pasta do tema, com assets/, components/, elements/, sections/ e templates/.');
   return {project: projects[0], theme: await child(projects[0], 'tema', 'directory') as Folder | undefined, name: projects[0].name};
 }
 async function collect(folder: Folder, prefix: string, out: Found[], signal?: AbortSignal): Promise<void> {
