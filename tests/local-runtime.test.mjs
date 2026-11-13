@@ -171,6 +171,13 @@ describe('ambiente local portátil', () => {
     await writeFile(path.join(root, 'tema/components/IconHeader.vue'), '<template><div><slot/></div></template>');
     await expect(packProject(root)).rejects.toThrow('Nome reservado');
   });
+  test('pack recusa o texto que a Yampi não salvaria: include seguido de aspas lido como inclusão', async () => {
+    const root = await project(), file = path.join(root, 'tema/elements/head.twig');
+    await writeFile(file, "<script>fetch('/carrinho', {credentials: 'include', priority: 'low'});</script>\n");
+    await expect(packProject(root)).rejects.toThrow("elements/head.twig: A Yampi recusa salvar este texto: ela lê include seguido de aspas como inclusão de arquivo, mesmo dentro de JavaScript. Na linha 1");
+    await writeFile(file, "<script>fetch('/carrinho', {credentials: `include`, priority: 'low'});</script>\n");
+    await expect(packProject(root)).resolves.toBeInstanceOf(Uint8Array);
+  });
   test('pack aponta arquivo modificado que inclui arquivo novo', async () => {
     const root = await project();
     await mkdir(path.join(root, 'tema/sections/home'), {recursive: true});

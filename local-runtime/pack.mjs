@@ -2,11 +2,11 @@ import path from 'node:path';
 import {writeFile, access} from 'node:fs/promises';
 import {zipSync, strToU8} from 'fflate';
 import {readProject, digest} from './engine.mjs';
-import {dependencyReport, productionIssues} from './dependencies.mjs';
+import {dependencyReport, productionIssues, saveIssues} from './dependencies.mjs';
 export async function packProject(root) {
   const {manifest, baseline, files} = await readProject(root);
   for (const [name, value] of Object.entries(files)) if (/\.(?:twig|vue)$/.test(name) && (!baseline[name] || digest(value) !== digest(baseline[name]))) {
-    const issues = productionIssues(name, value.toString('utf8'));
+    const text = value.toString('utf8'), issues = [...productionIssues(name, text), ...saveIssues(name, text)];
     if (issues.length) throw new Error(`${name}: ${issues.join(' ')}`);
   }
   const entries = Object.create(null);

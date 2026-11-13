@@ -3,6 +3,10 @@ export interface DependencyReport {blocked: {path: string; dependencies: {path: 
 export function kebab(name: string): string;
 export const RESERVED_COMPONENTS: Set<string>;
 export function assetUrlProblem(value: unknown): string | undefined;
+export interface YampiInclude {name: string; file: boolean; line: number; excerpt: string}
+export function yampiIncludes(text: string): YampiInclude[];
+export function includeSpot(text: string, name: string): {line: number; excerpt: string} | undefined;
+export function saveIssues(path: string, text: string): string[];
 export function productionIssues(path: string, text: string): string[];
 export function references(path: string, text: string): Reference[];
 export function resolvedReferences(path: string, text: string, paths: Iterable<string>): string[];

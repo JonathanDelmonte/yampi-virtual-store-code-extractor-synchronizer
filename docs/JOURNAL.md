@@ -318,3 +318,21 @@ Decisões:
 - `CLAUDE.md` registra onde ver qual módulo o editor carrega.
 
 Ainda sem validação real: o primeiro envio com a 0.10.6 numa loja real. As gravações de textos existentes usam os mesmos controles de antes (**Salvar arquivo**, abas e CodeMirror), que o módulo novo mantém.
+
+## 13/11/2026 — Recusa da Yampi ao salvar (0.10.7)
+
+Relato do proprietário, com duas capturas de tela de um envio real de 19 itens: o editor mostrou, num bloco vermelho acima das abas, "Erro ao incluir o arquivo ', priority: '. O arquivo não foi encontrado.", com `elements/scripts/navigation.twig` ainda marcado como alterado; o painel, na 0.10.6, parou em 2 de 19 itens com "O editor não confirmou a operação dentro do prazo: esperava a Yampi confirmar o salvamento de elements/scripts/navigation.twig." Pediu que os dois erros fossem corrigidos.
+
+Causas:
+- O servidor da Yampi lê, num `.twig` salvo, a palavra `include` seguida de aspas como inclusão do arquivo nomeado até as próximas aspas, sem olhar se está num `<script>`. O texto tinha, pelo que a mensagem mostra, `credentials: 'include', priority: '…'` (um `fetch` com prioridade): a Yampi procurou o arquivo `, priority: ` e recusou o salvamento (HTTP 406). O texto do tema não está neste repositório; a forma exata foi deduzida da mensagem.
+- O módulo público do editor carregado hoje (`code-editor-9121cad2.js`, que só importa o `web-component-030ca37f.js` do editor de 05/11/2026) e o anterior (`550f3324`), lidos como dado em 13/11/2026, sem executá-los e sem trazê-los ao repositório, mostram a mesma resposta: num 406, a mensagem do servidor vai para `main .has-error > .bg-red-pure`; em qualquer recusa, o botão volta ligado e o arquivo continua alterado. A ponte só esperava o botão desligar, até 20 s (60 s com a aba oculta); a 0.10.6 já dizia o que faltava, mas não o motivo.
+
+Decisões:
+- A ponte reconhece o bloco e para na hora, com a mensagem e a linha do trecho. Uma recusa sem mensagem para quando o envio do botão termina com ele ligado, depois de 1 s estável: no editor real, o sucesso desliga o botão na mesma atualização que encerra o envio.
+- Um bloco anterior é fechado pelo próprio ícone antes de salvar. Sem isso, a mesma recusa de novo, ou uma recusa sem mensagem com o bloco antigo na tela, seriam iguais na página. O ícone só esconde o aviso; nada da loja muda.
+- A comparação barra o texto antes do envio (`saveIssues`), para o envio não parar no meio. Só a mesma linha e só nomes que nenhum arquivo pode ter: é o que a recusa real mostra. Ler entre linhas barraria `credentials: 'include'` seguido de quebra de linha, comum em JavaScript, sem prova de que a Yampi recuse; se recusar, a ponte mostra a mensagem dela.
+- A regra é separada de `productionIssues`, que a gravação também aplica aos arquivos incluídos pelo texto: um arquivo da loja só incluído não é salvo de novo e não pode bloquear quem o inclui.
+- A alteração recusada não é desfeita na aba. Restaurar o texto antigo deixaria a aba marcada como alterada do mesmo jeito (o editor marca qualquer mudança), e fechar a aba sem salvar passa pela janela **Alterações não salvas**, com o botão de descartar, que a extensão não aciona.
+- `dependencies.mjs` e `pack.mjs` mudaram: os hashes anteriores (iguais da 0.10.1 à 0.10.6) entraram em `scripts/runtime-versions.json`.
+
+Ainda sem validação real: a ponte nova não salvou numa loja real, e a regra da Yampi entre linhas, em `.vue` e para nomes de caminho inexistentes não foi observada.

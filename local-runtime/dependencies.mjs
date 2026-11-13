@@ -18,6 +18,45 @@ export const RESERVED_COMPONENTS = new Set(('IconBag IconBuyButton IconCart Icon
 export function assetUrlProblem(value) {
   return String(value).startsWith('/assets/') ? undefined : 'assets_url precisa do caminho completo a partir do template, como "/assets/images/capa.png". A Yampi concatena o valor literalmente; "images/capa.png" gera um endereço quebrado.';
 }
+// Yampi reads the inclusions of a Twig text when it is saved: its server refused one on
+// 13/11/2026 and the editor showed the refusal. The word include followed by a quote counts as
+// the inclusion of the file named up to the next quote, anywhere in the text, JavaScript too:
+// `credentials: 'include', priority: …` (as the message shows) made it look for the file
+// ", priority: ", and the save was refused with "Erro ao incluir o arquivo ', priority: '. O
+// arquivo não foi encontrado."
+// Read here on the same line only: what this misses still stops the send at the editor's refusal.
+const YAMPI_INCLUDE = /include\s*\(?\s*['"]([^'"\n]+)['"]/g;
+// What a theme file can be called. Any other name is not a file, and Yampi would not find it.
+const FILE_NAME = /^[\p{L}\p{N}_.@/-]+$/u;
+const lineOf = (text, index) => text.slice(0, index).split('\n').length;
+const literal = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// The line around a stretch, cut between words about 40 characters before and after it.
+function stretch(text, index, length) {
+  const start = text.lastIndexOf('\n', index - 1) + 1, end = text.indexOf('\n', index), stop = end < 0 ? text.length : end;
+  let from = Math.max(start, index - 40), to = Math.min(stop, index + length + 40);
+  if (from > start) {const space = text.slice(from, index).search(/\s/); if (space >= 0) from += space;}
+  if (to < stop) {const space = text.slice(index + length, to).search(/\s\S*$/); if (space >= 0) to = index + length + space;}
+  return (from > start ? '…' : '') + text.slice(from, to).trim() + (to < stop ? '…' : '');
+}
+// Every inclusion as Yampi reads it: the name it looks for, whether a file can have that name,
+// and where it is (line and stretch).
+export function yampiIncludes(text) {
+  return [...text.matchAll(YAMPI_INCLUDE)].map(match => ({name: match[1], file: FILE_NAME.test(match[1]), line: lineOf(text, match.index), excerpt: stretch(text, match.index, match[0].length)}));
+}
+// Where a text holds the inclusion a refusal of Yampi names, for the message that explains it.
+export function includeSpot(text, name) {
+  const match = new RegExp(String.raw`include\s*\(?\s*['"]` + literal(name) + `['"]`).exec(text);
+  return match ? {line: lineOf(text, match.index), excerpt: stretch(text, match.index, match[0].length)} : undefined;
+}
+// What Yampi refuses when this text is saved. Only for the texts a send writes: a file already
+// in the store and only included by them is not saved again.
+export function saveIssues(path, text) {
+  if (!path.endsWith('.twig')) return [];
+  const refused = yampiIncludes(text).filter(item => !item.file);
+  if (!refused.length) return [];
+  const [first] = refused, more = refused.length - 1;
+  return [`A Yampi recusa salvar este texto: ela lê include seguido de aspas como inclusão de arquivo, mesmo dentro de JavaScript. Na linha ${first.line} (${first.excerpt}), ela procuraria o arquivo “${first.name}”, que não existe${more ? `, e há mais ${more} ${more === 1 ? 'trecho assim' : 'trechos assim'}` : ''}. Não deixe include colado a aspas: em JavaScript, use crases, como credentials: \`include\`.`];
+}
 export function productionIssues(path, text) {
   const issues = [];
   if (path.startsWith('components/') && path.endsWith('.vue') && RESERVED_COMPONENTS.has(kebab(path.split('/').at(-1).slice(0, -4)))) issues.push('Nome reservado pela Yampi: este componente é substituído por um ícone interno. Crie uma cópia com um nome próprio e atualize as tags que a usam.');

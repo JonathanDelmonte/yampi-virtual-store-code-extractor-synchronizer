@@ -3,9 +3,10 @@ import type {EditorView} from '@codemirror/view';
 import {editorView, readDocument} from './editor-document';
 import {assertContext, validatePath, validatePaths, validateImage, imagePath, writable, creatableName, uploadablePath, imageType, dataUrlBytes, MAX_FILE_BYTES, type Context} from '../core/model';
 import {openSession, readFiles, YAMPI_SERVER, type Server} from './server-read';
+import {includeSpot} from '../../local-runtime/dependencies.mjs';
 // directOpen/directRead: copies straight from the editor's own server (see server-read.ts).
 export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write' | 'create' | 'upload' | 'links' | 'directOpen' | 'directRead'; context?: Context; path?: string; paths?: string[]; store?: string; expected?: string; content?: string}
-export const version = '0.10.6';
+export const version = '0.10.7';
 type Reply = {ok: true; value: unknown} | {ok: false; error: string};
 const clean = (e: Element | null) => e?.textContent?.trim() || '';
 type EditorRoot = ShadowRoot | HTMLElement;
@@ -122,7 +123,8 @@ function dirty(): boolean {
   return buttons.some(b => !b.disabled) || !!root().querySelector('main .tab-item .close-button.has-changes, main .tab-item .holder-icon circle, main .tab-item .change-icon, main .tab-item .unsaved, main .tab-item.dirty');
 }
 function assertClean(): void {
-  if (dirty()) throw new Error('Existe um arquivo com alterações não salvas. Salve ou descarte manualmente antes de continuar.');
+  // After a refused save the change stays in its tab: closing the tab without saving discards it.
+  if (dirty()) throw new Error('Existe um arquivo com alterações não salvas no editor. Feche a aba dele sem salvar, ou salve-o se a alteração for sua, antes de continuar.');
 }
 function guard(context: Context): void {assertContext(context, getContext());}
 // Waits react to the editor's own DOM changes. In a hidden tab the browser runs timers about
@@ -163,12 +165,37 @@ async function until(check: () => boolean, timeout = 10000, what?: string | (() 
 }
 // The same value for at least 320 ms, seen at least twice: a file opens before its content
 // arrives, and the editor can swap documents while loading.
-function stability(): (value: unknown) => boolean {
+function stability(ms = 320): (value: unknown) => boolean {
   let last: unknown, since = 0, checks = 0;
   return value => {
     if (value === undefined || value !== last) {last = value; since = performance.now(); checks = 0; return false;}
-    return ++checks >= 2 && performance.now() - since >= 320;
+    return ++checks >= 2 && performance.now() - since >= ms;
   };
+}
+// How the editor answers a save (public editor modules 550f3324 and 030ca37f, read on 13/11/2026).
+// While it sends, the button (DsButton, as "Adicionar arquivo") carries "sending" and a loader with
+// a spinner. Saved, the button turns off in the same update that ends the sending. Refused, the
+// button stays on and the file stays marked as changed; when the Yampi server explains the refusal
+// (HTTP 406), its message goes to a red box above the tabs, and any other refusal shows nothing.
+// A box stays until the next save that works, or until closed.
+const sending = (button: HTMLButtonElement) => button.classList.contains('sending') || !!button.querySelector('.loading, .spinner, .button__loader, .button__spinner');
+const errorBoxes = () => [...root().querySelectorAll<HTMLElement>('main .has-error > .bg-red-pure')];
+function saveError(): string {return errorBoxes().map(box => box.textContent?.trim() || '').filter(Boolean).join('\n');}
+// A box left by an earlier refusal would read as this save's: the same refusal again changes
+// nothing on screen, and neither does a refusal without a message. Its own icon closes it, which
+// only hides the notice. Best effort: a box that stays is compared with what comes after.
+async function dismissSaveError(): Promise<void> {
+  const boxes = errorBoxes();
+  if (!boxes.length) return;
+  for (const box of boxes) box.querySelector('svg')?.dispatchEvent(new MouseEvent('click', {bubbles: true, composed: true}));
+  await until(() => !saveError(), 3000).catch(() => {});
+}
+// The refusal in the user's terms, with the stretch Yampi read as an inclusion when it names one.
+function refusal(path: string, message: string, content: string): string {
+  const named = /incluir o arquivo '([\s\S]*?)'\.(?:\s|$)/i.exec(message)?.[1];
+  const spot = named === undefined ? undefined : includeSpot(content, named);
+  const where = spot ? ` Ela leu como inclusão de arquivo a palavra include seguida de aspas na linha ${spot.line} (${spot.excerpt}).` : '';
+  return `A Yampi recusou salvar ${path}: ${message.replace(/\s+/g, ' ').trim()}${where} A loja continua com a versão anterior. A alteração ficou só na aba do editor: feche essa aba sem salvar, corrija o projeto e compare de novo.`;
 }
 function selectedPath(): string | undefined {
   const selected = root().querySelectorAll('aside .collapse-item.selected .file-name');
@@ -314,10 +341,9 @@ async function openAddDialog(folder: string, context: Context): Promise<HTMLElem
   if (control.kind !== 'dialog') throw new Error(`O "+" da pasta ${folder} não abriu o envio de imagens.`);
   return control.dialog;
 }
-// The editor shows a "Salvar"/"Adicionar" request in flight on the button itself (DsButton: class
-// "sending" and a loader). It shows a refusal of the name, and "already exists", under the field;
-// any other refusal of the server it only logs to the console, and the window stays open.
-const sending = (button: HTMLButtonElement) => button.classList.contains('sending') || !!button.querySelector('.button__loader');
+// The window shows its "Adicionar" request in flight on the button, as "Salvar" does (`sending`,
+// above). It shows a refusal of the name, and "already exists", under the field; any other refusal
+// of the server it only logs to the console, and the window stays open.
 async function finishDialog(dialog: HTMLElement, path: string, error: string, context: Context, timeout: number): Promise<void> {
   try {
     await until(() => !dialogButton(dialog, 'Adicionar arquivo').disabled || !!clean(dialog.querySelector(error)), 10000, `o botão "Adicionar arquivo" ficar disponível para ${path}`);
@@ -468,17 +494,29 @@ export async function command(input: Command): Promise<Reply> {
     if (!writable(input.path) || new TextEncoder().encode(input.content).length > MAX_FILE_BYTES || input.content.includes('\u0000')) throw new Error('Tipo de arquivo não permitido para envio.');
     if (old !== input.expected) throw new Error(`Conflito antes de salvar: ${input.path}`);
     if (input.content === old) return {ok: true, value: {saved: false}};
+    await dismissSaveError();
     guard(context);
     if (selectedPath() !== input.path) throw new Error('A seleção do editor mudou.');
     editor.dispatch({changes: {from: 0, to: editor.state.doc.length, insert: input.content}});
     await until(() => !findButton('Salvar arquivo').disabled, 10000, `o botão "Salvar arquivo" ficar disponível para ${input.path}`);
     guard(context);
     if (selectedPath() !== input.path || readDocument(editor) !== input.content) throw new Error('O arquivo foi alterado durante a operação. Gravação interrompida.');
-    const save = findButton('Salvar arquivo');
+    const save = findButton('Salvar arquivo'), shown = saveError();
     save.click();
+    // Saved: the button turns off. Refused: the sending ends with the button on, which stops the
+    // send at once instead of waiting for the time limit, with Yampi's message when it gives one.
+    let sent = false;
+    const ended = stability(1000);
     await until(() => {
       guard(context);
-      return save.disabled && !save.querySelector('.loading, .spinner, .button__loader, .button__spinner') && !root().querySelector('main [aria-busy="true"]');
+      if (sending(save)) {sent = true; ended(undefined); return false;}
+      // Another load in the editor only delays the answer.
+      if (root().querySelector('main [aria-busy="true"]')) {ended(undefined); return false;}
+      if (save.disabled) return true;
+      const message = saveError();
+      if (message && message !== shown) throw new Error(refusal(input.path!, message, input.content!));
+      if (sent && ended('refused')) throw new Error(`A Yampi não confirmou o salvamento de ${input.path}: o editor terminou de enviar sem salvar e sem mostrar o motivo${shown ? ` (continua na tela um aviso anterior: ${shown.replace(/\s+/g, ' ')})` : ''}. A alteração ficou só na aba do editor: feche essa aba sem salvar e continue o envio de onde parou.`);
+      return false;
     }, 20000, `a Yampi confirmar o salvamento de ${input.path}`);
     // Do not click publish, delete or rename controls. A separate fresh-page verification follows.
     if (readDocument(view()) !== input.content) throw new Error('Conteúdo diferente após salvar.');

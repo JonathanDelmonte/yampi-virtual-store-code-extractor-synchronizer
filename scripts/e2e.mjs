@@ -321,6 +321,35 @@ try {
   assert.equal(currentRead.value.ok, true); assert.equal(currentRead.current, true); assert.equal(currentRead.unchanged, true);
   assert.equal(currentRead.value.value, new TextDecoder().decode(entries['tema/templates/long.twig']));
   assert.deepEqual(currentRead.operations, {dispatch: 0, save: 0, forbidden: 0, add: 0});
+  // A save the Yampi server refuses (HTTP 406) shows its message in a red box above the tabs: the
+  // bridge stops at once with it, never at the time limit. A refusal without a message stops too.
+  const refusalEditor = await browser.newPage(); await refusalEditor.goto('https://app.yampi.com.br/store/code-editor/?recusa=1');
+  await refusalEditor.waitForFunction(() => document.querySelector('yampi-code-editor')?.shadowRoot?.querySelector('aside .file-name'));
+  await refusalEditor.addScriptTag({content: await readFile(path.join(repository, 'dist/bridge.js'), 'utf8')});
+  const refusals = await refusalEditor.evaluate(async () => {
+    const bridge = window.YampiThemeSyncBridge, file = 'elements/head.twig', pause = () => new Promise(resolve => setTimeout(resolve, 600));
+    const timed = async command => {const start = performance.now(); return {...await bridge.command(command), ms: performance.now() - start};};
+    const before = (await bridge.command({op: 'read', path: file})).value, edited = before + '<!-- editado -->\n';
+    const refused = await timed({op: 'write', path: file, expected: before, content: before + "<script>fetch('/carrinho', {credentials: 'include', priority: 'low'});</script>\n"});
+    const kept = sessionStorage.getItem('fixture-files'), box = document.querySelector('yampi-code-editor').shadowRoot.querySelector('.has-error > .bg-red-pure')?.textContent.trim();
+    const dirty = await bridge.command({op: 'context'});
+    window.fictitiousDiscard(); await pause(); window.fictitiousFailNextSave();
+    const silent = await timed({op: 'write', path: file, expected: before, content: edited});
+    window.fictitiousDiscard(); await pause();
+    const saved = await timed({op: 'write', path: file, expected: before, content: edited});
+    return {refused, kept, box, dirty, silent, saved, stored: JSON.parse(sessionStorage.getItem('fixture-files'))[file], edited, left: !!document.querySelector('yampi-code-editor').shadowRoot.querySelector('.bg-red-pure'), operations: window.fictitiousOperations};
+  });
+  assert.equal(refusals.refused.ok, false);
+  assert.match(refusals.refused.error, /^A Yampi recusou salvar elements\/head\.twig: Erro ao incluir o arquivo ', priority: '\. O arquivo não foi encontrado\. Ela leu como inclusão de arquivo a palavra include seguida de aspas na linha 2 \(.*credentials: 'include', priority: 'low'.*\)\. A loja continua com a versão anterior\./);
+  assert.equal(refusals.box, "Erro ao incluir o arquivo ', priority: '. O arquivo não foi encontrado.");
+  assert.equal(refusals.kept, null, 'A recusa não pode gravar nada na loja fictícia.');
+  assert.match(refusals.dirty.error, /não salvas/);
+  assert.equal(refusals.silent.ok, false); assert.match(refusals.silent.error, /^A Yampi não confirmou o salvamento de elements\/head\.twig: o editor terminou de enviar sem salvar e sem mostrar o motivo\./);
+  assert.ok(refusals.refused.ms < 5000 && refusals.silent.ms < 6000, `A recusa deve parar na hora: ${Math.round(refusals.refused.ms)} ms e ${Math.round(refusals.silent.ms)} ms.`);
+  assert.equal(refusals.saved.ok, true, refusals.saved.error); assert.equal(refusals.stored, refusals.edited); assert.equal(refusals.left, false);
+  assert.deepEqual({save: refusals.operations.save, forbidden: refusals.operations.forbidden, add: refusals.operations.add}, {save: 3, forbidden: 0, add: 0});
+  await refusalEditor.close();
+  console.log(`E2E: salvamento recusado pela Yampi parou em ${Math.round(refusals.refused.ms)} ms com a mensagem e a linha; recusa sem mensagem em ${Math.round(refusals.silent.ms)} ms; o salvamento seguinte funcionou e limpou o aviso.`);
   console.log('E2E aprovado: confirmação antes da cópia, CodeMirror antigo e atual, zero mutações na exportação, Shadow DOM, isolamento de loja/componente, erro de conexão e retry, PNG, projeto portátil com npm ci, Twig/Sass/Vue 2, importação de pasta/ZIP, envio com backup/reload e restauração. Nenhuma requisição alcançou a Yampi.');
   // Exercise the actual panel -> authenticated worker -> public capture -> ZIP
   // pipeline. The worker's fetch receives only the synthetic public responses.

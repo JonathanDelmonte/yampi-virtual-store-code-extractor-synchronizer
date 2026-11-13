@@ -27,13 +27,44 @@ root.addEventListener('click', event => {if ((event.target as Element).closest('
 $('test-info').textContent = `Publicações: ${publications}`;
 function store() {sessionStorage.setItem('fixture-files', JSON.stringify(files));}
 const save = $<HTMLButtonElement>('save');
+// The fictitious server reads the inclusions of a Twig text before keeping it, as the Yampi
+// server did on 13/11/2026: "include", a quote, and the name up to the next quote, anywhere in
+// the text. A name that is not a file of the store refuses the save (HTTP 406, with a message).
+function refusal(path: string, value: string): string | undefined {
+  if (!path.endsWith('.twig')) return undefined;
+  for (const [, name] of value.matchAll(/include\s*\(?\s*['"]([^'"]+)['"]/g)) if (!(name in files) && !(name in assetSources) && !name.startsWith('yampi-internals/')) return `Erro ao incluir o arquivo '${name}'. O arquivo não foi encontrado.`;
+  return undefined;
+}
+// What the editor shows of a refusal: the server's message in a red box above the tabs, closed by
+// its icon or by the next save that works. The same message again changes nothing on screen.
+function showRefusal(message: string) {
+  const area = $('editor-area'), box = area.querySelector<HTMLElement>(':scope > .bg-red-pure');
+  area.classList.add('has-error');
+  if (box?.firstChild?.textContent === message + ' ') return;
+  const holder = box || document.createElement('div'), close = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  holder.className = 'flex justify-between mb-4 mr-4 p-4 rounded-lg border bg-red-pure text-white whitespace-pre-line';
+  close.setAttribute('width', '28'); close.setAttribute('height', '28'); close.setAttribute('viewBox', '0 0 32 32'); close.setAttribute('fill', '#FCFBF9'); close.setAttribute('role', 'presentation');
+  close.innerHTML = '<path d="M14.6 16l-4.1 4.1 1.4 1.4 4.1-4.1 4.1 4.1 1.4-1.4-4.1-4.1 4.1-4.1-1.4-1.4-4.1 4.1-4.1-4.1-1.4 1.4z"/>';
+  close.addEventListener('click', clearRefusal);
+  holder.replaceChildren(document.createTextNode(message + ' '), close);
+  if (!box) area.prepend(holder);
+}
+function clearRefusal() {$('editor-area').classList.remove('has-error'); $('editor-area').querySelector(':scope > .bg-red-pure')?.remove();}
+// Test control: the server's next answer to a save is another error, which the editor does not show.
+let failNextSave = false;
 save.addEventListener('click', () => {
-  if (!current || !editor || save.disabled) return;
+  if (!current || !editor || save.disabled || save.classList.contains('sending')) return;
   const path = current, value = editor.state.doc.toString();
   operations.save++; saves++;
-  // Keep enabled until the fake server has persisted, just as a save acknowledgment should.
+  // While sending, the button stays enabled with a loader, as the editor's DsButton does.
+  sendingState(save, true);
   setTimeout(() => {
-    files[path] = value; store(); save.disabled = true; unsaved(false);
+    sendingState(save, false);
+    const refused = refusal(path, value), failed = failNextSave;
+    failNextSave = false;
+    if (failed) return;
+    if (refused) {showRefusal(refused); return;}
+    files[path] = value; store(); save.disabled = true; unsaved(false); clearRefusal();
     $('version').textContent = 'Versão salva · ' + Date.now();
   }, 150);
 });
@@ -244,5 +275,11 @@ Object.assign(window, {fictitiousServer: (route: string, path?: string) => {
   if (route === 'identity') return {alias};
   return path === undefined ? null : path in files ? files[path] : assetSources[path] ?? null;
 }});
+// Test controls: the server answers the next save with an error the editor does not show; and the
+// tab's change is discarded, as closing the tab without saving does. A red box stays on screen.
+Object.assign(window, {
+  fictitiousFailNextSave: () => {failNextSave = true;},
+  fictitiousDiscard: () => {unsaved(false); save.disabled = true; if (current) open(current);}
+});
 $('reset').addEventListener('click', () => {sessionStorage.removeItem('fixture-files'); sessionStorage.removeItem('fixture-assets'); location.reload();});
 $('publish').addEventListener('click', () => {sessionStorage.setItem('fixture-publications', String(++publications)); $('test-info').textContent = `Publicações: ${publications}`;});

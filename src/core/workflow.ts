@@ -2,7 +2,7 @@ import {assertContext, safeFiles, safeSnapshot, imagePath, writable, validatePat
 import {missingNewTexts, selectionIssues} from './planner';
 import {DIRECT_BATCH, DIRECT_MIN, STORE_CHANGED, directKind, directSamples, storeChanged} from './direct';
 import {COMPONENTS_FILE as COMPONENTS} from '../../local-runtime/contract.mjs';
-import {productionIssues, resolvedReferences} from '../../local-runtime/dependencies.mjs';
+import {productionIssues, resolvedReferences, saveIssues} from '../../local-runtime/dependencies.mjs';
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 type Hooks = {signal?: AbortSignal; progress?: (p: Progress) => void};
 function check(signal?: AbortSignal) {if (signal?.aborted) throw new Error('Cancelado. Os arquivos já salvos não foram desfeitos.');}
@@ -184,7 +184,8 @@ export async function applyPlan(adapter: Adapter, plan: Plan, selected: string[]
       row.status === 'create' && writable(path) && !row.image && row.local !== undefined && row.remote === undefined ||
       row.status === 'upload' && !!row.image?.local && !row.image.remote);
     if (!eligible) throw new Error(`Arquivo não elegível para envio: ${path}`);
-    const issues = row.local === undefined ? [] : productionIssues(path, row.local);
+    // A plan confirmed before a rule existed (an interrupted send continued) meets it here, before any change.
+    const issues = row.local === undefined ? [] : [...productionIssues(path, row.local), ...saveIssues(path, row.local)];
     if (issues.length) throw new Error(`${path}: ${issues.join(' ')} Compare novamente depois de corrigir o projeto.`);
     return row;
   });

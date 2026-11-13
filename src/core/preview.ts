@@ -36,7 +36,7 @@ export interface PreviewBundle {
 // own budget, so they never take the place of a representative page, CSS, fonts or banners.
 export interface PreviewLimits {pages: number; resources: number; resourceBytes: number; totalBytes: number; jsonBytes: number; apiRequests: number; apiBytes: number; timeoutMs: number; storePages: number; storeBytes: number; storeRounds: number; productPages: number; productBytes: number}
 export const PREVIEW_LIMITS: PreviewLimits = {pages: 8, resources: 200, resourceBytes: 2 * 1024 * 1024, totalBytes: 12 * 1024 * 1024, jsonBytes: 2 * 1024 * 1024, apiRequests: 40, apiBytes: 4 * 1024 * 1024, timeoutMs: 15000, storePages: 200, storeBytes: 24 * 1024 * 1024, storeRounds: 4, productPages: 400, productBytes: 16 * 1024 * 1024};
-export const TOOL_VERSION = '0.10.6';
+export const TOOL_VERSION = '0.10.7';
 // Where Yampi storefronts keep their images and fonts: asked together with the storefront, in one
 // question at the download click, so the capture does not stop to ask for each one.
 export const PREVIEW_ORIGINS = ['https://cdn.yampi.io', 'https://fonts.googleapis.com', 'https://fonts.gstatic.com'];

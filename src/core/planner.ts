@@ -1,5 +1,5 @@
 import {assertContext, safeSnapshot, validatePaths, writable, sameIgnoringWhitespace, creatableName, freshFile, uploadablePath, yampiImageName, type Assets, type Snapshot, type Files, type Plan, type PlanRow} from './model';
-import {dependencyReport, resolvedReferences, productionIssues} from '../../local-runtime/dependencies.mjs';
+import {dependencyReport, resolvedReferences, productionIssues, saveIssues} from '../../local-runtime/dependencies.mjs';
 import {COMPONENTS_FILE} from '../../local-runtime/contract.mjs';
 import {hasConflictMarks} from './merge';
 import {knownBase, type Known} from './known';
@@ -114,8 +114,9 @@ export function makePlan(base: Snapshot, local: Files, remote: Snapshot, localAs
     if (path === COMPONENTS_FILE && (status === 'update' || status === 'conflict')) {status = 'unsupported'; reason = 'A Yampi gera este arquivo sozinha, com os componentes que existem na loja. A extensão não o envia.';}
     if (l !== undefined && (status === 'update' || status === 'create') && hasConflictMarks(l)) {status = 'blocked-dependency'; reason = MARKED;}
     if (leftovers[path] && (status === 'update' || status === 'create')) {status = 'blocked-dependency'; reason =`Usa imagens que vão direto para assets/images por um caminho que a extensão não consegue ajustar (${leftovers[path].join(', ')}). Escreva no código o caminho completo, como 'images/pasta/arquivo.jpg'.`;}
+    // What would break in the store, and what Yampi refuses to save (only for a text to be saved).
     if (l !== undefined && (status === 'update' || status === 'create')) {
-      const issues = productionIssues(path, l);
+      const issues = [...productionIssues(path, l), ...saveIssues(path, l)];
       if (issues.length) {status = 'blocked-dependency'; reason = issues.join(' ');}
     }
     return {path, status, base: b, local: l, remote: r, ...(rewritten[path] ? {rewritten: rewritten[path]} : {}), ...(override ? {override} : {}), ...(reason ? {reason} : {}), ...(assumed.has(path) ? {assumed: true} : {}), ...(origin ? {origin} : {})};

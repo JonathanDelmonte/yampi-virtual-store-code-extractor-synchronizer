@@ -1,5 +1,18 @@
 # Validação
 
+## Recusa da Yampi ao salvar na 0.10.7, em 13/11/2026
+
+Relato: num envio real de 19 itens, com a 0.10.6, a Yampi recusou salvar `elements/scripts/navigation.twig` com "Erro ao incluir o arquivo ', priority: '. O arquivo não foi encontrado.", e a extensão parou em 2 de 19 itens no fim do prazo ("esperava a Yampi confirmar o salvamento de…"), sem o motivo. Tudo abaixo usa só o editor fictício e exemplos fictícios; nenhuma requisição alcançou a Yampi e nada foi gravado numa loja real.
+
+- **Editor real, lido como dado.** O módulo que o editor carrega hoje (`code-editor-9121cad2.js`, entrada `src/web-component.ts` do `manifest.json` da Yampi, que só importa o `web-component-030ca37f.js` do editor de 05/11/2026) e o anterior (`web-component-550f3324.mjs`), lidos em 13/11/2026 sem executá-los e sem trazê-los ao repositório, mostram a mesma recusa: num HTTP 406, a mensagem do servidor vai para um bloco `bg-red-pure` dentro de `has-error`, acima das abas; durante o envio, o botão **Salvar arquivo** tem `sending` e um indicador; numa recusa, ele volta ligado e o arquivo continua alterado; num salvamento que funciona, desliga na mesma atualização. A mensagem "Erro ao incluir" não está nos módulos: vem do servidor. Os avisos flutuantes de erro também usam `bg-red-pure`, mas ficam fora de `main .has-error`. O editor fictício passou a reproduzir essa marcação, e o servidor dele recusa uma inclusão de arquivo que não existe.
+- **Regras** (`tests/save-refusal.test.ts`, 13 testes): o trecho do relato é lido como inclusão de `, priority: `, com linha e trecho; inclusões de arquivos do tema, `yampi-internals/`, nomes montados, `includes()`, `@include` e `'include'` no fim da linha não bloqueiam; texto alterado ou novo fica bloqueado com o motivo, e quem depende da versão nova espera; um arquivo da loja só incluído não bloqueia, e o envio termina; o plano de um envio interrompido para antes do backup e de qualquer gravação.
+- **`npm run pack`** (`tests/local-runtime.test.mjs`): recusa o texto e aceita a correção com crases.
+- **Ponte no Chromium** (`scripts/e2e.mjs`, cenário novo, com o editor fictício): o salvamento recusado parou em 934 ms, com a mensagem da Yampi e a linha do trecho, sem gravar nada; a aba alterada bloqueou o comando seguinte; a recusa sem mensagem parou em 1992 ms (antes, só no fim do prazo de 20 s, ou 60 s com a aba oculta); o salvamento seguinte funcionou e limpou o aviso.
+- `npm run check` passou com 407 testes em 28 arquivos, typecheck e build, e `npm run package` gerou a 0.10.7. `npm run test:bare`, `test:panel`, `test:update` e `test:background` passaram no Chromium; os três primeiros gravam pelo editor fictício com a ponte nova.
+- `npm run test:e2e` passou do download à restauração com mudança externa e parou na conferência do heartbeat do painel (um a cada 20 s), como o código de antes desta correção (`7a69fb4`) no mesmo ambiente. Numa cópia local que só registra essa conferência, o restante passou, com o cenário novo (935 ms e 1991 ms) e o download com a vitrine fictícia. Numa das execuções, a abertura da restauração passou dos 45 s de espera do teste, como numa execução do código anterior; repetida, passou.
+
+Sem validação real: a ponte nova não salvou numa loja real, e a leitura da Yampi entre linhas, em `.vue` e de caminhos que não existem não foi observada.
+
 ## Criação no editor novo da Yampi na 0.10.6, em 11/11/2026
 
 Relato: o envio real parou no primeiro texto novo com "o botão + não abriu nenhuma janela".

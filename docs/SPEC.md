@@ -15,6 +15,7 @@ Regras lidas no módulo público do editor (15/10/2026, e de novo em 10/11/2026)
 - Na pasta `assets/images`, o mesmo botão abre o envio de imagens: PNG, JPEG, WebP ou SVG de até 2 MB, salvas sempre em `assets/images/<nome>`, com o nome em minúsculas e outros caracteres trocados por `-`.
 - Não há criação de pastas nem substituição de imagem.
 - `elements/scripts/components.twig` é gerado pela Yampi com os componentes existentes.
+- Ao salvar um `.twig`, o servidor lê `include` seguido de aspas como inclusão do arquivo nomeado até as próximas aspas, em qualquer parte do texto, JavaScript incluído, e recusa o salvamento se não acha o arquivo (visto numa recusa real em 13/11/2026; veja "Recusa da Yampi ao salvar").
 
 ## Comparação
 
@@ -35,6 +36,7 @@ Cada caminho recebe um estado a partir do original exportado (B), do projeto loc
 | imagem nova, sem R, com **Enviar imagens novas** ligado | `upload` | sim: a extensão envia |
 | imagem nova, sem R, com a opção desligada (padrão) | `new-local`, com o motivo | não; um texto que a usa fica bloqueado |
 | texto com marcações de conflito (`<<<<<<<` … `=======` … `>>>>>>>`) | `blocked-dependency`, com o motivo | não: resolva no editor de código |
+| `.twig` a salvar com `include` seguido de aspas e, na mesma linha, um nome que nenhum arquivo pode ter | `blocked-dependency`, com a linha e o trecho | não: a Yampi recusaria salvar |
 | imagem existente alterada | `unsupported` | não: a Yampi não substitui imagens |
 | `elements/scripts/components.twig` alterado | `unsupported` | não: a Yampi gera esse arquivo |
 | fora de `.twig`, `.vue`, `.css` e `.scss` | `unsupported` | não |
@@ -225,6 +227,17 @@ Os dois editores criam com `POST /merchant/file/storage/create?preview=true`; a 
 - **Janela** (editor anterior): mostra só erros de nome e o 409; outra recusa do servidor vai só para o console, e a janela fica aberta. O botão de confirmar tem a classe `sending` e um `.button__loader` durante o pedido. Se o pedido terminou e a janela continua aberta sem mensagem (1,5 s depois do fim do pedido, ou 8 s sem nunca ver o pedido), a extensão fecha a janela pelo **Cancelar** e para com "A Yampi não confirmou a criação de `<arquivo>`".
 
 Cada espera do editor tem nome, e o prazo esgotado diz o que faltou ("esperava o "+" da pasta … abrir o campo de novo arquivo ou a janela…"). O editor fictício reproduz a linha nova por padrão e a janela com `fixture-creation=janela`; `fixture-refuse-create` reproduz a recusa do servidor nos dois.
+
+### Recusa da Yampi ao salvar
+
+Em 13/11/2026, a Yampi recusou salvar um `.twig` que, pela mensagem, tinha num `<script>` as opções de um `fetch` (`credentials: 'include', priority: …`): "Erro ao incluir o arquivo ', priority: '. O arquivo não foi encontrado." O servidor leu `include'` como o começo de uma inclusão e procurou o arquivo `, priority: `. A extensão esperava só o botão **Salvar arquivo** desligar e parou no fim do prazo, sem o motivo.
+
+- **Antes de gravar** (`saveIssues`, em `local-runtime/dependencies.mjs`). Num `.twig` que vai ser salvo (`update` ou `create`), `include`, espaços ou parêntese opcionais, aspas e um nome até as próximas aspas na mesma linha formam uma inclusão (`yampiIncludes`). Um nome que nenhum arquivo do tema pode ter (com vírgula, dois-pontos, espaço, chaves…) bloqueia o texto, com a linha, o trecho e o nome. Um nome de caminho continua com a conferência de dependências. Vale para a comparação, para a gravação (que confere de novo o plano de um envio interrompido) e para `npm run pack`. Não vale para os arquivos que o texto só inclui: a Yampi lê o texto que é salvo, e `productionIssues`, que também percorre os incluídos, continua sem essa regra.
+- **Na hora de salvar** (`bridge.ts`, marcação lida em 13/11/2026 nos módulos públicos do editor `550f3324` e `030ca37f`, este o carregado hoje). Enquanto envia, o botão tem `sending` e um indicador. Salvo, ele desliga na mesma atualização que encerra o envio. Recusado, continua ligado, o arquivo continua marcado como alterado e, quando o servidor explica (HTTP 406), a mensagem aparece num bloco vermelho acima das abas (`main .has-error > .bg-red-pure`). A extensão para na hora com a mensagem e, numa inclusão, com a linha do trecho (`includeSpot`). Envio encerrado com o botão ligado e sem mensagem para depois de 1 s estável.
+- **Aviso anterior.** O bloco fica na tela até um salvamento que funcione ou até ser fechado, e a mesma recusa de novo não muda nada na página. Antes de pôr o texto no editor, a extensão fecha um bloco que já esteja na tela pelo próprio ícone, que só esconde o aviso; um bloco que não fecha é comparado com o que vem depois.
+- A recusa não grava nada na loja. A alteração fica só na aba do editor, que bloqueia as próximas operações até ser fechada sem salvar.
+
+`tests/save-refusal.test.ts`, `tests/local-runtime.test.mjs` e `scripts/e2e.mjs` verificam estas regras; o editor fictício recusa com o mesmo bloco, e o seu servidor procura cada inclusão até as próximas aspas, mesmo em outra linha.
 
 ### Continuar um envio interrompido
 

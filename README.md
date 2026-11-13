@@ -6,6 +6,18 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
+## Versão 0.10.7 — recusa da Yampi ao salvar
+
+Num envio real, a Yampi recusou salvar um texto Twig com JavaScript que, pela mensagem, tinha `credentials: 'include', priority: …`, as opções de um `fetch`. O servidor dela lê a palavra `include` seguida de aspas como inclusão de outro arquivo, mesmo em JavaScript, e procurou o arquivo `, priority: `. O editor mostrou "Erro ao incluir o arquivo ', priority: '. O arquivo não foi encontrado.", mas a extensão não reconhecia esse aviso: esperou o prazo e parou com "O editor não confirmou a operação dentro do prazo: esperava a Yampi confirmar o salvamento de …", sem dizer por quê. A versão está preparada neste código; o link de download acima continua apontando para a última release publicada.
+
+- **Antes de gravar.** A comparação bloqueia um texto `.twig` que a Yampi recusaria: `include` seguido de aspas, na mesma linha, com um nome que nenhum arquivo pode ter. O motivo traz a linha, o trecho e o nome que a Yampi procuraria, e os arquivos alterados que dependem desse texto esperam junto. `npm run pack` recusa o mesmo texto. Um envio interrompido com o plano antigo (**Continuar de onde parou**) para antes de qualquer gravação. Um arquivo que não muda e só é incluído não bloqueia ninguém: a Yampi lê só o texto que é salvo.
+- **Na hora da recusa.** A extensão reconhece o aviso vermelho que o editor mostra quando o servidor da Yampi recusa um salvamento e para na hora, com a mensagem da Yampi e, numa inclusão, a linha do trecho. Uma recusa sem mensagem também para logo, sem esperar o prazo de 20 s (60 s com a aba oculta). A loja fica com a versão anterior, e o que já foi conferido continua nela. A alteração recusada fica só na aba do editor: feche essa aba sem salvar, corrija o projeto e compare de novo.
+- **Como corrigir o tema.** Em JavaScript, troque as aspas do valor por crases: `` credentials: `include` `` é o mesmo valor para o navegador, e a Yampi não o lê como inclusão.
+
+**Validação:** a regra foi deduzida de uma recusa real, em 13/11/2026. O aviso vermelho e o fim do salvamento foram lidos no módulo público do editor que a Yampi carrega hoje (o mesmo do editor de 05/11/2026) e no anterior, e reproduzidos no editor fictício, que recusa da mesma forma. A comparação só barra uma inclusão escrita na mesma linha das aspas; se a Yampi também ler entre linhas, a recusa aparece ao salvar, com a mensagem dela. Testado só com o editor fictício. [Validação](docs/VALIDACAO.md).
+
+Projetos já exportados precisam atualizar suas ferramentas (`node scripts/update-project.mjs <projeto>`, depois `--apply`) para `npm run pack` recusar esse texto.
+
 ## Versão 0.10.6 — criação de arquivos no editor novo da Yampi
 
 Desde 05/11/2026, o editor de código da Yampi cria arquivos de outro jeito: o "+" de uma pasta não abre mais a janela **Adicionar arquivo**, e sim um campo na própria árvore, onde se escreve o nome com a extensão e se confirma com Enter. A extensão esperava a janela, e o envio parava no primeiro arquivo novo ("o botão + não abriu nenhuma janela"). A versão está preparada neste código; o link de download acima continua apontando para a última release publicada.
@@ -297,10 +309,11 @@ O botão **Concluir** no resultado de um envio também retorna à tela inicial d
 | Imagem existente alterada | Não enviada: a Yampi não substitui imagens |
 | `elements/scripts/components.twig` | Nunca enviado: a Yampi gera esse arquivo |
 | Depende de arquivo que não existirá na loja | Bloqueia, com o nome da dependência |
+| Texto `.twig` com `include` seguido de aspas que não nomeiam um arquivo (como `credentials: 'include', priority: 'low'`) | Bloqueia, com a linha: a Yampi recusaria salvar |
 | Arquivos alterados que usam uns aos outros | Enviados juntos |
 | Só espaço em branco | Separado, sem seleção inicial; pode ser descartado |
 
-Cada texto existente é relido antes de salvar. Os arquivos criados e as imagens enviadas são conferidos em grupo, depois de recarregar o editor, antes da etapa seguinte; cada texto é salvo e conferido após recarregar, antes do próximo. A operação para no primeiro erro e mantém o registro parcial; **Continuar de onde parou** retoma do item em que parou, sem refazer o que já foi conferido e sem sobrescrever o que outra pessoa alterou na loja. **Desfazer este envio** e **Comparar para restaurar** (no menu **⋯ → Histórico e backups**) protegem alterações posteriores: arquivos criados voltam ao conteúdo inicial da Yampi, e nada é excluído. A extensão nunca publica, exclui ou renomeia. Regras completas: [SPEC.md](docs/SPEC.md).
+Cada texto existente é relido antes de salvar. Os arquivos criados e as imagens enviadas são conferidos em grupo, depois de recarregar o editor, antes da etapa seguinte; cada texto é salvo e conferido após recarregar, antes do próximo. A operação para no primeiro erro e mantém o registro parcial; um salvamento que a Yampi recusa para na hora, com a mensagem dela. **Continuar de onde parou** retoma do item em que parou, sem refazer o que já foi conferido e sem sobrescrever o que outra pessoa alterou na loja. **Desfazer este envio** e **Comparar para restaurar** (no menu **⋯ → Histórico e backups**) protegem alterações posteriores: arquivos criados voltam ao conteúdo inicial da Yampi, e nada é excluído. A extensão nunca publica, exclui ou renomeia. Regras completas: [SPEC.md](docs/SPEC.md).
 
 ### Atualizar da loja e versões
 
