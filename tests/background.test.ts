@@ -348,6 +348,16 @@ describe('operações em segundo plano: o painel pode fechar', () => {
     expect((await message(token, {action: 'job-start', job: {id: 'job-export-0006', kind: 'export', links}, context: shop})).error).toBe('Operação inválida.');
     expect((await message(token, {action: 'job-start', job: {id: 'job-compare-0007', kind: 'compare', links: [{url: 'javascript:alert(1)', files: []}]}, context: shop})).error).toBe('Operação inválida.');
   });
+  test('comparação de projeto sem original chega à execução pedindo a leitura como original', async () => {
+    const token = await open();
+    expect((await message(token, {action: 'job-start', job: {id: 'job-compare-0008', kind: 'compare', scope: 'project', full: true, adopt: true}, context: shop})).ok).toBe(true);
+    expect(runnerMessages.filter(m => m.target === 'runner' && m.action === 'start').at(-1)).toMatchObject({job: {id: 'job-compare-0008', full: true, adopt: true}});
+    await fromRunner({runner: 'job-compare-0008', session: token, action: 'job-finish', state: jobState('job-compare-0008', 'completed', 1)});
+    // Only a project comparison takes the store as its original: never a send, an update or a restore.
+    for (const [id, job] of [['job-send-0009', {kind: 'send', scope: 'project', adopt: true}], ['job-compare-0010', {kind: 'compare', scope: 'update', adopt: true}], ['job-compare-0011', {kind: 'compare', scope: 'restore', adopt: true}], ['job-compare-0012', {kind: 'compare', adopt: true}], ['job-compare-0013', {kind: 'compare', scope: 'project', adopt: 'sim'}]] as const) {
+      expect((await message(token, {action: 'job-start', job: {id, ...job}, context: shop})).error).toBe('Operação inválida.');
+    }
+  });
   test('comparação em segundo plano não pode gravar', async () => {
     const {token, id} = await startJob('compare');
     expect(stored[token].access).toBe('read');

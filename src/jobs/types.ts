@@ -21,6 +21,9 @@ export interface JobRequest {
   scope?: CompareScope; journalId?: string;
   // compare: the store files to read; full reads every file.
   paths?: string[]; full?: boolean;
+  // compare (project): the project has no original, neither .yampi-sync/ nor one kept by the
+  // extension. The whole store is read and, while there is still none, becomes it.
+  adopt?: boolean;
   // send: continue this interrupted send instead of starting one.
   resume?: string;
 }
@@ -32,7 +35,7 @@ export interface Waiting {kind: 'origins'; origins: string[]}
 export type Decision = {action: 'allow'; origins: string[]} | {action: 'partial'} | {action: 'discard'};
 export type JobResult =
   | {kind: 'export'; texts: number; images: number; pages?: number; fileName: string; preview: string; previewDetails?: string; warnings?: string[]; previewOnly?: boolean}
-  | {kind: 'compare'; read: number; listed: number; full: boolean; links?: LinkReport}
+  | {kind: 'compare'; read: number; listed: number; full: boolean; links?: LinkReport; adopted?: boolean}
   | {kind: 'send'; journalId?: string; verified: number; created: number; uploaded: number; total: number; warnings: string[]; preview?: string};
 export interface JobState {
   id: string; kind: JobKind; status: JobStatus; scope?: CompareScope; resumed?: boolean;

@@ -7,7 +7,7 @@ import type {JobRequest, JobState} from '../jobs/types';
 // job: the background operation that holds the lock. While it runs, the panel only watches it,
 // and closing or reopening the panel never releases the editor.
 type Session = {tabId: number; editorUrl: string; documentId?: string; locked: boolean; access?: 'read' | 'write'; previewOrigins?: string[]; job?: string};
-const BRIDGE_VERSION = '0.10.2';
+const BRIDGE_VERSION = '0.10.6';
 const RUNNER = 'runner.html';
 const inFlight = new Map<string, Set<Promise<unknown>>>();
 const ports = new Map<string, Set<Promise<string>>>();
@@ -286,10 +286,12 @@ function validRequest(value: unknown): JobRequest {
   for (const key of ['resume', 'journalId'] as const) if (request[key] !== undefined && (typeof request[key] !== 'string' || !/^[\w-]{8,64}$/.test(request[key]!))) throw new Error('Operação inválida.');
   // A preview-only download reads the storefront, never the theme: only with the storefront allowed.
   if (request.previewOnly !== undefined && (request.kind !== 'export' || request.previewOnly !== true || request.includePreview !== true)) throw new Error('Operação inválida.');
+  // A project without any original takes the whole store, read by a comparison, as its original.
+  if (request.adopt !== undefined && (request.kind !== 'compare' || request.adopt !== true || request.scope !== 'project')) throw new Error('Operação inválida.');
   // The internal links of the texts a comparison sends, read on the storefront like the preview.
   const links = request.links;
   if (links !== undefined && (request.kind !== 'compare' || !Array.isArray(links) || links.length > 200 || links.some(link => !link || typeof link.url !== 'string' || link.url.length > 2048 || !/^https?:\/\//.test(link.url) || !Array.isArray(link.files) || link.files.length > 20 || link.files.some(file => typeof file !== 'string' || file.length > 500)))) throw new Error('Operação inválida.');
-  return {id: request.id, kind: request.kind, ...(request.includePreview ? {includePreview: true} : {}), ...(request.previewOnly ? {previewOnly: true} : {}), ...(request.scope ? {scope: request.scope} : {}), ...(request.journalId ? {journalId: request.journalId} : {}), ...(request.paths ? {paths: [...request.paths]} : {}), ...(request.full ? {full: true} : {}), ...(request.resume ? {resume: request.resume} : {}), ...(links?.length ? {links: links.map(link => ({url: link.url, files: [...link.files]}))} : {})};
+  return {id: request.id, kind: request.kind, ...(request.includePreview ? {includePreview: true} : {}), ...(request.previewOnly ? {previewOnly: true} : {}), ...(request.scope ? {scope: request.scope} : {}), ...(request.journalId ? {journalId: request.journalId} : {}), ...(request.paths ? {paths: [...request.paths]} : {}), ...(request.full ? {full: true} : {}), ...(request.adopt ? {adopt: true} : {}), ...(request.resume ? {resume: request.resume} : {}), ...(links?.length ? {links: links.map(link => ({url: link.url, files: [...link.files]}))} : {})};
 }
 async function startJob(token: string, session: Session, message: {job?: unknown; context?: unknown}): Promise<null> {
   const request = validRequest(message.job), context = validateContext(message.context);

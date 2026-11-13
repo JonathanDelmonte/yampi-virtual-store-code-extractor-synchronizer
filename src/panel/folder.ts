@@ -57,7 +57,7 @@ async function locate(root: Folder): Promise<{project?: Folder; theme?: Folder; 
   const projects: Folder[] = [];
   for await (const entry of root.values()) if (entry.kind === 'directory' && !SKIP.has(entry.name) && await isProject(entry as Folder)) projects.push(entry as Folder);
   if (projects.length > 1) throw new Error(`Esta pasta tem ${projects.length} projetos (${projects.map(p => p.name).slice(0, 4).join(', ')}). Escolha a pasta de um deles.`);
-  if (!projects.length) throw new Error('Não encontrei um tema nesta pasta. Escolha a pasta do projeto, com tema/ (ou theme/) e .yampi-sync/, ou a própria pasta do tema, com assets/, components/, elements/, sections/ e templates/.');
+  if (!projects.length) throw new Error('Não encontrei um tema nesta pasta. Escolha a pasta do projeto, com o tema em tema/ ou theme/, ou a própria pasta do tema, com assets/, components/, elements/, sections/ e templates/.');
   return {project: projects[0], theme: await child(projects[0], 'tema', 'directory') as Folder | undefined, name: projects[0].name};
 }
 async function collect(folder: Folder, prefix: string, out: Found[], signal?: AbortSignal): Promise<void> {

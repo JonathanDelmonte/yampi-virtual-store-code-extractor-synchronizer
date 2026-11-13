@@ -257,3 +257,64 @@ Decisões:
 Não feito: o seletor de arquivos alternativo (sem a API de pastas) continua exigindo a pasta do tema, e o ZIP de retorno continua recusando arquivos acima de 2 MiB.
 
 Ainda sem validação real: a leitura no painel do Chrome e a comparação dessa pasta com a loja; nada foi enviado.
+
+## 10/11/2026 — Tema solto sem download prévio (0.10.3)
+
+Relato do proprietário, com a 0.10.2 instalada: a pasta foi reconhecida, mas o painel parou com "a extensão ainda não guardou o original desta loja. Em Baixar arquivos…". Pediu que a extensão fosse compatível com qualquer projeto, sem exigir arquivos dela na pasta nem um passo antes de importar.
+
+Causa: um tema solto só era comparado se já houvesse um original guardado na extensão, e só um download o guardava.
+
+Decisões:
+- A primeira comparação de um tema solto sem original lê a loja inteira e guarda essa leitura como original (`adopt` no pedido, conferido por `validRequest`). É o mesmo original que um download guardaria, sem ZIP e sem escrever na pasta. Um original guardado no meio tempo vale mais.
+- **Atualizar da loja**, **Juntar com a loja** e **Versões** ficam desligados num tema solto, com a explicação no painel, em vez de falhar no clique: eles guardam registros em `.yampi-sync/`.
+- A ordem continua comparação, backup e confirmação antes de gravar. Sem o original do projeto, a revisão de cada arquivo é a única defesa contra desfazer mudanças da loja feitas depois da cópia de onde o projeto partiu; o painel avisa isso ao terminar a leitura.
+
+Não feito: ler o original no histórico Git do projeto. A extensão não lê o Git; `npm run versoes:conhecidas` existe só nos projetos exportados.
+
+Ainda sem validação real: a importação no painel do Chrome e qualquer envio para uma loja real.
+
+## 10/11/2026 — Envio bloqueado num redesign e avisos (0.10.4)
+
+Relato do proprietário, com a 0.10.3: o envio do projeto real continuava bloqueado sem que ficasse claro o motivo, o modelo 3D aparecia como deixado de fora, e os avisos flutuantes pediam um visual melhor.
+
+Causa do bloqueio, reproduzida com o planejador da extensão sobre a pasta real e a primeira versão do tema no Git (só leitura): 41 textos novos que a Yampi não deixa criar (32 em 6 pastas novas, 9 `.js`), 9 textos com `assets_url` sem `/assets/`, 2 com caminhos de imagem montados que a extensão não ajusta, e os arquivos que dependem deles. Um texto novo impossível de criar bloqueia o envio inteiro desde 15/10, e a revisão listava uma linha por arquivo.
+
+Decisões:
+- A regra continua. A revisão passa a agrupar os bloqueios por motivo, com a contagem por pasta, e o título diz quantos arquivos novos o envio espera.
+- Avisos flutuantes com tom, marca, título e **Fechar**; os de atenção ficam 12 s e esperam enquanto lidos. O que a leitura deixou de fora fica também na revisão.
+- O modelo 3D continua fora: o editor guarda só textos e imagens PNG, JPEG, WebP ou SVG em `assets/images`. A orientação ao proprietário é hospedá-lo fora da Yampi, com CORS, e apontar o tema para esse endereço.
+
+Não feito: mover sozinho os arquivos de pastas novas para pastas existentes. Exigiria reescrever includes, imports e o nome com que a Yampi registra cada componente (gerado em `elements/scripts/components.twig`), sem validação numa loja real. A correção de `assets_url` também continua sem conserto silencioso, como decidido na 0.10.1.
+
+Ainda sem validação real: o painel do Chrome com os avisos novos e qualquer envio para uma loja real.
+
+## 10/11/2026 — Envio real parado na primeira criação (0.10.5)
+
+Relato do proprietário: o envio do redesign de uma loja real (185 itens: 100 textos novos, 42 imagens, 43 textos alterados) parou em 0 de 185 com "O editor não confirmou a operação dentro do prazo". A primeira etapa cria os textos novos pela janela **Adicionar arquivo**; o primeiro seria um `.scss` numa subpasta de `assets/styles`.
+
+Encontrado, relendo como dado o módulo público do editor (o mesmo de 01/10/2026, ainda publicado): a janela cria com `POST /merchant/file/storage/create?preview=true`; ao dar certo, fecha, recarrega a árvore e abre o arquivo. Uma recusa do servidor que não seja 409 só vai para o console, e a janela fica aberta, sem mensagem. A ponte esperava a janela fechar e o arquivo aparecer por 20 s, e então dava um erro genérico. As outras esperas (janela abrir, opção de extensão, botão liberar) também davam o mesmo erro.
+
+Decisões:
+- A ponte acompanha o botão de confirmar (classe `sending` e `.button__loader`, do `DsButton`) e para logo quando o pedido termina com a janela aberta, fechando-a pelo **Cancelar**.
+- Toda espera do editor tem nome na mensagem de prazo esgotado.
+- O editor fictício reproduz o botão em andamento e a recusa silenciosa (`fixture-refuse-create`).
+
+Não feito: descobrir o motivo da recusa na loja real. Só a resposta do servidor (no console ou na rede da aba do editor) mostra o status; o próximo envio com a 0.10.5 vai dizer em qual passo e arquivo parou. Criar pelo servidor, sem a janela, daria o status, mas mudaria a forma de gravação autorizada (pelos controles do editor) e precisa de decisão do proprietário.
+
+Ainda sem validação real: qualquer criação na loja real com a 0.10.5.
+
+## 11/11/2026 — O editor da Yampi mudou a criação de arquivos (0.10.6)
+
+Relato do proprietário, com a 0.10.5: o envio real parou de novo no primeiro texto novo, agora com o passo nomeado: "esperava a janela "Adicionar arquivo" abrir na pasta assets/styles/elements/cart (o botão + não abriu nenhuma janela)".
+
+Encontrado, só com arquivos públicos lidos como dado:
+- A página do editor é do painel da Yampi, publicado em 10/11/2026. Ele lê `https://lisa.yampi.com.br/manifest.json` e carrega a entrada `src/web-component.ts`: `code-editor-9121cad2.js`, que importa `web-component-030ca37f.js` (manifesto de 05/11/2026). A extensão foi feita sobre `web-component-550f3324.mjs` (01/10/2026), e a última criação real conferida foi em 16/10.
+- No módulo novo, o "+" de uma pasta comum põe uma linha na árvore (`NewFileInput`/`FileNameInput`): um campo para o nome com a extensão, Enter confirma, Esc ou perder o foco cancela, `sending` durante o pedido, e qualquer recusa aparece abaixo do campo. Só `assets/images` continua abrindo a janela de envio de imagens. A aba marca alterações com `button.close-button.has-changes`. O componente padrão de um `.vue` novo não mudou.
+- Durante o pedido, a linha mostra o nome num `.file-name`, a mesma classe dos arquivos da árvore: sem cuidado, a extensão o contaria como arquivo criado antes da Yampi criar.
+
+Decisões:
+- A ponte segue o que o "+" abrir: a linha (nome e Enter no mesmo instante, Esc ao parar) ou a janela de antes. A leitura da árvore ignora a linha em edição.
+- O editor fictício passa a reproduzir a linha e a aba novas; a janela fica com `fixture-creation=janela`, e `test:bare` cobre os dois.
+- `CLAUDE.md` registra onde ver qual módulo o editor carrega.
+
+Ainda sem validação real: o primeiro envio com a 0.10.6 numa loja real. As gravações de textos existentes usam os mesmos controles de antes (**Salvar arquivo**, abas e CodeMirror), que o módulo novo mantém.

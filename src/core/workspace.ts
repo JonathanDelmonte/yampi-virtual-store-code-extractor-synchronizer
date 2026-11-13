@@ -15,10 +15,13 @@ export interface Review {reading?: Capture; overrides: string[]; selected?: stri
 // An update of the project folder from the store: the full reading of the store and the user's
 // choice for each file the update cannot decide alone.
 export interface Update {reading?: Capture; choices: Record<string, Resolution>; hunks?: Record<string, Record<string, HunkChoice>>}
-// known: the project's own versions read with it (Git list and send receipts).
-export interface ProjectSource {local: Files; localAssets: Assets; name: string; kind: 'folder' | 'zip' | 'demo'; loadedAt: string; known?: Known}
-// journals: the sends that moved the reference forward since the export.
-export interface Lineage {exportedAt: string; journals: string[]; advancedAt?: string}
+// known: the project's own versions read with it (Git list and send receipts). bare: only a theme,
+// without .yampi-sync/; it sends like any project, but has no place for an update or versions.
+// notes: what the reading left out, and why; shown with the review, not only for a moment.
+export interface ProjectSource {local: Files; localAssets: Assets; name: string; kind: 'folder' | 'zip' | 'demo'; loadedAt: string; known?: Known; bare?: boolean; notes?: string[]}
+// journals: the sends that moved the reference forward since the export. adopted: the reference
+// is the whole store read by the first comparison of a project that had no original, not a download.
+export interface Lineage {exportedAt: string; journals: string[]; advancedAt?: string; adopted?: boolean}
 export interface Workspace {
   version: 1; context: Context; updatedAt: string;
   baseline?: Snapshot; lineage?: Lineage;
@@ -50,6 +53,6 @@ export function advanceBaseline(workspace: Workspace, plan: Plan, journal: Journ
   const now = new Date().toISOString();
   workspace.baseline = {...baseline, files, ...(Object.keys(assets).length ? {assets} : {})};
   const journals = workspace.lineage?.journals ?? [];
-  workspace.lineage = {exportedAt: workspace.lineage?.exportedAt ?? baseline.capturedAt, journals: journals.includes(journal.id) ? journals : [...journals, journal.id], advancedAt: now};
+  workspace.lineage = {exportedAt: workspace.lineage?.exportedAt ?? baseline.capturedAt, journals: journals.includes(journal.id) ? journals : [...journals, journal.id], advancedAt: now, ...(workspace.lineage?.adopted ? {adopted: true} : {})};
   return true;
 }

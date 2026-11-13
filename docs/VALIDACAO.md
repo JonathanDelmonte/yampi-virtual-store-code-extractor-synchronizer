@@ -1,5 +1,45 @@
 # Validação
 
+## Criação no editor novo da Yampi na 0.10.6, em 11/11/2026
+
+Relato: o envio real parou no primeiro texto novo com "o botão + não abriu nenhuma janela".
+
+- **Módulo do editor, lido como dado e sem executar.** `https://lisa.yampi.com.br/manifest.json` (modificado em 05/11/2026) aponta `src/web-component.ts` para `code-editor-9121cad2.js` e `web-component-030ca37f.js`. Nele, o "+" de uma pasta comum abre a linha `NewFileInput` na árvore, e não mais a janela. Comparado ao módulo de 01/10, continuam iguais **Salvar arquivo**, `tab-item`, `cm-content`, o cabeçalho, a leitura `file/get`, `merchant-identity` e o componente padrão do `.vue`. A marca de alteração não salva da aba mudou.
+- **Painel no Chromium** (`npm run test:bare`), com o editor fictício reproduzindo a linha nova. O envio cria um texto novo pelo campo. Com a recusa do servidor, para em segundos com "A Yampi recusou … Erro ao criar o arquivo." e fecha a linha. Na janela antiga (`fixture-creation=janela`), para com a recusa silenciosa reconhecida. **Continuar** cria o arquivo uma vez.
+- **Aba com alteração não salva** (`test:e2e`): a marca nova (`close-button has-changes`) e a antiga impedem a operação.
+- **Conjunto** (Node 24): `npm run package` passou no typecheck, nos 393 testes de 27 arquivos e no build, e gerou `releases/zirtuno-sync-yampi/` na 0.10.6. `test:bare`, `test:panel` e `test:update` passaram. O `test:e2e` rodou três vezes. Nas três, passaram a exportação, a importação, o envio com o texto novo criado pelo campo e a imagem pela janela, o painel fechado no meio do envio e o backup. Os dois passos instáveis já registrados falharam: na primeira execução, a restauração com mudança externa; na segunda e na terceira, a conferência do heartbeat do painel (um a cada 20 s de conexão; a mesma falha da 0.10.0 e da 0.10.1). O código do heartbeat não mudou.
+
+Sem validação real: qualquer envio com a 0.10.6 numa loja real.
+
+## Envio que diz onde parou na 0.10.5, em 10/11/2026
+
+Relato: um envio real parou na primeira criação com "O editor não confirmou a operação dentro do prazo".
+
+- **Módulo público do editor** (`web-component-550f3324.mjs`, publicado em 01/10/2026, relido como dado e sem executar): a janela **Adicionar arquivo** só mostra erros de nome e o 409; outra recusa do servidor vai para o console, e a janela fica aberta. O botão de confirmar tem `sending` e `.button__loader` durante o pedido. As opções de extensão continuam "SCSS", "Vue", "Twig" e "JS".
+- **Painel no Chromium** (`npm run test:bare`): com a recusa silenciosa ligada no editor fictício, o envio de um texto novo para em segundos com "A Yampi não confirmou a criação de sections/home/novidade.twig: o pedido terminou e a janela…", a janela da Yampi fica fechada sem confirmar, e **Continuar de onde parou**, já sem a recusa, cria e preenche o arquivo uma vez.
+- **Conjunto** (Node 24): `npm run package` passou no typecheck, nos 393 testes de 27 arquivos e no build, e gerou `releases/zirtuno-sync-yampi/` na 0.10.5. `test:bare`, `test:panel`, `test:update` e `test:e2e` (que cria um texto e envia uma imagem pelas janelas do editor fictício) passaram.
+
+Sem validação real: o motivo da recusa na loja real e qualquer criação nela com a 0.10.5.
+
+## Avisos e revisão agrupada na 0.10.4, em 10/11/2026
+
+- **Causa do bloqueio relatado, sem escrita** (simulação descartável, fora do repositório): o planejador da extensão sobre a pasta real, com a primeira versão do tema no Git como original e loja. Resultado: 41 textos novos impossíveis de criar (32 em 6 pastas novas, 9 `.js`), 9 bloqueios de `assets_url`, 2 de caminhos de imagem montados e as dependências deles.
+- **Painel no Chromium** (`npm run test:bare`): o aviso de atenção tem tom e título, continua visível com o ponteiro sobre ele e fecha com um clique; o modelo 3D deixado de fora aparece em **Precisa da sua atenção**. Com 3 arquivos em 2 pastas novas e 2 `.js`, a revisão mostra uma linha por motivo ("3 arquivos novos estão em 2 pastas que não existem na loja…: components/catalogo (2) e components/manual (1)", "2 arquivos: A Yampi só cria…"), cada uma com **Ver N arquivos**, o título diz "5 arquivos novos não podem ser criados" e **Enviar** fica desligado. Capturas nos temas claro e escuro em `.cache/bare-validation/`, sem rolagem lateral.
+- **Conjunto** (Node 24): `npm run package` passou no typecheck, nos 393 testes de 27 arquivos e no build, e gerou `releases/zirtuno-sync-yampi/` na 0.10.4. `test:bare`, `test:panel`, `test:update` e `test:e2e` passaram.
+
+Sem validação real: o painel do Chrome com os avisos novos e qualquer envio para uma loja real.
+
+## Tema solto sem download prévio na 0.10.3, em 10/11/2026
+
+Relato: com a 0.10.2, a pasta de um projeto real com o tema em `theme/` foi reconhecida, mas o painel pedia **Baixar arquivos** antes de comparar.
+
+- **Painel no Chromium** (`npm run test:bare`, novo): editor fictício sem nenhum original guardado e uma pasta fictícia no armazenamento privado do navegador com `theme/`, `package.json`, `node_modules`, documentação e um modelo 3D. Escolher a pasta compara sem erro: a loja fictícia inteira é lida, o aviso de original aparece, o resumo mostra 1 arquivo alterado e nenhum conflito, e **Atualizar da loja** e **Versões** ficam desligados com a explicação. O envio grava só esse arquivo, conferido na loja fictícia, sem acionar controles proibidos. A pasta termina idêntica, sem `.yampi-sync/`. Escolhida de novo, nada fica para enviar, e o download mostra "Loja lida na comparação".
+- **Execução** (`tests/jobs.test.ts`): a comparação com `adopt` lê a loja inteira, textos e imagens, guarda o original sem `inventory` nem `partial`, com `lineage.adopted`, sem ZIP nem gravação; o plano vê a mudança da pasta sem conflito. Um original guardado antes vale mais que a leitura.
+- **Worker** (`tests/background.test.ts`): `adopt` chega à execução numa comparação de projeto; é recusado num envio, numa atualização, numa restauração, sem escopo ou com valor que não é `true`.
+- **Conjunto** (Node 24): `npm run package` passou no typecheck, nos 393 testes de 27 arquivos e no build, e gerou `releases/zirtuno-sync-yampi/` na 0.10.3. `test:bare`, `test:panel` e `test:update` passaram. `test:update` falhava também no código anterior (`7a69fb4`), na linha que esperava **Reler** depois de **Concluir**, que desde a reorganização da revisão volta sem projeto carregado; o script agora escolhe a pasta de novo.
+
+Sem validação real: a importação no painel do Chrome e qualquer envio para uma loja real.
+
 ## Pasta com o tema em theme/ na 0.10.2, em 10/11/2026
 
 Relato: o painel recusava a pasta de um projeto real com o tema em `theme/` e sem `.yampi-sync/`.

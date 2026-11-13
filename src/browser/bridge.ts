@@ -5,7 +5,7 @@ import {assertContext, validatePath, validatePaths, validateImage, imagePath, wr
 import {openSession, readFiles, YAMPI_SERVER, type Server} from './server-read';
 // directOpen/directRead: copies straight from the editor's own server (see server-read.ts).
 export interface Command {op: 'context' | 'inventory' | 'read' | 'readAsset' | 'visual' | 'write' | 'create' | 'upload' | 'links' | 'directOpen' | 'directRead'; context?: Context; path?: string; paths?: string[]; store?: string; expected?: string; content?: string}
-export const version = '0.10.2';
+export const version = '0.10.6';
 type Reply = {ok: true; value: unknown} | {ok: false; error: string};
 const clean = (e: Element | null) => e?.textContent?.trim() || '';
 type EditorRoot = ShadowRoot | HTMLElement;
@@ -78,8 +78,11 @@ function pathFor(file: Element): string {
   const path = parts.join('/');
   return path.startsWith('logs/') ? path : validatePath(path);
 }
+// The tree's files. A row being edited (a file being created or renamed) shows a name that is not
+// a file of the store yet: never listed.
+const treeNames = () => [...root().querySelectorAll<HTMLElement>('aside .file-name')].filter(node => !node.closest('.editing-row'));
 function inventory(): Map<string, HTMLElement> {
-  const entries=[...root().querySelectorAll<HTMLElement>('aside .file-name')].map(node=>[pathFor(node),node] as const).filter(([path])=>!path.startsWith('logs/'));
+  const entries=treeNames().map(node=>[pathFor(node),node] as const).filter(([path])=>!path.startsWith('logs/'));
   const paths = entries.map(([path])=>path);
   validatePaths(paths);
   return new Map(entries);
@@ -96,13 +99,13 @@ async function completeInventory(context: Context): Promise<string[]> {
     if (++opened > 3000) throw new Error('Árvore de pastas ultrapassa os limites.');
     const title = [...folder.children].find(c => c.classList.contains('folder-title')) as HTMLElement | undefined;
     if (!title) throw new Error('Pasta não reconhecida.');
-    title.click(); await until(() => folder.classList.contains('active'));
+    title.click(); await until(() => folder.classList.contains('active'), 10000, () => `a pasta ${clean(title)} abrir na árvore`);
   }
   const settled = stability();
   await until(() => {
     guard(context);
     return settled(root().querySelector('aside [aria-busy="true"], aside .loading, aside .spinner, aside .loader-bg') ? undefined : JSON.stringify([...inventory().keys()].sort()));
-  });
+  }, 10000, 'a árvore de arquivos terminar de carregar');
   // A lazy tree can add folders after the initial expansion.
   if ([...root().querySelectorAll('aside .collapse-list:not(.active)')].some(n => clean([...n.children].find(c => c.classList.contains('folder-title')) || null) !== 'logs')) throw new Error('A árvore adicionou pastas durante a leitura. Exporte novamente.');
   return [...inventory().keys()].sort();
@@ -114,7 +117,9 @@ function view(): EditorView {
 }
 function dirty(): boolean {
   const buttons = [...root().querySelectorAll<HTMLButtonElement>('main button')].filter(b => clean(b) === 'Salvar arquivo');
-  return buttons.some(b => !b.disabled) || !!root().querySelector('main .tab-item .holder-icon circle, main .tab-item .change-icon, main .tab-item .unsaved, main .tab-item.dirty');
+  // Tabs with unsaved changes: the close button marked "has-changes" since the editor of 05/11/2026;
+  // a change icon before it.
+  return buttons.some(b => !b.disabled) || !!root().querySelector('main .tab-item .close-button.has-changes, main .tab-item .holder-icon circle, main .tab-item .change-icon, main .tab-item .unsaved, main .tab-item.dirty');
 }
 function assertClean(): void {
   if (dirty()) throw new Error('Existe um arquivo com alterações não salvas. Salve ou descarte manualmente antes de continuar.');
@@ -123,7 +128,8 @@ function guard(context: Context): void {assertContext(context, getContext());}
 // Waits react to the editor's own DOM changes. In a hidden tab the browser runs timers about
 // once a second, and chained timers can wait up to a minute; DOM changes still arrive at once.
 // The fallback check hops through a message first, so its timer never counts as chained.
-async function until(check: () => boolean, timeout = 10000): Promise<void> {
+// what: the step being waited for, named in the error so a stop says where it stopped.
+async function until(check: () => boolean, timeout = 10000, what?: string | (() => string)): Promise<void> {
   if (check()) return;
   const target: Node = activeRoot ?? document;
   await new Promise<void>((resolve, reject) => {
@@ -139,7 +145,11 @@ async function until(check: () => boolean, timeout = 10000): Promise<void> {
       if (done) return;
       try {if (check()) {finish(); return;}} catch (error) {finish(error); return;}
       // A hidden tab answers slower: allow it more time before calling it a failure.
-      if (performance.now() - start > (document.hidden ? timeout * 3 : timeout)) finish(new Error('O editor não confirmou a operação dentro do prazo.'));
+      if (performance.now() - start > (document.hidden ? timeout * 3 : timeout)) {
+        let step = '';
+        try {step = typeof what === 'function' ? what() : what || '';} catch { /* The generic message still stops the operation. */ }
+        finish(new Error(`O editor não confirmou a operação dentro do prazo${step ? `: esperava ${step}` : ''}.`));
+      }
     }
     function schedule() {
       const channel = new MessageChannel();
@@ -170,7 +180,7 @@ async function open(path: string, context: Context, reading=false): Promise<void
   validatePath(path);
   // Full inventories are still checked before/after capture and on every write.
   // A read only resolves matching names, including their complete directory path.
-  const candidates=reading?[...root().querySelectorAll<HTMLElement>('aside .file-name')].filter(n=>clean(n)===path.split('/').pop()&&pathFor(n)===path):[];
+  const candidates=reading?treeNames().filter(n=>clean(n)===path.split('/').pop()&&pathFor(n)===path):[];
   if(candidates.length>1)throw new Error('O arquivo tem caminhos duplicados na árvore. Operação interrompida.');
   const item = reading?candidates[0]:inventory().get(path);
   if (!item) throw new Error(`O arquivo não existe na loja: ${path}. A extensão não cria duplicatas.`);
@@ -180,14 +190,14 @@ async function open(path: string, context: Context, reading=false): Promise<void
     const title = [...parent.children].find(c => c.classList.contains('folder-title')) as HTMLElement | undefined;
     if (!title) throw new Error('Árvore do editor não reconhecida.');
     title.click();
-    await until(() => parent.classList.contains('active'));
+    await until(() => parent.classList.contains('active'), 10000, () => `a pasta ${clean(title)} abrir na árvore`);
   }
   item.click();
   await until(() => {
     guard(context);
     const image = root().querySelector<HTMLImageElement>('main img');
     return selectedPath() === path && clean(root().querySelector('main .tab-item.active p')) === path.split('/').pop() && (imagePath(path) ? !!image?.complete && !!image.naturalWidth : !!root().querySelector('main .cm-content'));
-  });
+  }, 10000, `${path} abrir no editor`);
   // CodeMirror and the active tab can switch before async file loading finishes. Require stable UI/document.
   const settled = stability();
   await until(() => {
@@ -196,7 +206,7 @@ async function open(path: string, context: Context, reading=false): Promise<void
     // CodeMirror Text is immutable: a new document resets the same stability window.
     // Copy/validate the full text once after stabilization, rather than on each poll.
     return settled(imagePath(path) ? visibleImage().src : view().state.doc);
-  });
+  }, 10000, `o conteúdo de ${path} terminar de carregar`);
   assertClean();
 }
 function visibleImage(): HTMLImageElement {
@@ -241,9 +251,12 @@ async function readImage(path: string, context: Context): Promise<string> {
   for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
   return btoa(binary);
 }
-// Creation goes through the editor's own controls, as a person would: the folder's
-// "Adicionar arquivo" button opens a dialog (name and extension) or, for assets/images,
-// the image uploader. Yampi validates, saves to the draft and lists the new file.
+// Creation goes through the editor's own controls, as a person would: the folder's "+"
+// ("Adicionar arquivo"). Since the editor of 05/11/2026 (module web-component-030ca37f.js), it
+// opens a row in the folder's list (NewFileInput): one field for the name with its extension, Enter
+// confirms, Esc or losing the focus cancels, the row shows "sending" while the request runs and the
+// error under the field. Earlier editors opened a window (name and extension apart). For
+// assets/images, both open the image uploader. Yampi validates, saves to the draft and lists the file.
 const EXTENSION_LABEL: Record<string, string> = {scss: 'SCSS', vue: 'Vue', twig: 'Twig'};
 function folderPath(list: Element): string {
   const parts: string[] = [];
@@ -262,40 +275,106 @@ function dialogButton(dialog: HTMLElement, label: string): HTMLButtonElement {
   if (matches.length !== 1) throw new Error(`Controle da janela da Yampi não reconhecido: ${label}`);
   return matches[0];
 }
-async function openAddDialog(folder: string, kind: 'file' | 'image', context: Context): Promise<HTMLElement> {
+// The new-file row of a folder: a direct child of the folder's own list, with its one field.
+function editingRows(list: HTMLElement): HTMLElement[] {
+  const items = [...list.children].find(c => c.tagName === 'UL');
+  return items ? [...items.children].filter((c): c is HTMLElement => c.classList.contains('editing-row')) : [];
+}
+type AddControl = {kind: 'row'; row: HTMLElement; input: HTMLInputElement} | {kind: 'dialog'; dialog: HTMLElement};
+async function openAddControl(folder: string, kind: 'file' | 'image', context: Context): Promise<AddControl> {
   if (activeDialogs().length) throw new Error('Há uma janela aberta no editor da Yampi. Feche-a e tente novamente.');
   const lists = [...root().querySelectorAll<HTMLElement>('aside .collapse-list')].filter(list => folderPath(list) === folder);
   if (lists.length !== 1) throw new Error(`A pasta ${folder} não existe no editor, e a Yampi não permite criar pastas.`);
+  if (root().querySelector('aside .editing-row')) throw new Error('Há um arquivo sendo criado ou renomeado na árvore do editor da Yampi. Conclua ou cancele (Esc) e tente novamente.');
   const title = [...lists[0].children].find(c => c.classList.contains('folder-title'));
   const add = title && [...title.children].find(c => c.classList.contains('add-item')) as HTMLElement | undefined;
   if (!add) throw new Error(`Sem permissão para adicionar arquivos em ${folder}.`);
   guard(context);
   add.click();
-  let dialog: HTMLElement | undefined;
+  let found: AddControl | undefined;
   await until(() => {
+    if (kind === 'file') {
+      const rows = editingRows(lists[0]), inputs = rows.flatMap(row => [...row.querySelectorAll<HTMLInputElement>('input')]);
+      if (rows.length === 1 && inputs.length === 1) {found = {kind: 'row', row: rows[0], input: inputs[0]}; return true;}
+    }
     const open = activeDialogs();
     if (open.length !== 1 || clean(open[0].querySelector('.ds-modal h3')) !== 'Adicionar arquivo') return false;
     const fits = kind === 'file' ? !!open[0].querySelector('form .ds-select') && open[0].querySelectorAll('input.ds-input__field').length === 1 : open[0].querySelectorAll('.ds-file-uploader input.ds-file-uploader__input').length === 1;
-    if (fits) dialog = open[0];
+    if (fits) found = {kind: 'dialog', dialog: open[0]};
     return fits;
+  }, 10000, () => {
+    const open = activeDialogs(), rows = editingRows(lists[0]);
+    if (rows.length) return `o campo de novo arquivo da pasta ${folder} ficar pronto (a linha apareceu com ${rows.flatMap(row => [...row.querySelectorAll('input')]).length} campos)`;
+    return open.length ? `a janela "Adicionar arquivo" da pasta ${folder} mostrar ${kind === 'file' ? 'a extensão e o nome do arquivo' : 'o envio de imagem'} (abriu outra janela: "${clean(open[0].querySelector('.ds-modal h3')) || 'sem título'}")` : `o "+" da pasta ${folder} abrir o campo de novo arquivo ou a janela "Adicionar arquivo" (não abriu nenhum dos dois)`;
   });
-  return dialog!;
+  return found!;
 }
+async function openAddDialog(folder: string, context: Context): Promise<HTMLElement> {
+  const control = await openAddControl(folder, 'image', context);
+  if (control.kind !== 'dialog') throw new Error(`O "+" da pasta ${folder} não abriu o envio de imagens.`);
+  return control.dialog;
+}
+// The editor shows a "Salvar"/"Adicionar" request in flight on the button itself (DsButton: class
+// "sending" and a loader). It shows a refusal of the name, and "already exists", under the field;
+// any other refusal of the server it only logs to the console, and the window stays open.
+const sending = (button: HTMLButtonElement) => button.classList.contains('sending') || !!button.querySelector('.button__loader');
 async function finishDialog(dialog: HTMLElement, path: string, error: string, context: Context, timeout: number): Promise<void> {
   try {
-    await until(() => !dialogButton(dialog, 'Adicionar arquivo').disabled || !!clean(dialog.querySelector(error)));
+    await until(() => !dialogButton(dialog, 'Adicionar arquivo').disabled || !!clean(dialog.querySelector(error)), 10000, `o botão "Adicionar arquivo" ficar disponível para ${path}`);
     const refused = clean(dialog.querySelector(error));
     if (refused) throw new Error(`A Yampi recusou ${path}: ${refused}`);
     guard(context);
-    dialogButton(dialog, 'Adicionar arquivo').click();
+    const confirm = dialogButton(dialog, 'Adicionar arquivo');
+    confirm.click();
+    let sent = false, idle = 0;
     await until(() => {
       const message = clean(dialog.querySelector(error));
       if (message) throw new Error(`A Yampi recusou ${path}: ${message}`);
-      return !dialog.classList.contains('ds-modal-overlay--active') && inventory().has(path);
-    }, timeout);
+      if (!dialog.classList.contains('ds-modal-overlay--active')) return inventory().has(path);
+      if (sending(confirm)) {sent = true; idle = 0; return false;}
+      idle ||= performance.now();
+      // The request ended (or never showed) and the window is still open, without a message.
+      if (performance.now() - idle > (sent ? 1500 : 8000)) throw new Error(`A Yampi não confirmou a criação de ${path}: o pedido terminou e a janela "Adicionar arquivo" continuou aberta, sem mensagem. O editor da Yampi só mostra no console uma recusa do servidor diferente de "já existe". Confira no editor se o arquivo aparece; ao continuar, a extensão confere a loja antes de criar de novo.`);
+      return false;
+    }, timeout, () => dialog.classList.contains('ds-modal-overlay--active') ? `a Yampi responder ao pedido de criação de ${path}` : `${path} aparecer na árvore do editor depois de criado`);
   } catch (failure) {
     // Leave the editor as it was: close the dialog without confirming anything.
     if (dialog.classList.contains('ds-modal-overlay--active')) try {dialogButton(dialog, 'Cancelar').click();} catch { /* The error below explains the stop. */ }
+    throw failure;
+  }
+}
+// The row of the editor of 05/11/2026: the name with its extension, then Enter, as a person types.
+// The same request, the row in "sending" while it runs, and any refusal under the field. Esc
+// cancels it; nothing else is clicked, so no other file is renamed or deleted.
+async function createInRow(row: HTMLElement, input: HTMLInputElement, path: string, context: Context): Promise<void> {
+  const name = path.split('/').at(-1)!;
+  // The field itself also takes the class "error": the message is the .error with text under it.
+  const refusal = () => [...row.querySelectorAll('.error')].map(node => clean(node)).find(Boolean) || '';
+  const key = (type: 'keyup' | 'keydown', value: 'Enter' | 'Escape') => input.dispatchEvent(new KeyboardEvent(type, {key: value, code: value, keyCode: value === 'Enter' ? 13 : 27, which: value === 'Enter' ? 13 : 27, bubbles: true, composed: true, cancelable: true}));
+  try {
+    guard(context);
+    // Typed and confirmed in one go: the row cancels itself if the page loses the focus first.
+    input.value = name;
+    input.dispatchEvent(new Event('input', {bubbles: true, composed: true}));
+    key('keyup', 'Enter');
+    let sent = false, idle = 0, closed = 0;
+    await until(() => {
+      const message = row.isConnected ? refusal() : '';
+      if (message) throw new Error(`A Yampi recusou ${path}: ${message}`);
+      if (!row.isConnected) {
+        if (inventory().has(path)) return true;
+        closed ||= performance.now();
+        if (!sent && performance.now() - closed > 3000) throw new Error(`O campo de novo arquivo da Yampi fechou antes de confirmar ${path}: a página do editor perdeu o foco ou o Esc foi pressionado. Nada foi criado; ao continuar, a extensão tenta de novo.`);
+        return false;
+      }
+      if (row.classList.contains('sending')) {sent = true; idle = 0; return false;}
+      idle ||= performance.now();
+      if (performance.now() - idle > (sent ? 1500 : 8000)) throw new Error(sent ? `A Yampi não confirmou a criação de ${path}: o pedido terminou e o campo continuou aberto, sem mensagem. Confira no editor se o arquivo aparece; ao continuar, a extensão confere a loja antes de criar de novo.` : `O campo de novo arquivo da Yampi não aceitou ${name} com Enter.`);
+      return false;
+    }, 20000, () => row.isConnected ? `a Yampi responder ao pedido de criação de ${path}` : `${path} aparecer na árvore do editor depois de criado`);
+  } catch (failure) {
+    // Leave the tree as it was: Esc closes the row without creating anything.
+    if (row.isConnected && !row.classList.contains('sending')) key('keydown', 'Escape');
     throw failure;
   }
 }
@@ -304,15 +383,17 @@ async function createFile(path: string, context: Context): Promise<void> {
   const name = path.split('/').at(-1)!, folder = path.slice(0, -name.length - 1), match = /^(.+)\.(twig|vue|scss)$/.exec(name);
   if (!creatableName(path) || !match) throw new Error(`A Yampi não cria arquivos com esse nome ou tipo: ${path}`);
   if (inventory().has(path)) throw new Error(`O arquivo já existe na loja: ${path}. A extensão não cria duplicatas.`);
-  const dialog = await openAddDialog(folder, 'file', context);
+  const control = await openAddControl(folder, 'file', context);
+  if (control.kind === 'row') return createInRow(control.row, control.input, path, context);
+  const dialog = control.dialog;
   try {
     const select = dialog.querySelector<HTMLElement>('form .ds-select')!, label = EXTENSION_LABEL[match[2]];
     const chosen = () => clean(select.querySelector('.ds-select__trigger span'));
     if (chosen() !== label) {
       select.click();
-      await until(() => [...select.querySelectorAll('.ds-select__option')].filter(o => clean(o) === label).length === 1);
+      await until(() => [...select.querySelectorAll('.ds-select__option')].filter(o => clean(o) === label).length === 1, 10000, () => `a opção ${label} aparecer em "Extensão do arquivo" (opções vistas: ${[...select.querySelectorAll('.ds-select__option')].map(o => clean(o)).join(', ') || 'nenhuma'})`);
       [...select.querySelectorAll<HTMLElement>('.ds-select__option')].find(o => clean(o) === label)!.click();
-      await until(() => chosen() === label);
+      await until(() => chosen() === label, 10000, () => `a extensão ${label} ficar escolhida (mostra "${chosen()}")`);
     }
     const input = dialog.querySelector<HTMLInputElement>('input.ds-input__field')!;
     input.value = match[1];
@@ -329,7 +410,7 @@ async function uploadImage(path: string, data: string, context: Context): Promis
   if (inventory().has(path)) throw new Error(`A imagem já existe na loja: ${path}. A extensão não cria duplicatas.`);
   const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
   validateImage(path, bytes);
-  const dialog = await openAddDialog('assets/images', 'image', context);
+  const dialog = await openAddDialog('assets/images', context);
   try {
     const input = dialog.querySelector<HTMLInputElement>('input.ds-file-uploader__input')!, transfer = new DataTransfer();
     transfer.items.add(new File([bytes], path.split('/').at(-1)!, {type: imageType(path)}));
@@ -390,7 +471,7 @@ export async function command(input: Command): Promise<Reply> {
     guard(context);
     if (selectedPath() !== input.path) throw new Error('A seleção do editor mudou.');
     editor.dispatch({changes: {from: 0, to: editor.state.doc.length, insert: input.content}});
-    await until(() => !findButton('Salvar arquivo').disabled);
+    await until(() => !findButton('Salvar arquivo').disabled, 10000, `o botão "Salvar arquivo" ficar disponível para ${input.path}`);
     guard(context);
     if (selectedPath() !== input.path || readDocument(editor) !== input.content) throw new Error('O arquivo foi alterado durante a operação. Gravação interrompida.');
     const save = findButton('Salvar arquivo');
@@ -398,7 +479,7 @@ export async function command(input: Command): Promise<Reply> {
     await until(() => {
       guard(context);
       return save.disabled && !save.querySelector('.loading, .spinner, .button__loader, .button__spinner') && !root().querySelector('main [aria-busy="true"]');
-    }, 20000);
+    }, 20000, `a Yampi confirmar o salvamento de ${input.path}`);
     // Do not click publish, delete or rename controls. A separate fresh-page verification follows.
     if (readDocument(view()) !== input.content) throw new Error('Conteúdo diferente após salvar.');
     return {ok: true, value: {saved: true}};

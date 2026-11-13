@@ -107,6 +107,12 @@ Layout funcional, com os componentes que já existiam; a revisão visual fica pa
 - **Enviar imagens novas** usa o mesmo interruptor de **Incluir a vitrine publicada**. Ligá-lo abre a confirmação do sistema com o aviso.
 - O aviso de sucesso da atualização usa o tom verde; problemas continuam em vermelho.
 
+## Avisos e revisão agrupada na 0.10.4
+
+- **Avisos flutuantes.** A superfície invertida continua (escura no tema claro, clara no escuro), agora com tom: informação (ciano), concluído (verde) e atenção (âmbar). O tom aparece num traço fino à esquerda e numa marca desenhada (círculo com "i", visto, triângulo), na cor que se lê sobre essa superfície; sem quadrados coloridos. Um aviso longo tem título em negrito e texto abaixo. Todos têm **Fechar**; os de atenção ficam 12 s, e todos esperam enquanto o ponteiro ou o foco estão sobre eles.
+- **O que ficou de fora fica na revisão.** O que a leitura da pasta deixou de fora (modelo 3D, vídeo) aparece também em **Precisa da sua atenção**, porque um aviso flutuante pode ser substituído pelo seguinte.
+- **Um motivo por linha.** Arquivos que não podem ir são agrupados pelo motivo: pastas que não existem na loja (com a contagem por pasta), tipos que a extensão não cria, um mesmo bloqueio de compatibilidade, dependências. Os arquivos ficam atrás de **Ver N arquivos**, cada um com seu **Ver**. Um motivo com um só arquivo continua numa linha só, como antes. O título **Ajuste o projeto antes de enviar** diz quantos arquivos novos o envio espera.
+
 ## Movimento e acesso
 
 - Troca de tela: 240 ms, com opacidade e deslocamento de 6 px, em curva de desaceleração. Folhas sobem em 280 ms; a barra de progresso anda em 450 ms; botões respondem à pressão em 120 ms.

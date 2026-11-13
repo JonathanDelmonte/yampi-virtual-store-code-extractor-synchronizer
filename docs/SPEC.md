@@ -8,9 +8,10 @@ Toda operação compara a identidade lida no cabeçalho do editor — nome da lo
 
 ## O que a Yampi permite
 
-Regras lidas no módulo público do editor (15/10/2026) e reproduzidas no editor fictício:
+Regras lidas no módulo público do editor (15/10/2026, e de novo em 10/11/2026) e reproduzidas no editor fictício. O módulo que o editor carrega hoje está em `https://lisa.yampi.com.br/manifest.json`, na entrada `src/web-component.ts` (em 10/11/2026: `code-editor-9121cad2.js`, que importa `web-component-030ca37f.js`, publicado em 05/11/2026; antes, `web-component-550f3324.mjs`).
 
-- **Adicionar arquivo**, no botão de cada pasta, cria `<pasta>/<nome>.<extensão>` numa pasta que já existe, com extensão SCSS, Vue, Twig ou JS e nome só com letras, números, `_` e `-`. Um `.vue` novo nasce com o componente padrão da Yampi; os demais, vazios. Tudo vai para o rascunho (`preview=true`).
+- **Adicionar arquivo**, no botão "+" de cada pasta, cria `<pasta>/<nome>.<extensão>` numa pasta que já existe, com extensão SCSS, Vue, Twig ou JS e nome só com letras, números, `_` e `-`. Um `.vue` novo nasce com o componente padrão da Yampi; os demais, vazios. Tudo vai para o rascunho (`preview=true`).
+- **Desde 05/11/2026**, o "+" não abre mais uma janela: põe no topo da lista da pasta uma linha (`li.editing-row`) com um só campo (`placeholder="nome-do-arquivo"`) para o nome **com a extensão**. Enter confirma; Esc ou perder o foco cancela. Enquanto o pedido roda, a linha tem a classe `sending` e mostra o nome num `.file-name`; uma recusa (do nome, 409 "já existe" ou "Erro ao criar o arquivo.") aparece num `.error` abaixo, e o próprio campo também ganha a classe `error`. Ao dar certo, a árvore é recarregada e o arquivo abre numa aba. A aba marca alterações não salvas com `button.close-button.has-changes`. Arquivos da árvore também têm **Renomear** e **Deletar**, que a extensão nunca aciona.
 - Na pasta `assets/images`, o mesmo botão abre o envio de imagens: PNG, JPEG, WebP ou SVG de até 2 MB, salvas sempre em `assets/images/<nome>`, com o nome em minúsculas e outros caracteres trocados por `-`.
 - Não há criação de pastas nem substituição de imagem.
 - `elements/scripts/components.twig` é gerado pela Yampi com os componentes existentes.
@@ -83,7 +84,7 @@ Um arquivo enviado não pode depender de um arquivo que não existirá na loja. 
 
 A pasta escolhida é, nesta ordem: um projeto exportado (`.yampi-sync/manifest.json`, tema em `tema/`); a própria pasta do tema (com `assets/`, `components/`, `elements/`, `sections/` ou `templates/`); uma pasta com o tema em `tema/` ou, desde a 0.10.2, em `theme/`, sem `.yampi-sync/`; ou uma pasta com um único projeto exportado dentro. `tema/` e `theme/` juntos são recusados: a extensão não adivinha qual foi editado. `theme/` cobre os projetos começados de uma cópia da loja anterior à extensão.
 
-Um tema sem `.yampi-sync/` (tema solto) é comparado com o original desta loja guardado na extensão, o do último **Baixar arquivos**; sem ele, a leitura para e pede o download. Esse original é a loja de hoje, não a cópia da qual o projeto partiu: uma mudança feita na loja entre as duas aparece como diferença da pasta.
+Um tema sem `.yampi-sync/` (tema solto) é comparado com o original desta loja guardado na extensão, de um download ou de envios anteriores. Sem ele, desde a 0.10.3, a primeira comparação (`adopt`) lê a loja inteira, sem recarregar o editor quando o servidor responde, e guarda essa leitura como original (`lineage.adopted`), sem ZIP e sem gravar na pasta. Um original guardado no meio tempo, como um download em outra aba, vale mais que a leitura. Esse original é a loja no momento da leitura, não a cópia da qual o projeto partiu: uma mudança feita na loja entre as duas aparece como diferença da pasta. **Atualizar da loja**, **Juntar com a loja** e **Versões** guardam registros em `.yampi-sync/` e ficam desligados num tema solto (`project.bare`).
 
 Do tema entram textos e as imagens PNG, JPEG, WebP ou SVG de `assets/`. Outros binários (modelos 3D, vídeos, fontes) ficam de fora com um aviso que os nomeia, e não são lidos se passam de 2 MiB; arquivos do sistema (ocultos, `Thumbs.db`, `desktop.ini`) ficam de fora sem aviso. Um texto do tema (Twig, Vue, SCSS, CSS, JS, JSON, Markdown) que não é UTF-8 para a leitura e diz qual é: deixá-lo de fora enviaria o resto sem ele.
 
@@ -217,6 +218,13 @@ Desde a 0.8.0, imagens novas só entram no envio quando o usuário liga **Enviar
 Logo depois de uma recarga, o editor mostra a versão do servidor. Ele só é recarregado de novo quando algo mudou desde a última recarga: a recarga que confere um texto salvo é o ponto de partida do próximo, e a conferência final não precisa de outra. A ordem e as conferências acima não mudam.
 
 Um item criado ou enviado e ainda não conferido fica em `issued`, até a conferência do seu grupo.
+
+Os dois editores criam com `POST /merchant/file/storage/create?preview=true`; a extensão só usa os controles deles. Desde a 0.10.6, depois do "+", ela segue o que aparecer:
+
+- **Linha na árvore** (editor de 05/11/2026): escreve o nome com a extensão e dispara Enter no mesmo instante, para a linha não se fechar por perda de foco. Acompanha a classe `sending` da linha; uma recusa com texto num `.error` para o envio na hora, com o texto da Yampi; a linha fechada sem o arquivo aparecer, ou o pedido terminado com a linha aberta e sem mensagem, também param. Ao parar, um Esc fecha a linha sem criar nada. A leitura da árvore ignora o `.file-name` de uma linha em edição, que ainda não é arquivo da loja.
+- **Janela** (editor anterior): mostra só erros de nome e o 409; outra recusa do servidor vai só para o console, e a janela fica aberta. O botão de confirmar tem a classe `sending` e um `.button__loader` durante o pedido. Se o pedido terminou e a janela continua aberta sem mensagem (1,5 s depois do fim do pedido, ou 8 s sem nunca ver o pedido), a extensão fecha a janela pelo **Cancelar** e para com "A Yampi não confirmou a criação de `<arquivo>`".
+
+Cada espera do editor tem nome, e o prazo esgotado diz o que faltou ("esperava o "+" da pasta … abrir o campo de novo arquivo ou a janela…"). O editor fictício reproduz a linha nova por padrão e a janela com `fixture-creation=janela`; `fixture-refuse-create` reproduz a recusa do servidor nos dois.
 
 ### Continuar um envio interrompido
 

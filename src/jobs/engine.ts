@@ -100,7 +100,7 @@ function remoteFetch(rpc: RPC, context: Context, signal: AbortSignal): PreviewFe
 }
 function titleFor(request: JobRequest, store: string): string {
   if (request.kind === 'export') return request.previewOnly ? `Baixando a prévia de ${store}` : `Baixando o tema de ${store}`;
-  if (request.kind === 'compare') return request.scope === 'restore' ? `Preparando a restauração de ${store}` : request.scope === 'update' ? `Lendo ${store} para atualizar o projeto` : `Comparando com ${store}`;
+  if (request.kind === 'compare') return request.scope === 'restore' ? `Preparando a restauração de ${store}` : request.scope === 'update' ? `Lendo ${store} para atualizar o projeto` : request.adopt ? `Lendo ${store} inteira para comparar` : `Comparando com ${store}`;
   if (request.resume) return `Continuando o envio para ${store}`;
   return request.scope === 'restore' ? `Restaurando ${store}` : `Enviando para ${store}`;
 }
@@ -289,8 +289,10 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
   }
   async function compare() {
     // An update reads the whole store: any file the store changed may have to come to the project.
-    const whole = !!request.full || request.scope === 'update';
-    if (request.scope === 'update') tracker.relabel('read', 'Ler a loja inteira');
+    // So does the first comparison of a project without an original: the reading becomes it.
+    const adopting = request.scope === 'project' && !!request.adopt;
+    const whole = !!request.full || request.scope === 'update' || adopting;
+    if (whole && !request.full) tracker.relabel('read', 'Ler a loja inteira');
     // What the comparison reads and checks is known from the request: the bar keeps room for it.
     if (!whole) tracker.expect('read', request.paths?.length ?? 0);
     const linking = request.scope === 'project' && !!request.links?.length;
@@ -302,14 +304,21 @@ export async function runJob(request: JobRequest, expected: Context, host: Engin
     else {step('prepare', 'Recarregando o editor'); await adapter.refresh(); tracker.finish('prepare');}
     const observed = await capture(adapter, {signal: control.signal, progress, notice, ...(server ? {serverOnly: true} : {}), ...(whole ? {} : {only: request.paths || []})});
     const links = linking ? await checkLinks(request.links!) : undefined;
+    let adopted = false;
     await updateWorkspace(expected, workspace => {
       // Kept apart from the send's review: the folder changes only when the user applies it.
       if (request.scope === 'update') {workspace.update = {reading: observed, choices: {}}; return;}
+      // An original kept meanwhile (a download in another tab) wins over this reading.
+      if (adopting && !workspace.baseline) {
+        const {inventory: _inventory, partial: _partial, ...store} = observed;
+        workspace.baseline = store; workspace.lineage = {exportedAt: store.capturedAt, journals: [], adopted: true};
+        adopted = true;
+      }
       const review = {reading: observed, overrides: [], ...(links ? {links} : {})};
       if (request.scope === 'restore') workspace.restore = {...review, journalId: request.journalId!};
       else workspace.review = review;
     });
-    return {kind: 'compare' as const, read: Object.keys(observed.files).length + Object.keys(observed.assets || {}).length, listed: observed.inventory.length, full: whole, ...(links ? {links} : {})};
+    return {kind: 'compare' as const, read: Object.keys(observed.files).length + Object.keys(observed.assets || {}).length, listed: observed.inventory.length, full: whole, ...(links ? {links} : {}), ...(adopted ? {adopted: true} : {})};
   }
   // Categories, showcases and pages are data of the Yampi panel, not theme files: a send creates no
   // route. Each internal link of the texts the project changed is read on the storefront, and a

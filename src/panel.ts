@@ -27,7 +27,7 @@ import {canPickFolders, droppedItem, folderEntries, openProject, permitted, pick
 import {renderDiff} from './panel/diff-view';
 import {HistoryPicker} from './panel/history-picker';
 import {trackTruncatedLabel} from './panel/truncated-label';
-import {$, el, glyph, list, plural, dateTime, since, enter, toast, copyText} from './panel/dom';
+import {$, el, glyph, list, plural, dateTime, since, enter, toast, holdToast, copyText} from './panel/dom';
 const isDemo = ['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).get('demo') === '1';
 const editorTab = new URLSearchParams(location.search).get('tab');
 trackTruncatedLabel($('store'));
@@ -142,7 +142,8 @@ function reviewHead(): Head {
   const store = plan!.context.storeName, reading = (scope === 'restore' ? workspace?.restore : workspace?.review)?.reading;
   const compared = reading ? `Comparado com ${store} ${since(reading.capturedAt)}.` : '';
   if (scope === 'restore' && restoreJournal) return {title: selected.size ? `Restaurar ${plural(selected.size, 'item', 'itens')}` : 'Nada para restaurar', detail: `Envio de ${dateTime(restoreJournal.startedAt)}. Só volta o que continua igual ao que foi enviado.`};
-  if (missingNewTexts(plan!).length) return {title: 'Ajuste o projeto antes de enviar', detail: compared};
+  const missing = missingNewTexts(plan!).length;
+  if (missing) return {title: 'Ajuste o projeto antes de enviar', detail: `${plural(missing, 'arquivo novo não pode ser criado', 'arquivos novos não podem ser criados')} na Yampi, e o envio espera por ${missing === 1 ? 'ele' : 'eles'}: veja abaixo o motivo de cada grupo. ${compared}`};
   if (!selected.size) {
     if (plan!.rows.some(sendable)) return {title: 'Nenhum arquivo selecionado', detail: `Marque os arquivos que deseja enviar ou conclua para escolher outro projeto. ${compared}`};
     return {title: plan!.rows.some(row => row.status === 'conflict' || row.status === 'blocked-dependency') ? 'Nada pronto para enviar' : 'Nada para enviar', detail: plan!.rows.some(row => row.status === 'conflict') ? compared : `A loja já tem tudo o que o projeto mudou. ${compared}`};
@@ -237,7 +238,7 @@ function renderHistorySummary(view: View): void {
 function renderExport(): void {
   const base = workspace?.baseline;
   $('baseline-info').hidden = !base;
-  if (base) $('baseline-info').textContent = `Último download em ${dateTime(workspace?.lineage?.exportedAt || base.capturedAt)}.`;
+  if (base) $('baseline-info').textContent = `${workspace?.lineage?.adopted ? 'Loja lida na comparação' : 'Último download'} em ${dateTime(workspace?.lineage?.exportedAt || base.capturedAt)}.`;
 }
 function renderPick(): void {
   const project = workspace?.project, lineage = workspace?.lineage;
@@ -247,7 +248,7 @@ function renderPick(): void {
   const images = Object.keys(project.localAssets).length;
   $('project-name').textContent = project.name;
   $('local-info').textContent = `${Object.keys(project.local).length} textos e ${plural(images, 'imagem', 'imagens')}, lidos ${since(project.loadedAt)}.`;
-  $('reference-info').textContent = workspace?.baseline ? `Referência: loja em ${dateTime(lineage?.exportedAt || workspace.baseline.capturedAt)}${lineage?.journals.length ? `, com ${plural(lineage.journals.length, 'envio', 'envios')} desde então` : ''}.${interruptedReference ? ' A última atualização parou no meio: use Atualizar da loja para concluir.' : ''}` : 'Falta a exportação original: escolha a pasta com .yampi-sync/.';
+  $('reference-info').textContent = workspace?.baseline ? `Referência: loja em ${dateTime(lineage?.exportedAt || workspace.baseline.capturedAt)}${lineage?.journals.length ? `, com ${plural(lineage.journals.length, 'envio', 'envios')} desde então` : ''}.${interruptedReference ? ' A última atualização parou no meio: use Atualizar da loja para concluir.' : ''}` : 'Sem original guardado: a comparação lê a loja inteira e a usa como original.';
   if (project.kind === 'zip') $('zip-name').textContent = project.name;
 }
 function renderJob(): void {
@@ -339,7 +340,11 @@ function renderProjectTools(view: View): void {
   if (tools.hidden) return;
   const slot = view === 'review' ? 'review-tools' : 'pick-tools';
   if (tools.parentElement !== $(slot)) $(slot).append(tools);
-  $('project-tools-note').hidden = !!projectFolder();
+  const bare = !!project?.bare;
+  $('project-tools-note').hidden = !!projectFolder() && !bare;
+  $('project-tools-note').textContent = bare
+    ? 'Atualizar da loja e Versões guardam registros em .yampi-sync/, que esta pasta não tem. A comparação e o envio funcionam sem eles.'
+    : 'Para atualizar da loja e guardar versões, escolha a pasta do projeto, não o ZIP.';
 }
 // --- Controls -------------------------------------------------------------------------------------
 function controls(): void {
@@ -355,7 +360,7 @@ function controls(): void {
   for (const id of ['preview-allow', 'preview-partial', 'preview-discard']) $(id).toggleAttribute('disabled', busy);
   for (const id of ['pick-folder', 'pick-other', 'reload-folder', 'folder', 'baseline', 'clear', 'demo-local', 'mode-import', 'mode-export', 'go-import']) $(id).toggleAttribute('disabled', working);
   historyPicker.setDisabled(working);
-  $('compare').toggleAttribute('disabled', working || !connected || !workspace?.baseline || !workspace?.project);
+  $('compare').toggleAttribute('disabled', working || !connected || !workspace?.project);
   const missing = plan ? missingNewTexts(plan).length : 0, partial = plan ? selectionIssues(plan, selected) : [];
   const blocked = !!missing || partial.length > 0;
   $('apply').toggleAttribute('disabled', working || !connected || !plan || !selected.size || blocked);
@@ -368,7 +373,7 @@ function controls(): void {
   $('cancel').toggleAttribute('disabled', !!job && cancelled === job.id && !busy);
   $('restore').toggleAttribute('disabled', working || !connected || !journal);
   // The update reads the store; applying it and the versions only touch the project folder.
-  const folderReady = !!projectFolder() && !!workspace?.baseline;
+  const folderReady = !!projectFolder() && !!workspace?.baseline && !workspace.project?.bare;
   $('update-project').toggleAttribute('disabled', working || !connected || !folderReady);
   $('open-versions').toggleAttribute('disabled', working || !folderReady);
   $('apply-update').toggleAttribute('disabled', working || !updatePlan || !projectFolder());
@@ -505,11 +510,38 @@ function linkButton(text: string, act: () => void): HTMLButtonElement {
 function attentionItem(text: string, ...actions: HTMLButtonElement[]): HTMLLIElement {
   return el('li', {}, el('span', {text}), actions.length ? el('span', {class: 'actions'}, ...actions) : false);
 }
+// Files that cannot go, one line per cause instead of one per file: a redesign easily has dozens
+// in new folders. The files stay one click away, each with its own "Ver".
+function blockedGroups(rows: PlanRow[]): HTMLLIElement[] {
+  const folders = new Map<string, PlanRow[]>(), causes = new Map<string, PlanRow[]>();
+  const add = <K>(map: Map<K, PlanRow[]>, key: K, row: PlanRow) => map.set(key, [...map.get(key) || [], row]);
+  for (const row of rows) {
+    const folder = row.status === 'new-local' ? row.reason?.match(/^A pasta (.+) não existe na loja/)?.[1] : undefined;
+    if (folder) add(folders, folder, row); else add(causes, row.reason || '', row);
+  }
+  const name = (row: PlanRow) => row.source || row.path;
+  const files = (items: PlanRow[], note?: (row: PlanRow) => string) => el('details', {class: 'attention-files'},
+    el('summary', {text: `Ver ${plural(items.length, 'arquivo', 'arquivos')}`}),
+    el('ul', {}, ...items.map(row => el('li', {}, el('span', {text: note ? `${name(row)}: ${note(row)}` : name(row)}), linkButton('Ver', () => openDiff(row))))));
+  const block = (text: string, items: PlanRow[], note?: (row: PlanRow) => string) => el('li', {}, el('span', {text}), files(items, note));
+  const single = (row: PlanRow) => attentionItem(`${name(row)}: ${row.reason || (row.blockedBy?.length ? `usa ${list(row.blockedBy)}, que não pode ser enviado.` : 'não pode ser enviado.')}`, linkButton('Ver', () => openDiff(row)));
+  const out: HTMLLIElement[] = [], inFolders = [...folders.values()].flat();
+  if (inFolders.length === 1) out.push(single(inFolders[0]));
+  else if (inFolders.length) out.push(block(`${plural(inFolders.length, 'arquivo novo está', 'arquivos novos estão')} em ${plural(folders.size, 'pasta que não existe', 'pastas que não existem')} na loja, e a Yampi não cria pastas: ${list([...folders].map(([folder, items]) => `${folder} (${items.length})`))}. Mova-os para pastas que já existem na loja e ajuste os caminhos que os usam.`, inFolders));
+  for (const [cause, items] of causes) {
+    if (items.length === 1) out.push(single(items[0]));
+    else if (!cause) out.push(block(`${plural(items.length, 'arquivo usa', 'arquivos usam')} outros que não podem ser enviados: ${items.length === 1 ? 'ele espera' : 'eles esperam'} esses ficarem prontos.`, items, row => row.blockedBy?.length ? `usa ${list(row.blockedBy)}` : 'não pode ser enviado'));
+    else out.push(block(`${plural(items.length, 'arquivo', 'arquivos')}: ${cause}`, items));
+  }
+  return out;
+}
 // Only what needs a decision or a fix, in one line each, with the action that solves it.
 function attention(): HTMLLIElement[] {
   if (!plan) return [];
-  const items: HTMLLIElement[] = [];
+  const items: HTMLLIElement[] = [], unsendable: PlanRow[] = [];
   const rows = new Map(plan.rows.map(row => [row.path, row]));
+  // What the reading left out of the project (a 3D model, a video): it never reaches the store.
+  if (scope === 'project') for (const note of workspace?.project?.notes || []) items.push(attentionItem(note));
   // New images left out of the send: one line, with the switch that sends them.
   const offImages = plan.rows.filter(row => row.reason === IMAGES_OFF).length;
   if (offImages) items.push(attentionItem(`${plural(offImages, 'imagem nova fica', 'imagens novas ficam')} no projeto: o envio de imagens está desligado.`, linkButton('Ligar o envio de imagens', () => $<HTMLInputElement>('send-images').click())));
@@ -523,9 +555,10 @@ function attention(): HTMLLIElement[] {
     else if (row.override) items.push(attentionItem(`${row.path}: vai a versão do projeto. A da loja fica no backup.`, linkButton('Ver', () => openDiff(row)), linkButton('Manter a da loja', () => setOverride(row, false))));
     else if (row.status === 'conflict' && !row.image && writable(row.path)) items.push(attentionItem(`${row.path} mudou na loja depois da sua cópia. ${originText(row.origin)}`.trim(), linkButton('Juntar com a loja', () => openJoin(row)), linkButton('Comparar e escolher', () => openDiff(row))));
     else if (row.status === 'conflict') items.push(attentionItem(`${row.path} mudou na loja, e a extensão não pode substituí-lo.`, linkButton('Ver', () => openDiff(row))));
-    else if (row.status === 'new-local' || row.status === 'blocked-dependency' || row.status === 'unsupported' && row.reason && row.path !== COMPONENTS_FILE) items.push(attentionItem(`${row.source || row.path}: ${row.reason || (row.blockedBy?.length ? `usa ${list(row.blockedBy)}, que não pode ser enviado.` : 'não pode ser enviado.')}`, linkButton('Ver', () => openDiff(row))));
+    else if (row.status === 'new-local' || row.status === 'blocked-dependency' || row.status === 'unsupported' && row.reason && row.path !== COMPONENTS_FILE) unsendable.push(row);
     else if (row.status === 'missing-remote') items.push(attentionItem(`${row.path} foi removido da loja e não será recriado.`, linkButton('Ver', () => openDiff(row))));
   }
+  items.push(...blockedGroups(unsendable));
   for (const issue of selectionIssues(plan, selected)) items.push(attentionItem(`${issue.path} precisa ir junto com ${issue.requires}.`));
   for (const warning of plan.warnings || []) items.push(attentionItem(`${warning.path}: ${warning.message}`));
   // Categories and pages live in the Yampi panel: a send creates no route. A warning, never a block.
@@ -857,7 +890,7 @@ function openJoin(row: PlanRow): void {
   clearDiff(); diffJoin = row;
   $('diff-title').textContent = row.path;
   diffSwitch().hidden = false;
-  diffActions(projectFolder() ? ['diff-join'] : []);
+  diffActions(projectFolder() && !workspace?.project?.bare ? ['diff-join'] : []);
   showDiffTab('remote');
   openSheet('diff');
 }
@@ -1010,13 +1043,15 @@ function onJob(state: JobState | undefined): void {
       // A finished comparison opens the review; everything else shows its result.
       if (state.kind === 'compare' && state.status === 'completed') {route = 'send'; dismissJob();}
       render();
-      if (state.status === 'completed' && state.kind === 'send') toast(state.scope === 'restore' ? 'Restauração concluída e conferida.' : 'Envio concluído e conferido na Yampi.');
+      if (state.status === 'completed' && state.kind === 'send') toast(state.scope === 'restore' ? 'Restauração concluída e conferida.' : 'Envio concluído e conferido na Yampi.', undefined, {tone: 'ok'});
+      if (state.result?.kind === 'compare' && state.result.adopted) toast('Revise cada arquivo antes de enviar: o que a loja mudou depois da cópia de onde o projeto partiu aparece como mudança da pasta.', undefined, {tone: 'warn', title: 'A loja lida agora passou a ser o original deste projeto'});
       if (state.kind === 'send') void recordSendInFolder();
     });
     return;
   }
   render();
 }
+holdToast();
 $('cancel').addEventListener('click', () => {
   if (busy && controller) {controller.abort(); return;}
   if (!active(job)) return;
@@ -1072,18 +1107,20 @@ async function adoptProject(project: Project | LooseTheme, source: {name: string
   if ('baseline' in project) {
     if (connected && context) assertContext(project.baseline.context, context);
     target = project.baseline.context;
-  } else if (!workspace?.baseline) throw new Error('Esta pasta tem só o tema, sem o original da loja (.yampi-sync/), e a extensão ainda não guardou o original desta loja. Em Baixar arquivos, baixe os arquivos da loja e escolha esta pasta de novo: a comparação usa essa cópia como original.');
+  }
+  // A bare theme with no original kept by the extension needs nothing from the user or in the
+  // folder: its first comparison reads the whole store and keeps it as the original.
   if (!target) throw new Error('Conecte ao editor para carregar este projeto.');
   const chosen = 'baseline' in project ? chooseBaseline(workspace, project.baseline) : undefined;
   workspace = await updateWorkspace(target, value => {
     if (chosen) {value.baseline = chosen.baseline; value.lineage = chosen.lineage;}
-    value.project = {local: project.local, localAssets: project.localAssets, name: source.name, kind: source.kind, loadedAt: new Date().toISOString(), ...('known' in project && project.known ? {known: project.known} : {})};
+    value.project = {local: project.local, localAssets: project.localAssets, name: source.name, kind: source.kind, loadedAt: new Date().toISOString(), ...('known' in project && project.known ? {known: project.known} : {}), ...('baseline' in project ? {} : {bare: true}), ...(project.notes?.length ? {notes: [...project.notes]} : {})};
     value.review = {overrides: []}; delete value.restore; delete value.update;
   });
   if (chosen?.advanced) toast('Os arquivos já enviados não voltam como conflito.');
   interruptedReference = 'interrupted' in project && !!project.interrupted;
-  if ('notes' in project && project.notes?.length) toast(project.notes.join(' '), 8000);
-  if (interruptedReference) toast('A última atualização da pasta parou no meio. Use Atualizar da loja para concluir.', 8000);
+  if (project.notes?.length) toast(project.notes.join(' '), undefined, {tone: 'warn', title: 'Ficou de fora da importação'});
+  if (interruptedReference) toast('Use Atualizar da loja para concluir.', undefined, {tone: 'warn', title: 'A última atualização da pasta parou no meio'});
   restoreJournal = undefined; computePlan(); computeUpdate(); route = 'send';
   if (connected && compareAfter) await compare(full);
 }
@@ -1107,7 +1144,7 @@ async function recordSendInFolder(): Promise<void> {
     await saveVersion(access, {kind: 'envio', origin: 'loja', label: 'Loja depois do envio', context: base.context, files: base.files, journals: lineage.journals});
     // The receipts of the sends travel with the folder: another computer recognizes them as the project's own.
     for (const item of history.filter(entry => lineage.journals.includes(entry.id) && entry.verified.length)) await access.write(`${RECEIPTS}/recibo-${item.id}.json`, new TextEncoder().encode(JSON.stringify(makeReceipt(item), null, 2) + '\n'));
-    toast('Envio registrado também na pasta do projeto.', 4000);
+    toast('Envio registrado também na pasta do projeto.', 4000, {tone: 'ok'});
   } catch (error) {
     notice = {title: 'O envio está na loja, mas a pasta não registrou', text: `${error instanceof Error ? error.message : String(error)} Use Atualizar da loja para alinhar a pasta.`};
     render();
@@ -1116,8 +1153,11 @@ async function recordSendInFolder(): Promise<void> {
 async function compare(full = false): Promise<void> {
   $<HTMLInputElement>('backup-zip').checked = true;
   const base = workspace?.baseline, project = workspace?.project;
-  if (!base || !project) throw new Error('Carregue a exportação original e a pasta editada.');
+  if (!project) throw new Error('Escolha a pasta do projeto editado.');
   closeSheet('confirm-panel');
+  // No original anywhere (a bare theme): the whole store, read now, becomes it. The links are
+  // checked from the next comparison, once the changed texts are known.
+  if (!base) {await startJob({id: newId(), kind: 'compare', scope: 'project', full: true, adopt: true}); return;}
   const changed = Object.keys(project.local).filter(path => project.local[path] !== base.files[path]);
   const links = sendRoutes(project.local, changed, base.context.previewOrigin).map(route => ({url: route.url, files: route.sources}));
   await startJob({id: newId(), kind: 'compare', scope: 'project', paths: changedPaths(base, project.local, project.localAssets), ...(full ? {full: true} : {}), ...(links.length ? {links} : {})});
@@ -1267,7 +1307,7 @@ $('version-form').addEventListener('submit', event => {
     await saveVersion(await openProject(folder), {kind: 'manual', origin: 'pasta', label: name || `Pasta em ${dateTime(Date.now())}`, context: fresh.baseline.context, files: fresh.local});
     $<HTMLInputElement>('version-name').value = '';
     await loadVersions(folder);
-    toast('Versão guardada na pasta do projeto.');
+    toast('Versão guardada na pasta do projeto.', undefined, {tone: 'ok'});
   });
 });
 // --- Send -------------------------------------------------------------------------------------------

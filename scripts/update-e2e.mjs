@@ -192,8 +192,9 @@ try {
   await page.evaluate(files => sessionStorage.setItem('fixture-files', JSON.stringify(files)), storeLater);
   const folderLater = sent['tema/' + long].replace('<p>Linha 101 ·', '<p>Linha 101 (pasta) ·');
   await folder.edit('tema/' + long, folderLater);
-  await page.getByRole('tab', {name: 'Importar projeto'}).click();
-  await page.locator('#reload-folder').click();
+  // Concluir leaves no project loaded: the folder is chosen again.
+  await page.waitForFunction(() => document.body.dataset.view === 'pick');
+  await page.locator('#pick-folder').click();
   await page.waitForFunction(() => document.body.dataset.view === 'review' && document.querySelector('#attention-list')?.textContent.includes('Juntar com a loja'));
   await page.locator('#attention-list button', {hasText: 'Juntar com a loja'}).click();
   await page.locator('#diff-join').waitFor();

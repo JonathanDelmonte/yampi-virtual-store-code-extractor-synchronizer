@@ -145,6 +145,9 @@ try {
     const multiple = await bridge.command({op: 'context'}); duplicate.remove();
     const inactive = document.createElement('div'); inactive.className = 'tab-item'; inactive.innerHTML = '<div class="change-icon"></div>'; root.querySelector('main').append(inactive);
     const dirty = await bridge.command({op: 'context'}); inactive.remove();
+    // The editor of 05/11/2026 marks unsaved changes on the tab's close button.
+    const unsaved = document.createElement('div'); unsaved.className = 'tab-item'; unsaved.innerHTML = '<div><p>outro.twig</p></div><button class="close-button has-changes" type="button"><span></span></button>'; root.querySelector('main').append(unsaved);
+    const dirtyNew = await bridge.command({op: 'context'}); unsaved.remove();
     const switched = bridge.command({op: 'read', path: 'templates/long.twig', context: initial.value});
     await new Promise(r => setTimeout(r, 100)); root.querySelector('#shop-name').textContent = 'Outra loja fictícia';
     const changedStore = await switched; root.querySelector('#shop-name').textContent = 'Loja de testes';
@@ -155,10 +158,10 @@ try {
     host.replaceWith(replacement); const changedComponent = await replacing; replacement.replaceWith(host);
     const closed = document.createElement('yampi-code-editor'); closed.attachShadow({mode: 'closed'}); host.replaceWith(closed);
     const inaccessible = await bridge.command({op: 'context'}); closed.replaceWith(host);
-    return {multiple, dirty, changedStore, changedComponent, inaccessible};
+    return {multiple, dirty, dirtyNew, changedStore, changedComponent, inaccessible};
   });
   for (const result of Object.values(guards)) assert.equal(result.ok, false);
-  assert.match(guards.dirty.error, /não salvas/); assert.match(guards.changedStore.error, /loja|origem/i);
+  assert.match(guards.dirty.error, /não salvas/); assert.match(guards.dirtyNew.error, /não salvas/); assert.match(guards.changedStore.error, /loja|origem/i);
   assert.match(guards.changedComponent.error, /componente do editor mudou/); assert.match(guards.inaccessible.error, /estrutura de arquivos/);
   console.log('E2E: loja/componente trocados, múltiplos editores, rascunho inativo e Shadow DOM fechado bloqueados.');
   for (const [name, bytes] of Object.entries(entries)) {await mkdir(path.dirname(path.join(project, name)), {recursive: true}); await writeFile(path.join(project, name), bytes);}

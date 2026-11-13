@@ -6,6 +6,46 @@ Extensão independente para copiar o código do editor Yampi, trabalhar no compu
 
 Extraia o ZIP em uma pasta fixa. Abra `chrome://extensions`, ative **Modo do desenvolvedor**, clique em **Carregar sem compactação** e selecione a pasta que contém `manifest.json`. O download **Source code** do GitHub não é a extensão pronta. Se ela já estiver instalada, atualize os arquivos na mesma pasta e clique em **Recarregar** no cartão.
 
+## Versão 0.10.6 — criação de arquivos no editor novo da Yampi
+
+Desde 05/11/2026, o editor de código da Yampi cria arquivos de outro jeito: o "+" de uma pasta não abre mais a janela **Adicionar arquivo**, e sim um campo na própria árvore, onde se escreve o nome com a extensão e se confirma com Enter. A extensão esperava a janela, e o envio parava no primeiro arquivo novo ("o botão + não abriu nenhuma janela"). A versão está preparada neste código; o link de download acima continua apontando para a última release publicada.
+
+- **Campo na árvore.** A extensão escreve o nome com a extensão (`cg-cart.scss`) e confirma com Enter, como uma pessoa faria. Uma recusa da Yampi, que agora aparece abaixo do campo ("Erro ao criar o arquivo.", "já existe"), para o envio com esse texto. Ao parar, o campo é fechado com Esc, sem criar nada. A janela antiga continua aceita, para editores que ainda a usem.
+- **A árvore não se engana com o campo.** Enquanto a Yampi cria, o campo mostra o nome do arquivo novo; a extensão não o conta como arquivo da loja até ele aparecer de verdade.
+- **Aba com alterações não salvas.** O editor novo marca isso no botão de fechar da aba; a extensão reconhece a marca nova e a antiga.
+- Renomear e excluir, que o editor novo oferece em cada arquivo, nunca são acionados.
+
+**Validação:** o módulo público do editor novo foi lido como dado, sem executá-lo, e o editor fictício reproduz o campo. `npm run test:bare` cria pelo campo, reproduz a recusa nele e na janela antiga e continua o envio sem duplicar. Ainda sem um envio real com a 0.10.6.
+
+## Versão 0.10.5 — o envio diz onde parou
+
+Num envio real, a criação do primeiro arquivo parou com "O editor não confirmou a operação dentro do prazo", sem dizer qual passo nem qual arquivo. A versão está preparada neste código; o link de download acima continua apontando para a última release publicada.
+
+- **Recusa silenciosa reconhecida.** Ao criar um arquivo, a janela **Adicionar arquivo** da Yampi mostra só "já existe" e erros de nome. Qualquer outra recusa do servidor vai só para o console, e a janela fica aberta. A extensão agora acompanha o botão da janela (que mostra o pedido em andamento): quando o pedido termina e a janela continua aberta, para em segundos com "A Yampi não confirmou a criação de `<arquivo>`…", fecha a janela sem confirmar e explica como continuar.
+- **Cada espera tem nome.** Quando o editor não responde, a mensagem diz o que faltou: a janela abrir na pasta, a opção de extensão aparecer, o botão liberar, o arquivo aparecer na árvore, o salvamento ser confirmado.
+- **Continuar** confere a loja antes de criar de novo: um arquivo que a Yampi criou depois do tempo é reconhecido, não duplicado.
+
+**Validação:** `npm run test:bare` reproduz a recusa no editor fictício (o envio para em segundos, com a mensagem, e **Continuar** cria o arquivo uma vez). `test:e2e`, `test:panel` e `test:update` passaram. A causa da recusa na loja real ainda não é conhecida.
+
+## Versão 0.10.4 — avisos mais claros e o motivo de um envio bloqueado
+
+Num redesign com dezenas de arquivos novos, a revisão listava uma linha por arquivo, e era difícil ver por que o envio ficava bloqueado. A versão está preparada neste código; o link de download acima continua apontando para a última release publicada.
+
+- **Um motivo por linha.** **Precisa da sua atenção** agrupa os arquivos que não podem ir: "32 arquivos novos estão em 6 pastas que não existem na loja, e a Yampi não cria pastas: …", com a contagem por pasta e os arquivos em **Ver N arquivos**. O título diz quantos arquivos novos o envio espera. A regra não mudou: um texto novo que a Yampi não deixa criar bloqueia o envio inteiro, porque os arquivos alterados podem depender dele.
+- **Avisos com tom.** Informação, concluído e atenção, com marca, título e **Fechar**. Os de atenção ficam mais tempo e esperam enquanto você lê. O que a leitura deixou de fora, como um modelo 3D, também fica fixo na revisão.
+
+**Validação:** `npm run test:bare` cobre o tom, o fechar, o aviso fixo e o agrupamento por pasta e por tipo, com capturas nos temas claro e escuro. Sem validação no painel real.
+
+## Versão 0.10.3 — qualquer pasta de tema, sem preparar nada antes
+
+Na 0.10.2, um tema sem `.yampi-sync/` ainda dependia de um **Baixar arquivos** anterior, e o painel parava com "a extensão ainda não guardou o original desta loja". Nenhum projeto precisa ter arquivos da extensão. A versão está preparada neste código; o link de download acima continua apontando para a última release publicada.
+
+- **Original lido na hora.** Sem original guardado, a primeira comparação lê a loja inteira e passa a usar essa leitura como original. Nada é gravado na pasta do projeto, e nenhum ZIP é baixado. Um original que exista (de um download ou de envios anteriores) continua valendo.
+- **O que depende de `.yampi-sync/`.** **Atualizar da loja**, **Juntar com a loja** e **Versões** guardam registros nessa pasta. Num tema solto, ficam desligados e o painel explica por quê; a comparação e o envio funcionam do mesmo jeito.
+- **Revise cada arquivo.** O original de um tema solto é a loja no momento da leitura. Uma mudança que a loja recebeu depois da cópia de onde o projeto partiu aparece como mudança da pasta, e enviá-la desfaz essa mudança.
+
+**Validação:** `npm run test:bare` (novo) usa o painel no Chromium, o editor fictício e uma pasta fictícia com `theme/`, `package.json`, `node_modules` e um modelo 3D. Sem download prévio, a pasta foi importada e comparada sem erro; o envio gravou só o arquivo alterado, conferido na loja fictícia; a pasta terminou idêntica, sem `.yampi-sync/`. Ainda sem validação no painel real e sem envio para uma loja real.
+
 ## Versão 0.10.2 — projeto com o tema em `theme/`
 
 Um projeto que guarda o tema em `theme/`, e não em `tema/`, sem `.yampi-sync/` (como os começados de uma cópia da loja anterior à extensão), era recusado com "Não encontrei um projeto exportado nesta pasta". A versão está preparada neste código; o link de download acima continua apontando para a última release publicada.

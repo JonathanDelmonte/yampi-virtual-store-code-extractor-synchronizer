@@ -2,7 +2,7 @@
 // text and visibility change, plus two lists (files, activity log) rebuilt from data.
 export const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 // Only the marks that carry information (done, failed, close); everything else is text.
-export function glyph(name: 'check' | 'x' | 'close'): SVGSVGElement {
+export function glyph(name: 'check' | 'x' | 'close' | 'alert' | 'info'): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
   svg.setAttribute('class', 'glyph'); svg.setAttribute('aria-hidden', 'true');
   use.setAttribute('href', `#i-${name}`); svg.append(use);
@@ -38,14 +38,34 @@ export function enter(...nodes: HTMLElement[]): void {
   if (reducedMotion() || document.hidden || document.body.dataset.input === 'keyboard') return;
   for (const [index, node] of nodes.entries()) node.animate?.([{opacity: 0, transform: 'translateY(6px)'}, {opacity: 1, transform: 'none'}], {duration: 240, delay: index * 40, easing: 'cubic-bezier(.23, 1, .32, 1)', fill: 'backwards'});
 }
-let toastTimer: ReturnType<typeof setTimeout> | undefined;
-export function toast(text: string, ms = 3400): void {
-  const node = $('toast');
-  node.hidden = true; node.textContent = text;
+// A short message over the content. tone: info (default), ok (done) or warn (something the user
+// must know: it stays longer, and both stay while the pointer or the focus is on them). A title
+// gives a long message its point in a few words. Closing is always one click away.
+export type Tone = 'info' | 'ok' | 'warn';
+let toastTimer: ReturnType<typeof setTimeout> | undefined, toastLeft = 0, toastSince = 0;
+const hideToast = () => {clearTimeout(toastTimer); $('toast').hidden = true;};
+const runToast = (ms: number) => {clearTimeout(toastTimer); toastLeft = ms; toastSince = Date.now(); toastTimer = setTimeout(hideToast, ms);};
+export function toast(text: string, ms?: number, options: {tone?: Tone; title?: string} = {}): void {
+  const node = $('toast'), tone = options.tone || 'info';
+  node.hidden = true; node.dataset.tone = tone;
+  const close = el('button', {class: 'toast-close', attrs: {type: 'button', 'aria-label': 'Fechar aviso'}}, glyph('x'));
+  close.addEventListener('click', hideToast);
+  node.replaceChildren(
+    el('span', {class: 'toast-mark'}, glyph(tone === 'ok' ? 'check' : tone === 'warn' ? 'alert' : 'info')),
+    el('div', {class: 'toast-body'}, options.title ? el('strong', {text: options.title}) : false, el('span', {text})),
+    close
+  );
   void node.offsetWidth;
   node.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {node.hidden = true;}, ms);
+  runToast(ms ?? (tone === 'warn' ? 12000 : 3400));
+}
+// The time left pauses while the user reads or reaches for the close button.
+export function holdToast(): void {
+  const node = $('toast');
+  const hold = () => {if (node.hidden) return; clearTimeout(toastTimer); toastLeft = Math.max(1500, toastLeft - (Date.now() - toastSince));};
+  const release = () => {if (!node.hidden && !node.matches(':hover') && !node.contains(document.activeElement)) runToast(toastLeft);};
+  node.addEventListener('pointerenter', hold); node.addEventListener('focusin', hold);
+  node.addEventListener('pointerleave', release); node.addEventListener('focusout', () => setTimeout(release));
 }
 // The click that asks for it lets the page write to the clipboard; older paths use a selection.
 export async function copyText(text: string): Promise<boolean> {

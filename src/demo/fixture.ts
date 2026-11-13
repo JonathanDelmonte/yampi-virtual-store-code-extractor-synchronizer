@@ -33,10 +33,12 @@ save.addEventListener('click', () => {
   operations.save++; saves++;
   // Keep enabled until the fake server has persisted, just as a save acknowledgment should.
   setTimeout(() => {
-    files[path] = value; store(); save.disabled = true; $('tab').querySelector('.holder-icon')!.replaceChildren();
+    files[path] = value; store(); save.disabled = true; unsaved(false);
     $('version').textContent = 'Versão salva · ' + Date.now();
   }, 150);
 });
+// The tab marks unsaved changes on its close button, as the editor of 05/11/2026 does.
+function unsaved(on: boolean) {const button = $('tab').querySelector('.close-button')!; button.classList.toggle('has-changes', on); button.replaceChildren(...on ? [document.createElement('span')] : []);}
 const items = new Map<string, HTMLElement>();
 function open(path: string) {
   const li = items.get(path)!;
@@ -54,7 +56,7 @@ function open(path: string) {
       if (!update.docChanged) return;
       operations.dispatch++; textChanges++;
       save.disabled = update.state.doc.toString() === files[path];
-      $('tab').querySelector('.holder-icon')!.innerHTML = save.disabled ? '' : '<div class="change-icon"></div>';
+      unsaved(!save.disabled);
     })]})});
   }, 450);
 }
@@ -68,7 +70,10 @@ function folder(parent: HTMLElement, name: string, path: string): HTMLElement {
   const caret = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); caret.setAttribute('class', 'caret-icon'); caret.setAttribute('width', '10'); caret.setAttribute('height', '10'); title.append(caret);
   const span = document.createElement('span'); span.textContent = name; title.append(span);
   const add = document.createElement('div'); add.className = 'add-item'; add.title = 'Adicionar arquivo'; add.textContent = '+';
-  add.addEventListener('click', () => {operations.add++; opened.add(path); holder.classList.add('active'); (path === 'assets/images' ? openAssetDialog : openFileDialog)(path);});
+  add.addEventListener('click', () => {
+    operations.add++; opened.add(path); holder.classList.add('active');
+    if (path === 'assets/images') openAssetDialog(); else if (windowCreation()) openFileDialog(path); else openFileRow(list, path);
+  });
   title.append(add);
   const list = document.createElement('ul'); list.className = 'all-files'; holder.append(title, list); parent.append(holder);
   title.addEventListener('click', event => {if (event.target !== title && event.target !== span) return; holder.classList.toggle('active') ? opened.add(path) : opened.delete(path);});
@@ -96,6 +101,55 @@ function renderTree() {
   }
 }
 renderTree();
+// The editor of 05/11/2026 (NewFileInput and FileNameInput): the folder's "+" puts a row at the top
+// of its list, with one field for the name and its extension. Enter confirms, Esc or losing the
+// focus cancels; while the request runs the row is "sending" and shows the name in a .file-name;
+// a refusal, of the name or of the server, shows under the field. Earlier editors opened a window:
+// fixture-creation=janela (or ?criacao=janela) keeps it, for the bridge's older path.
+const ACCEPTED = ['scss', 'vue', 'twig', 'js'];
+function windowCreation(): boolean {return new URLSearchParams(location.search).get('criacao') === 'janela' || sessionStorage.getItem('fixture-creation') === 'janela';}
+function openFileRow(list: HTMLElement, folder: string) {
+  if (list.querySelector(':scope > .editing-row')) return;
+  const row = document.createElement('li'); row.className = 'editing-row';
+  const box = document.createElement('div'); box.className = 'flex w-full flex-wrap';
+  const holder = document.createElement('div'); holder.className = 'holder-input relative flex w-full items-center';
+  const field = document.createElement('input'); field.type = 'text'; field.placeholder = 'nome-do-arquivo';
+  holder.append(field); box.append(holder); row.append(box); list.prepend(row);
+  let busy = false;
+  const close = () => row.remove();
+  const rowError = (message: string) => {
+    box.querySelector(':scope > .mt-1')?.remove(); field.classList.toggle('error', !!message);
+    if (!message) return;
+    const wrap = document.createElement('div'); wrap.className = 'mt-1 flex w-full';
+    const error = document.createElement('div'); error.className = 'error'; error.textContent = message;
+    wrap.append(error); box.append(wrap);
+  };
+  field.addEventListener('input', () => rowError(''));
+  field.addEventListener('keydown', event => {if (event.key === 'Escape') close();});
+  field.addEventListener('blur', () => {if (!busy) close();});
+  field.addEventListener('keyup', event => {
+    if (event.key !== 'Enter' || busy) return;
+    const name = field.value.trim(), dot = name.lastIndexOf('.'), base = dot === -1 ? name : name.slice(0, dot), extension = dot === -1 ? '' : name.slice(dot + 1);
+    const message = !name ? 'O nome do arquivo não pode ficar em branco.' : !/^[a-zA-Z0-9_-]+$/.test(base) ? 'O nome do arquivo não pode conter espaço ou símbolos.' : dot === -1 ? 'Adicione uma extensão ao arquivo: .scss, .vue, .twig e .js' : !ACCEPTED.includes(extension) ? 'Extensões aceitas: .scss, .vue, .twig e .js' : '';
+    if (message) {rowError(message); return;}
+    const path = `${folder}/${name}`;
+    busy = true; row.classList.add('sending');
+    const shown = document.createElement('div'); shown.className = 'flex w-full items-center';
+    const label = document.createElement('span'); label.className = 'file-name ml-2'; label.textContent = name;
+    shown.append(label); holder.replaceWith(shown);
+    setTimeout(() => {
+      if (sessionStorage.getItem('fixture-refuse-create') || path in files) {
+        busy = false; row.classList.remove('sending'); shown.replaceWith(holder);
+        rowError(path in files ? 'O nome do arquivo não pode ser um já existente.' : 'Erro ao criar o arquivo.');
+        console.error('Recusa fictícia do servidor ao criar', path);
+        return;
+      }
+      files[path] = extension === 'vue' ? YAMPI_VUE_TEMPLATE : ''; store(); created.files.push(path);
+      close(); renderTree(); open(path);
+    }, 200);
+  });
+  field.focus();
+}
 // Dialogs: DsModal overlay, DsSelect without the current option, DsInput and DsButton, as in the editor.
 function dialog(id: string) {
   const overlay = $(id), primary = [...overlay.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent!.trim() === 'Adicionar arquivo')!;
@@ -129,12 +183,21 @@ fileDialog.primary.addEventListener('click', () => {
   if (!name.trim()) return showError(holder, 'ds-input__error', 'O nome do arquivo não pode ficar em branco.');
   if (/[^\w\s-]/.test(name)) return showError(holder, 'ds-input__error', 'O nome do arquivo não pode conter espaço ou símbolos.');
   if (path in files) return showError(holder, 'ds-input__error', `Um arquivo com o nome "${name}.${extension.toLowerCase()}" já existe.`);
-  fileDialog.primary.disabled = true;
+  // DsButton while the request runs: class "sending" and a loader. A refusal other than 409 only
+  // reaches the console and leaves the window open (fixture-refuse-create reproduces it).
+  sendingState(fileDialog.primary, true);
   setTimeout(() => {
+    sendingState(fileDialog.primary, false);
+    if (sessionStorage.getItem('fixture-refuse-create')) {console.error('Recusa fictícia do servidor ao criar', path); return;}
     files[path] = extension === 'Vue' ? YAMPI_VUE_TEMPLATE : ''; store(); created.files.push(path);
     fileDialog.close(); renderTree(); open(path);
   }, 200);
 });
+function sendingState(button: HTMLButtonElement, on: boolean) {
+  button.classList.toggle('sending', on);
+  button.querySelector('.button__loader')?.remove();
+  if (on) {const loader = document.createElement('div'); loader.className = 'button__loader'; loader.append(Object.assign(document.createElement('div'), {className: 'button__spinner'})); button.append(loader);}
+}
 // Uploader: the editor keeps images in assets/images, named as its sanitizer gives.
 const assetDialog = dialog('add-asset'), uploader = assetDialog.overlay.querySelector<HTMLInputElement>('.ds-file-uploader__input')!;
 let pending: {name: string; data: string} | undefined;
@@ -159,8 +222,10 @@ assetDialog.primary.addEventListener('click', () => {
   if (!pending) return;
   const path = 'assets/images/' + pending.name, data = pending.data;
   if (path in assetSources) return showError(assetDialog.overlay.querySelector('.ds-file-uploader')!, 'ds-file-uploader__error', 'Um arquivo com esse nome já existe.');
-  assetDialog.primary.disabled = true;
+  sendingState(assetDialog.primary, true);
   setTimeout(() => {
+    sendingState(assetDialog.primary, false);
+    if (sessionStorage.getItem('fixture-refuse-create')) {console.error('Recusa fictícia do servidor ao enviar', path); return;}
     assetSources[path] = uploads[path] = data; sessionStorage.setItem('fixture-assets', JSON.stringify(uploads)); created.images.push(path);
     assetDialog.close(); renderTree(); open(path);
   }, 200);

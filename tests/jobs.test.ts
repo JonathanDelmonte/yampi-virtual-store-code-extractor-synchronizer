@@ -161,6 +161,32 @@ describe('operações em segundo plano', () => {
     const reading = (await loadWorkspace(context))?.review?.reading;
     expect(reading).toMatchObject({partial: true, files: {[home]: 'home'}, inventory: [ 'elements/head.twig', home, product]});
   });
+  test('projeto sem original: a comparação lê a loja inteira e a guarda como original, sem ZIP', async () => {
+    const editor = new FakeEditor(store, {'assets/images/a.png': png(1)}), {host: h, downloads} = host(editor);
+    await updateWorkspace(context, workspace => {workspace.project = {local: {...store, [home]: 'novo home'}, localAssets: {}, name: 'theme', kind: 'folder', loadedAt: new Date().toISOString(), bare: true};});
+    const result = await runJob({id: 'adotar-1', kind: 'compare', scope: 'project', full: true, adopt: true}, context, h, control());
+    expect(result).toMatchObject({status: 'completed', title: 'Lendo Loja fictícia inteira para comparar', result: {kind: 'compare', full: true, read: 4, adopted: true}});
+    expect(editor.writes).toEqual([]); expect(downloads).toEqual([]);
+    const workspace = (await loadWorkspace(context))!;
+    expect(workspace.baseline?.files).toEqual(store);
+    expect(workspace.baseline?.assets?.['assets/images/a.png']).toEqual(png(1));
+    expect(workspace.baseline).not.toHaveProperty('inventory'); expect(workspace.baseline).not.toHaveProperty('partial');
+    expect(workspace.lineage).toMatchObject({exportedAt: workspace.baseline!.capturedAt, journals: [], adopted: true});
+    expect(workspace.review?.reading?.files).toEqual(store);
+    // The plan then sees the folder's change as the project's own, with nothing from the store against it.
+    const plan = makePlan(workspace.baseline!, workspace.project!.local, workspace.review!.reading!);
+    expect(plan.rows.find(r => r.path === home)?.status).toBe('update');
+    expect(plan.rows.filter(r => r.status === 'conflict')).toEqual([]);
+  });
+  test('original guardado no meio tempo vale mais que a leitura da comparação', async () => {
+    const editor = new FakeEditor({...store, [product]: 'mudou na loja'}), {host: h} = host(editor);
+    await updateWorkspace(context, workspace => {workspace.baseline = snapshot(store); workspace.lineage = {exportedAt: snapshot(store).capturedAt, journals: []};});
+    const result = await runJob({id: 'adotar-2', kind: 'compare', scope: 'project', full: true, adopt: true}, context, h, control());
+    expect(result.result).toMatchObject({kind: 'compare', full: true}); expect(result.result).not.toHaveProperty('adopted');
+    const workspace = (await loadWorkspace(context))!;
+    expect(workspace.baseline?.files[product]).toBe('product'); expect(workspace.lineage?.adopted).toBeUndefined();
+    expect(workspace.review?.reading?.files[product]).toBe('mudou na loja');
+  });
   test('exportação guarda a referência e baixa o ZIP com o tema', async () => {
     const editor = new FakeEditor(store), {host: h, downloads} = host(editor);
     await updateWorkspace(context, workspace => {workspace.review = {reading: {...snapshot(store), inventory: []}, overrides: ['x']};});
